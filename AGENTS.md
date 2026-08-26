@@ -34,6 +34,7 @@ cargo run -p kirje-cli -- mcp serve
 - `crates/kirje-core`: provider-neutral types and application contracts.
 - `crates/kirje-protocol`: Pimalaya-backed protocol adapters.
 - `crates/kirje-runtime`: account, credential, and mailbox application services.
+- `crates/kirje-store`: transactional SQLite envelope index and sync cursors.
 - `crates/kirje-cli`: the `kirje` binary and JSON command envelope.
 - `crates/kirje-mcp`: typed MCP tools using the core contract.
 - `skills/kirje`: the distributable Agent Skill.

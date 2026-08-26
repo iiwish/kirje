@@ -9,8 +9,10 @@ use std::{
 
 use directories::ProjectDirs;
 use kirje_core::{
-    ConnectionReport, MailAccountConfig, MailError, MailErrorCode, MailboxPage, MailboxReader,
-    MessageContent, MessagePage, MessageRead, MessageSearch,
+    AttachmentContent, AttachmentRead, ConnectionReport, LocalMessageSearch, MailAccountConfig,
+    MailError, MailErrorCode, MailboxPage, MailboxReader, MailboxSyncReport, MailboxSyncRequest,
+    MailboxSyncState, MessageContent, MessageIndex, MessagePage, MessageRead, MessageSearch,
+    SyncCursor,
 };
 use schemars::JsonSchema;
 use secrecy::{ExposeSecret, SecretString};
@@ -168,13 +170,11 @@ impl TomlAccountRepository {
     }
 
     fn save(&self, document: &ConfigDocument) -> Result<(), MailError> {
-        let parent = self.path.parent().ok_or_else(|| {
-            MailError::new(
-                MailErrorCode::ConfigWrite,
-                "account configuration path has no parent directory",
-                false,
-            )
-        })?;
+        let parent = self
+            .path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
         fs::create_dir_all(parent).map_err(|_| config_write_error())?;
         let serialized = toml::to_string_pretty(document).map_err(|_| config_write_error())?;
         let mut temporary =
@@ -309,6 +309,7 @@ pub struct KirjeRuntime {
     accounts: Arc<dyn AccountRepository>,
     secrets: Arc<dyn SecretStore>,
     reader: Arc<dyn MailboxReader>,
+    index: Arc<dyn MessageIndex>,
 }
 
 impl KirjeRuntime {
@@ -319,14 +320,29 @@ impl KirjeRuntime {
     ///
     /// Returns a configuration-path error when no default path is available.
     pub fn local(config_path: Option<PathBuf>) -> Result<Self, MailError> {
+        Self::local_with_index(config_path, None)
+    }
+
+    /// Build the production runtime with an optional explicit `SQLite` index path.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable configuration or store initialization errors.
+    pub fn local_with_index(
+        config_path: Option<PathBuf>,
+        index_path: Option<PathBuf>,
+    ) -> Result<Self, MailError> {
+        let custom_config = config_path.is_some();
         let path = match config_path {
             Some(path) => path,
             None => TomlAccountRepository::default_path()?,
         };
-        Ok(Self::new(
+        let index_path = resolve_index_path(custom_config.then_some(path.as_path()), index_path)?;
+        Ok(Self::with_index(
             Arc::new(TomlAccountRepository::new(path)),
             Arc::new(KeyringSecretStore),
             Arc::new(kirje_protocol::PimalayaImapReader),
+            Arc::new(kirje_store::SqliteMessageIndex::open(index_path)?),
         ))
     }
 
@@ -336,10 +352,21 @@ impl KirjeRuntime {
         secrets: Arc<dyn SecretStore>,
         reader: Arc<dyn MailboxReader>,
     ) -> Self {
+        Self::with_index(accounts, secrets, reader, Arc::new(UnavailableMessageIndex))
+    }
+
+    #[must_use]
+    pub fn with_index(
+        accounts: Arc<dyn AccountRepository>,
+        secrets: Arc<dyn SecretStore>,
+        reader: Arc<dyn MailboxReader>,
+        index: Arc<dyn MessageIndex>,
+    ) -> Self {
         Self {
             accounts,
             secrets,
             reader,
+            index,
         }
     }
 
@@ -430,6 +457,7 @@ impl KirjeRuntime {
         Ok(MailboxPage {
             returned: u16::try_from(mailboxes.len()).unwrap_or(u16::MAX),
             mailboxes,
+            untrusted: true,
         })
     }
 
@@ -455,6 +483,76 @@ impl KirjeRuntime {
         self.reader.read_message(&account, &secret, read)
     }
 
+    /// Synchronize one bounded mailbox metadata batch into the local index.
+    ///
+    /// # Errors
+    ///
+    /// Returns account, credential, protocol, validation, or store errors.
+    pub fn sync_mailbox(
+        &self,
+        account_id: &str,
+        mailbox: &str,
+        limit: u16,
+        refresh: bool,
+    ) -> Result<MailboxSyncReport, MailError> {
+        let previous = if refresh {
+            None
+        } else {
+            self.index.state(account_id, mailbox)?
+        };
+        let cursor = previous.as_ref().map(|state| SyncCursor {
+            uid_validity: state.uid_validity,
+            highest_uid: state.highest_uid,
+        });
+        let request = MailboxSyncRequest {
+            account_id: account_id.to_owned(),
+            mailbox: mailbox.to_owned(),
+            cursor,
+            limit,
+        };
+        request.validate()?;
+        let (account, secret) = self.credentials(account_id)?;
+        let batch = self.reader.sync_mailbox(&account, &secret, &request)?;
+        self.index
+            .apply_sync(&batch, refresh || batch.reset_required)
+    }
+
+    /// Return local sync state without consulting credentials or the network.
+    ///
+    /// # Errors
+    ///
+    /// Returns account, validation, or store errors.
+    pub fn index_status(
+        &self,
+        account_id: &str,
+        mailbox: &str,
+    ) -> Result<Option<MailboxSyncState>, MailError> {
+        let _account = self.account(account_id)?;
+        self.index.state(account_id, mailbox)
+    }
+
+    /// Search indexed metadata without consulting credentials or the network.
+    ///
+    /// # Errors
+    ///
+    /// Returns account, validation, or store errors.
+    pub fn search_index(&self, search: &LocalMessageSearch) -> Result<MessagePage, MailError> {
+        search.validate()?;
+        let _account = self.account(&search.account_id)?;
+        self.index.search(search)
+    }
+
+    /// Read one explicitly selected attachment without remote mailbox mutation.
+    ///
+    /// # Errors
+    ///
+    /// Returns account, credential, validation, protocol, or resource errors.
+    pub fn read_attachment(&self, read: &AttachmentRead) -> Result<AttachmentContent, MailError> {
+        read.validate()?;
+        let (account, secret) = self.credentials(&read.reference.account_id)?;
+        self.reader.read_attachment(&account, &secret, read)
+    }
+
     fn account(&self, account_id: &str) -> Result<MailAccountConfig, MailError> {
         self.accounts.get(account_id)?.ok_or_else(|| {
             MailError::new(
@@ -473,6 +571,66 @@ impl KirjeRuntime {
         let secret = self.secrets.get(account_id)?;
         Ok((account, secret))
     }
+}
+
+/// Resolve an explicit, config-colocated, or platform-native index path.
+///
+/// # Errors
+///
+/// Returns a stable store error when the platform data directory is unavailable.
+pub fn resolve_index_path(
+    config_path: Option<&Path>,
+    explicit_index: Option<PathBuf>,
+) -> Result<PathBuf, MailError> {
+    if let Some(path) = explicit_index {
+        return Ok(path);
+    }
+    if let Some(config_path) = config_path
+        && let Some(parent) = config_path.parent()
+    {
+        return Ok(parent.join("index.sqlite3"));
+    }
+    ProjectDirs::from("", "", "kirje")
+        .map(|dirs| dirs.data_local_dir().join("index.sqlite3"))
+        .ok_or_else(|| {
+            MailError::new(
+                MailErrorCode::StoreRead,
+                "cannot determine the Kirje data directory",
+                false,
+            )
+        })
+}
+
+struct UnavailableMessageIndex;
+
+impl MessageIndex for UnavailableMessageIndex {
+    fn state(
+        &self,
+        _account_id: &str,
+        _mailbox: &str,
+    ) -> Result<Option<MailboxSyncState>, MailError> {
+        Err(index_unavailable())
+    }
+
+    fn apply_sync(
+        &self,
+        _batch: &kirje_core::MailboxSyncBatch,
+        _replace: bool,
+    ) -> Result<MailboxSyncReport, MailError> {
+        Err(index_unavailable())
+    }
+
+    fn search(&self, _search: &LocalMessageSearch) -> Result<MessagePage, MailError> {
+        Err(index_unavailable())
+    }
+}
+
+fn index_unavailable() -> MailError {
+    MailError::new(
+        MailErrorCode::StoreRead,
+        "local message index is not configured",
+        false,
+    )
 }
 
 fn config_write_error() -> MailError {
@@ -495,7 +653,11 @@ fn secret_store_error() -> MailError {
 mod tests {
     use std::{collections::BTreeMap, sync::Mutex};
 
-    use kirje_core::{CredentialKind, Endpoint, Mailbox, Protocol, TransportSecurity};
+    use chrono::{TimeZone as _, Utc};
+    use kirje_core::{
+        CredentialKind, Endpoint, MailAddress, Mailbox, MailboxSyncBatch, MessageEnvelope,
+        MessageReference, Protocol, TransportSecurity,
+    };
 
     use super::*;
 
@@ -577,6 +739,99 @@ mod tests {
         ) -> Result<MessageContent, MailError> {
             unreachable!("not used")
         }
+
+        fn sync_mailbox(
+            &self,
+            _account: &MailAccountConfig,
+            _secret: &SecretString,
+            _request: &MailboxSyncRequest,
+        ) -> Result<kirje_core::MailboxSyncBatch, MailError> {
+            unreachable!("not used")
+        }
+
+        fn read_attachment(
+            &self,
+            _account: &MailAccountConfig,
+            _secret: &SecretString,
+            _read: &AttachmentRead,
+        ) -> Result<AttachmentContent, MailError> {
+            unreachable!("not used")
+        }
+    }
+
+    #[derive(Default)]
+    struct SyncReader(Mutex<Vec<Option<SyncCursor>>>);
+
+    impl MailboxReader for SyncReader {
+        fn check(
+            &self,
+            _account: &MailAccountConfig,
+            _secret: &SecretString,
+        ) -> Result<ConnectionReport, MailError> {
+            unreachable!("not used")
+        }
+
+        fn list_mailboxes(
+            &self,
+            _account: &MailAccountConfig,
+            _secret: &SecretString,
+            _include_counts: bool,
+        ) -> Result<Vec<Mailbox>, MailError> {
+            unreachable!("not used")
+        }
+
+        fn search_messages(
+            &self,
+            _account: &MailAccountConfig,
+            _secret: &SecretString,
+            _search: &MessageSearch,
+        ) -> Result<MessagePage, MailError> {
+            unreachable!("not used")
+        }
+
+        fn read_message(
+            &self,
+            _account: &MailAccountConfig,
+            _secret: &SecretString,
+            _read: &MessageRead,
+        ) -> Result<MessageContent, MailError> {
+            unreachable!("not used")
+        }
+
+        fn sync_mailbox(
+            &self,
+            _account: &MailAccountConfig,
+            _secret: &SecretString,
+            request: &MailboxSyncRequest,
+        ) -> Result<MailboxSyncBatch, MailError> {
+            self.0
+                .lock()
+                .expect("sync lock")
+                .push(request.cursor.clone());
+            let uid = request
+                .cursor
+                .as_ref()
+                .and_then(|cursor| cursor.highest_uid)
+                .map_or(10, |uid| uid + 1);
+            Ok(MailboxSyncBatch {
+                account_id: request.account_id.clone(),
+                mailbox: request.mailbox.clone(),
+                uid_validity: 7,
+                messages: vec![message(uid)],
+                remote_total: Some(u64::from(uid)),
+                has_more: false,
+                reset_required: false,
+            })
+        }
+
+        fn read_attachment(
+            &self,
+            _account: &MailAccountConfig,
+            _secret: &SecretString,
+            _read: &AttachmentRead,
+        ) -> Result<AttachmentContent, MailError> {
+            unreachable!("not used")
+        }
     }
 
     fn account() -> MailAccountConfig {
@@ -591,6 +846,31 @@ mod tests {
                 security: TransportSecurity::ImplicitTls,
             },
             credential_kind: CredentialKind::AppPassword,
+        }
+    }
+
+    fn message(uid: u32) -> MessageEnvelope {
+        MessageEnvelope {
+            reference: MessageReference {
+                account_id: "work".to_owned(),
+                mailbox: "INBOX".to_owned(),
+                uid_validity: Some(7),
+                uid,
+            },
+            message_id: Some(format!("{uid}@example.com")),
+            in_reply_to: Vec::new(),
+            subject: format!("Message {uid}"),
+            from: vec![MailAddress {
+                name: None,
+                email: "alice@example.com".to_owned(),
+            }],
+            to: Vec::new(),
+            sent_at: Utc.with_ymd_and_hms(2026, 8, 26, 0, 0, 0).single(),
+            size: 10,
+            is_read: false,
+            is_starred: false,
+            has_attachment: Some(false),
+            truncated: false,
         }
     }
 
@@ -652,5 +932,82 @@ mod tests {
             runtime.account_status("missing").unwrap_err().code,
             MailErrorCode::AccountNotFound
         );
+    }
+
+    #[test]
+    fn local_index_search_does_not_read_credentials() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let repository = Arc::new(TomlAccountRepository::new(
+            directory.path().join("accounts.toml"),
+        ));
+        repository.upsert(account()).expect("account");
+        let index = Arc::new(
+            kirje_store::SqliteMessageIndex::open(directory.path().join("index.sqlite3"))
+                .expect("index"),
+        );
+        let runtime = KirjeRuntime::with_index(
+            repository,
+            Arc::new(MemorySecrets::default()),
+            Arc::new(NoopReader),
+            index,
+        );
+        let page = runtime
+            .search_index(&LocalMessageSearch {
+                account_id: "work".to_owned(),
+                mailbox: "INBOX".to_owned(),
+                from: None,
+                to: None,
+                subject: None,
+                unread: None,
+                limit: 10,
+            })
+            .expect("offline search");
+        assert!(page.messages.is_empty());
+    }
+
+    #[test]
+    fn repeated_sync_passes_the_persisted_high_water_cursor() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let repository = Arc::new(TomlAccountRepository::new(
+            directory.path().join("accounts.toml"),
+        ));
+        repository.upsert(account()).expect("account");
+        let secrets = Arc::new(MemorySecrets::default());
+        secrets
+            .set("work", &SecretString::from("secret".to_owned()))
+            .expect("secret");
+        let reader = Arc::new(SyncReader::default());
+        let runtime = KirjeRuntime::with_index(
+            repository,
+            secrets,
+            reader.clone(),
+            Arc::new(
+                kirje_store::SqliteMessageIndex::open(directory.path().join("index.sqlite3"))
+                    .expect("index"),
+            ),
+        );
+
+        runtime
+            .sync_mailbox("work", "INBOX", 20, false)
+            .expect("initial sync");
+        let report = runtime
+            .sync_mailbox("work", "INBOX", 20, false)
+            .expect("incremental sync");
+        let refreshed = runtime
+            .sync_mailbox("work", "INBOX", 20, true)
+            .expect("refresh sync");
+
+        let cursors = reader.0.lock().expect("sync lock");
+        assert!(cursors[0].is_none());
+        assert_eq!(
+            cursors[1].as_ref().and_then(|cursor| cursor.highest_uid),
+            Some(10)
+        );
+        assert!(cursors[2].is_none());
+        assert_eq!(report.state.highest_uid, Some(11));
+        assert_eq!(report.state.indexed_messages, 2);
+        assert!(refreshed.reset);
+        assert_eq!(refreshed.state.highest_uid, Some(10));
+        assert_eq!(refreshed.state.indexed_messages, 1);
     }
 }

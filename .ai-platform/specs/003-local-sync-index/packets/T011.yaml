@@ -1,0 +1,31 @@
+schema_version: 1
+packet_id: 003-T011-A001
+task_id: T011
+feature_id: 003-local-sync-index
+status: complete
+title: Release readiness
+goal: Publish canonical docs, evidence, and a fully verified second-stage release candidate.
+requirements: [all]
+dependencies: [T006, T007, T008, T009, T010]
+governance_inputs: [.ai-platform/specs/003-local-sync-index/spec.md, .ai-platform/specs/003-local-sync-index/plan.md, .ai-platform/specs/003-local-sync-index/analysis.md]
+work_unit: {title: Release readiness, goal: Deliver canonical docs evidence and verified release candidate.}
+codebase_context: {patterns: [canonical present-tense docs, complete workspace quality gates]}
+execution_constraints: {branch: codex/local-sync-index, adapter: direct_execute}
+allowed_files: [README.md, AGENTS.md, docs/**, skills/**, .github/**, .ai-platform/**]
+tdd:
+  red: Not applicable; release task verifies implemented behavior.
+  green: Update canonical documentation and evidence from real commands.
+  refactor: Remove stale read-only-MVP wording and duplicated roadmap items.
+tdd_plan: [release verification only; behavioral TDD belongs to T006-T010]
+validation:
+  - cargo fmt --all --check
+  - cargo clippy --workspace --all-targets --all-features -- -D warnings
+  - cargo test --workspace --all-features --locked
+  - cargo build --workspace --all-features --locked
+  - cargo deny check
+validation_loop: [all local quality gates, MCP Inspector, manual CLI contract]
+evidence: .ai-platform/evidence/T011/summary.md
+evidence_contract: [summary, real command results, residual risk]
+review_contract: [spec compliance, engineering quality, QA acceptance]
+handoff: {commit: conventional, pull_request: required}
+stop_conditions: [Any quality gate fails, credentialed live smoke is represented as completed without credentials]

@@ -17,6 +17,14 @@ trap 'rm -rf "$work_dir"' EXIT
   --account "$account_id" \
   --mailbox INBOX \
   --limit 1 >"$work_dir/search.json"
+"$kirje_bin" --index "$work_dir/index.sqlite3" sync run \
+  --account "$account_id" \
+  --mailbox INBOX \
+  --limit 10 >"$work_dir/sync.json"
+"$kirje_bin" --index "$work_dir/index.sqlite3" message search-local \
+  --account "$account_id" \
+  --mailbox INBOX \
+  --limit 1 >"$work_dir/local-search.json"
 
 uid=$(jq -r '.data.messages[0].reference.uid // empty' "$work_dir/search.json")
 uid_validity=$(jq -r '.data.messages[0].reference.uid_validity // empty' "$work_dir/search.json")
@@ -40,4 +48,6 @@ jq -n \
   --arg account_id "$account_id" \
   --argjson mailboxes "$(jq '.data.returned' "$work_dir/mailboxes.json")" \
   --argjson messages "$(jq '.data.returned' "$work_dir/search.json")" \
-  '{ok: true, account_id: $account_id, mailboxes: $mailboxes, sampled_messages: $messages}'
+  --argjson synced "$(jq '.data.stored' "$work_dir/sync.json")" \
+  --argjson local_messages "$(jq '.data.returned' "$work_dir/local-search.json")" \
+  '{ok: true, account_id: $account_id, mailboxes: $mailboxes, sampled_messages: $messages, synced: $synced, local_messages: $local_messages}'

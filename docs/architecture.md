@@ -9,12 +9,11 @@ Agent harness
   `-- MCP stdio
           |
      kirje-runtime
-      /          \
-account config  secret store
-          |
-      kirje-core ports
-          |
-  kirje-protocol (IMAP)
+     /     |      \
+ config  keyring  kirje-core ports
+                  /          \
+       kirje-protocol       kirje-store
+           (IMAP)             (SQLite)
 ```
 
 The CLI is the durable automation contract. MCP maps typed tools to the same
@@ -27,12 +26,17 @@ application services and must not become a second implementation.
 - `kirje-protocol`: Pimalaya `io-imap` adapter, TLS/SASL, structured search,
   MIME decoding, HTML sanitization, and `BODY.PEEK` reads.
 - `kirje-runtime`: atomic TOML account repository, OS keyring adapter, and the
-  application services shared by every interface.
+  application services coordinating remote reads and local transactions.
+- `kirje-store`: private, versioned SQLite envelope index and sync cursor
+  adapter. It stores no bodies, raw MIME, attachments, or credentials.
 - `kirje-cli`: versioned JSON command envelope and interactive secret setup.
-- `kirje-mcp`: compact typed read-only tools over the runtime.
+- `kirje-mcp`: compact typed tools with explicit remote-read and local-write
+  annotations over the runtime.
 
-SMTP, JMAP, SQLite indexing, durable threads, operation plans, and audit records
-fit behind these boundaries but are not implemented in the read-only MVP.
+Sync is explicit rather than a daemon. Initial sync stores the newest bounded
+window, incremental sync advances by IMAP UID, and UIDVALIDITY changes replace
+one mailbox scope atomically. SMTP, JMAP, durable threads, background watching,
+operation plans, and audit records fit behind these boundaries.
 
 The project intentionally excludes React, Tauri, an embedded LLM, and a hosted
 mail relay from the core architecture.

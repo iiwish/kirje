@@ -1,0 +1,26 @@
+schema_version: 1
+packet_id: 003-T008-A001
+task_id: T008
+feature_id: 003-local-sync-index
+status: complete
+title: IMAP incremental synchronization
+goal: Fetch bounded initial and high-water UID batches without remote mutation.
+requirements: [FR-003, FR-004, FR-005, FR-006, FR-011, NFR-002]
+dependencies: [T006, T007]
+governance_inputs: [.ai-platform/specs/003-local-sync-index/spec.md, .ai-platform/specs/003-local-sync-index/plan.md, .ai-platform/specs/003-local-sync-index/analysis.md]
+work_unit: {title: IMAP incremental synchronization, goal: Fetch bounded UID batches without remote mutation.}
+codebase_context: {patterns: [Pimalaya adapter, EXAMINE, stable transcript tests]}
+execution_constraints: {branch: codex/local-sync-index, adapter: direct_execute}
+allowed_files: [crates/kirje-protocol/**, crates/kirje-core/**, crates/kirje-runtime/**]
+tdd:
+  red: Add UID-range, selection, limit, reset, and transcript tests.
+  green: Implement EXAMINE, UID SEARCH, and bounded UID FETCH.
+  refactor: Reuse envelope parsing and stable error classification.
+tdd_plan: [missing-port RED, UID adapter GREEN, transcript review]
+validation: [cargo test -p kirje-protocol -p kirje-runtime --all-features]
+validation_loop: [protocol tests, transcript tests, workspace Clippy]
+evidence: .ai-platform/evidence/T008/summary.md
+evidence_contract: [summary, real command results, residual risk]
+review_contract: [spec compliance, remote read-only proof, bounds]
+handoff: {commit: conventional, pull_request: required}
+stop_conditions: [Implementation uses SELECT or unbounded FETCH, UIDVALIDITY is absent]

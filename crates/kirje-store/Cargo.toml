@@ -1,0 +1,20 @@
+[package]
+name = "kirje-store"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Transactional SQLite message index for Kirje"
+
+[dependencies]
+chrono.workspace = true
+kirje-core.workspace = true
+rusqlite.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

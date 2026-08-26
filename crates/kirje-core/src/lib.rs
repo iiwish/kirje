@@ -7,7 +7,7 @@ mod mail;
 
 pub use mail::*;
 
-pub const CONTRACT_VERSION: &str = "2026-08-26";
+pub const CONTRACT_VERSION: &str = "2026-08-26.2";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]

@@ -7,15 +7,18 @@ email accounts. The project targets IMAP, SMTP, and JMAP across consumer,
 enterprise, and self-hosted providers without routing mailbox data through a
 Kirje cloud service.
 
-> Status: read-only mailbox MVP. Kirje can configure an IMAP account, keep its
-> credential in the operating-system keyring, list mailboxes, search bounded
-> metadata, and read bounded sanitized messages through CLI or MCP.
+> Status: local sync MVP. Kirje can configure an IMAP account, keep its
+> credential in the operating-system keyring, read mail without remote
+> mutation, synchronize bounded envelope metadata into SQLite, search offline,
+> and retrieve explicitly selected bounded attachments through CLI or MCP.
 
 ## Why Kirje
 
 - One local binary for CLI and MCP clients.
 - JSON-first, versioned output designed for deterministic automation.
 - Read-only remote access, with no mailbox write or send tools.
+- Explicit incremental sync into a private local SQLite metadata index.
+- Credential-free offline envelope search and sync coverage inspection.
 - Provider presets for NetEase 163/126, QQ/Foxmail, 139, 189, Sina, Aliyun,
   Fastmail, and iCloud.
 - No credential arguments, shell bridges, telemetry, or hosted control plane.
@@ -32,6 +35,8 @@ cargo build --release
 ./target/release/kirje account check personal --pretty
 ./target/release/kirje mailbox list --account personal --pretty
 ./target/release/kirje message search --account personal --mailbox INBOX --limit 10 --pretty
+./target/release/kirje sync run --account personal --mailbox INBOX --pretty
+./target/release/kirje message search-local --account personal --mailbox INBOX --pretty
 ./target/release/kirje schema --pretty
 ```
 
@@ -60,13 +65,18 @@ Example client configuration:
 }
 ```
 
-The MCP server exposes six read-only tools:
+The MCP server exposes ten task-level tools. All remote mailbox operations are
+read-only; `mailbox_sync` additionally writes the local SQLite index:
 
 - `account_discover`: discover provider endpoints without credentials.
 - `account_status`: inspect one configured account and credential presence.
 - `mailbox_list`: list selectable remote mailboxes.
 - `message_search`: search bounded envelope metadata using structured filters.
 - `message_read`: read bounded text and sanitized HTML using `BODY.PEEK`.
+- `mailbox_sync`: update one bounded local mailbox metadata index.
+- `index_status`: inspect local sync cursor and coverage without network access.
+- `message_search_local`: search indexed envelope metadata offline.
+- `attachment_read`: retrieve one bounded attachment as untrusted base64.
 - `system_status`: inspect the runtime contract and safety mode.
 
 ## For Agents
@@ -96,13 +106,19 @@ See [docs/architecture.md](docs/architecture.md) and
 [docs/security.md](docs/security.md) for the full technical boundary. Provider
 testing is documented in [docs/conformance.md](docs/conformance.md).
 
+## Local Index
+
+Kirje stores envelope metadata only. It does not persist message bodies,
+attachments, credentials, or raw MIME. The first sync imports the newest
+bounded window; later runs request UIDs above the stored cursor. Use `sync run
+--refresh` to rebuild that window after flags or deletions change. Full archive
+backfill and background `IDLE` watching are outside the current scope.
+
 ## Roadmap
 
-- IMAP flags, attachment retrieval, incremental sync, and local SQLite index.
-- SMTP draft, plan, approval, send, and idempotency support.
+- SMTP draft, immutable plan, explicit approval, send, and idempotency support.
+- Historical backfill, thread reconstruction, reconciliation, and event watching.
 - JMAP discovery and mail operations.
-- Local SQLite index, threads, search, and event watching.
-- Compact MCP tools generated from the same command contract.
 - Provider conformance fixtures and real-mailbox compatibility reports.
 
 The archived desktop predecessor is preserved at

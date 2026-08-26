@@ -1,7 +1,7 @@
 use assert_cmd::Command;
 
 #[test]
-fn stdio_handshake_is_protocol_clean_and_lists_only_read_tools() {
+fn stdio_handshake_is_protocol_clean_and_declares_local_write_safety() {
     let requests = concat!(
         "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"contract-test\",\"version\":\"1\"}}}\n",
         "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n",
@@ -30,8 +30,23 @@ fn stdio_handshake_is_protocol_clean_and_lists_only_read_tools() {
         .iter()
         .filter_map(|tool| tool["name"].as_str())
         .collect();
-    assert_eq!(names.len(), 6);
+    assert_eq!(names.len(), 10);
     assert!(names.contains(&"mailbox_list"));
+    assert!(names.contains(&"mailbox_sync"));
+    assert!(names.contains(&"message_search_local"));
+    assert!(names.contains(&"attachment_read"));
+    let sync = tools
+        .iter()
+        .find(|tool| tool["name"] == "mailbox_sync")
+        .expect("sync tool");
+    assert_eq!(sync["annotations"]["readOnlyHint"], false);
+    assert_eq!(sync["annotations"]["destructiveHint"], false);
+    let local_search = tools
+        .iter()
+        .find(|tool| tool["name"] == "message_search_local")
+        .expect("local search tool");
+    assert_eq!(local_search["annotations"]["readOnlyHint"], true);
+    assert_eq!(local_search["annotations"]["openWorldHint"], false);
     assert!(
         !names.iter().any(|name| {
             name.contains("send") || name.contains("delete") || name.contains("move")

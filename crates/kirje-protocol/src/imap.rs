@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, net::IpAddr, num::NonZeroU32, str::from_utf8};
 
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use chrono::{DateTime, Utc};
 use io_imap::{
     client::{ImapClient as _, ImapClientError, ImapClientStd},
@@ -23,8 +24,9 @@ use io_imap::{
 };
 use io_sasl::{mechanism::Sasl, rfc4616::plain::SaslPlainCreds};
 use kirje_core::{
-    AttachmentMetadata, ConnectionReport, MailAccountConfig, MailAddress, MailError, MailErrorCode,
-    Mailbox, MailboxReader, MessageContent, MessageEnvelope, MessagePage, MessageRead,
+    AttachmentContent, AttachmentMetadata, AttachmentRead, ConnectionReport, MailAccountConfig,
+    MailAddress, MailError, MailErrorCode, Mailbox, MailboxReader, MailboxSyncBatch,
+    MailboxSyncRequest, MessageContent, MessageEnvelope, MessagePage, MessageRead,
     MessageReference, MessageSearch, Protocol, TransportSecurity,
 };
 use mail_parser::{Addr, Address, MessageParser, MimeHeaders};
@@ -148,6 +150,7 @@ impl MailboxReader for PimalayaImapReader {
                 returned: 0,
                 limit: search.limit,
                 has_more: false,
+                untrusted: true,
             });
         }
 
@@ -172,6 +175,7 @@ impl MailboxReader for PimalayaImapReader {
                 returned: 0,
                 limit: search.limit,
                 has_more,
+                untrusted: true,
             });
         }
 
@@ -212,6 +216,7 @@ impl MailboxReader for PimalayaImapReader {
             returned,
             limit: search.limit,
             has_more,
+            untrusted: true,
         })
     }
 
@@ -225,55 +230,159 @@ impl MailboxReader for PimalayaImapReader {
         read.validate()?;
         ensure_account_scope(account, &read.reference.account_id)?;
 
+        let raw = fetch_raw_message(account, secret, &read.reference)?;
+        parse_message(&read.reference, &raw, read.max_body_chars)
+    }
+
+    fn sync_mailbox(
+        &self,
+        account: &MailAccountConfig,
+        secret: &SecretString,
+        request: &MailboxSyncRequest,
+    ) -> Result<MailboxSyncBatch, MailError> {
+        account.validate()?;
+        request.validate()?;
+        ensure_account_scope(account, &request.account_id)?;
+
         let (mut client, _) = connect(account, secret)?;
-        let mailbox = parse_mailbox(&read.reference.mailbox)?;
+        let mailbox = parse_mailbox(&request.mailbox)?;
         let selected = client
             .examine(mailbox, ImapMailboxExamineOptions::default())
             .map_err(|error| classify_error(&error))?;
-        let selected_uid_validity = selected.uid_validity.map(NonZeroU32::get);
-        ensure_uid_validity(read.reference.uid_validity, selected_uid_validity)?;
+        let uid_validity = selected
+            .uid_validity
+            .map(NonZeroU32::get)
+            .ok_or_else(|| protocol_error("IMAP mailbox did not provide UIDVALIDITY"))?;
+        let reset_required = request
+            .cursor
+            .as_ref()
+            .is_some_and(|cursor| cursor.uid_validity != uid_validity);
+        let highest_uid = request
+            .cursor
+            .as_ref()
+            .filter(|_| !reset_required)
+            .and_then(|cursor| cursor.highest_uid);
 
-        let uid = NonZeroU32::new(read.reference.uid)
-            .ok_or_else(|| MailError::invalid_input("message UID must be positive"))?;
-        let sequence_set = SequenceSet::try_from(vec![uid])
-            .map_err(|_| MailError::invalid_input("invalid message UID"))?;
-        let fetched = client
-            .fetch(
-                sequence_set,
-                body_peek_fetch_items(),
-                ImapMessageFetchOptions {
-                    uid: true,
-                    ..Default::default()
-                },
-            )
-            .map_err(|error| classify_error(&error))?;
-        let raw = fetched
-            .into_values()
-            .flat_map(io_imap::types::core::VecN::into_inner)
-            .find_map(|item| match item {
-                MessageDataItem::BodyExt { data, .. } => {
-                    data.0.map(|bytes| bytes.as_ref().to_vec())
-                }
-                _ => None,
-            })
-            .ok_or_else(|| {
-                MailError::new(
-                    MailErrorCode::MessageNotFound,
-                    "server returned no body for the requested message",
-                    false,
+        let mut uids = if highest_uid == Some(u32::MAX) {
+            Vec::new()
+        } else {
+            client
+                .search(
+                    sync_search_keys(highest_uid)?,
+                    ImapMessageSearchOptions { uid: true },
                 )
-            })?;
+                .map_err(|error| classify_error(&error))?
+        };
+        let incremental = highest_uid.is_some();
+        let has_more = select_sync_uids(&mut uids, request.limit, incremental);
+        let messages = if uids.is_empty() {
+            Vec::new()
+        } else {
+            let sequence_set = SequenceSet::try_from(uids.clone())
+                .map_err(|_| protocol_error("server returned an invalid IMAP UID set"))?;
+            let fetched = client
+                .fetch(
+                    sequence_set,
+                    envelope_fetch_items(),
+                    ImapMessageFetchOptions {
+                        uid: true,
+                        ..Default::default()
+                    },
+                )
+                .map_err(|error| classify_error(&error))?;
+            let mut by_uid: BTreeMap<u32, MessageEnvelope> = fetched
+                .into_iter()
+                .map(|(sequence, items)| {
+                    let envelope = envelope_from(
+                        account,
+                        &request.mailbox,
+                        Some(uid_validity),
+                        sequence.get(),
+                        items.into_inner(),
+                    );
+                    (envelope.reference.uid, envelope)
+                })
+                .collect();
+            uids.into_iter()
+                .filter_map(|uid| by_uid.remove(&uid.get()))
+                .collect()
+        };
 
-        if raw.len() > MAX_RAW_MESSAGE_BYTES {
-            return Err(MailError::new(
-                MailErrorCode::ResourceLimit,
-                "message exceeds the 10 MiB read-only MVP limit",
-                false,
-            ));
-        }
-
-        parse_message(&read.reference, &raw, read.max_body_chars)
+        Ok(MailboxSyncBatch {
+            account_id: request.account_id.clone(),
+            mailbox: request.mailbox.clone(),
+            uid_validity,
+            messages,
+            remote_total: selected.exists.map(u64::from),
+            has_more,
+            reset_required,
+        })
     }
+
+    fn read_attachment(
+        &self,
+        account: &MailAccountConfig,
+        secret: &SecretString,
+        read: &AttachmentRead,
+    ) -> Result<AttachmentContent, MailError> {
+        account.validate()?;
+        read.validate()?;
+        ensure_account_scope(account, &read.reference.account_id)?;
+        let raw = fetch_raw_message(account, secret, &read.reference)?;
+        parse_attachment(read, &raw)
+    }
+}
+
+fn fetch_raw_message(
+    account: &MailAccountConfig,
+    secret: &SecretString,
+    reference: &MessageReference,
+) -> Result<Vec<u8>, MailError> {
+    let (mut client, _) = connect(account, secret)?;
+    let mailbox = parse_mailbox(&reference.mailbox)?;
+    let selected = client
+        .examine(mailbox, ImapMailboxExamineOptions::default())
+        .map_err(|error| classify_error(&error))?;
+    let selected_uid_validity = selected.uid_validity.map(NonZeroU32::get);
+    ensure_uid_validity(reference.uid_validity, selected_uid_validity)?;
+
+    let uid = NonZeroU32::new(reference.uid)
+        .ok_or_else(|| MailError::invalid_input("message UID must be positive"))?;
+    let sequence_set = SequenceSet::try_from(vec![uid])
+        .map_err(|_| MailError::invalid_input("invalid message UID"))?;
+    let fetched = client
+        .fetch(
+            sequence_set,
+            body_peek_fetch_items(),
+            ImapMessageFetchOptions {
+                uid: true,
+                ..Default::default()
+            },
+        )
+        .map_err(|error| classify_error(&error))?;
+    let raw = fetched
+        .into_values()
+        .flat_map(io_imap::types::core::VecN::into_inner)
+        .find_map(|item| match item {
+            MessageDataItem::BodyExt { data, .. } => data.0.map(|bytes| bytes.as_ref().to_vec()),
+            _ => None,
+        })
+        .ok_or_else(|| {
+            MailError::new(
+                MailErrorCode::MessageNotFound,
+                "server returned no body for the requested message",
+                false,
+            )
+        })?;
+
+    if raw.len() > MAX_RAW_MESSAGE_BYTES {
+        return Err(MailError::new(
+            MailErrorCode::ResourceLimit,
+            "message exceeds the 10 MiB read limit",
+            false,
+        ));
+    }
+    Ok(raw)
 }
 
 fn connect(
@@ -457,6 +566,34 @@ fn build_search_keys(search: &MessageSearch) -> Result<Vec1<SearchKey<'static>>,
     }
 
     Vec1::try_from(keys).map_err(|_| MailError::invalid_input("search criteria cannot be empty"))
+}
+
+fn sync_search_keys(highest_uid: Option<u32>) -> Result<Vec1<SearchKey<'static>>, MailError> {
+    let key = match highest_uid {
+        Some(highest_uid) => {
+            let start = NonZeroU32::new(highest_uid.saturating_add(1)).ok_or_else(|| {
+                MailError::invalid_input("sync cursor cannot advance past UID max")
+            })?;
+            SearchKey::Uid(SequenceSet::from(start..))
+        }
+        None => SearchKey::All,
+    };
+    Ok(Vec1::from(key))
+}
+
+fn select_sync_uids(uids: &mut Vec<NonZeroU32>, limit: u16, incremental: bool) -> bool {
+    if incremental {
+        uids.sort_unstable();
+    } else {
+        uids.sort_unstable_by(|left, right| right.cmp(left));
+    }
+    let fetch_count = usize::from(limit).saturating_add(1);
+    uids.truncate(fetch_count);
+    let has_more = uids.len() > usize::from(limit);
+    if has_more {
+        uids.pop();
+    }
+    has_more
 }
 
 fn non_empty(value: Option<&str>) -> Option<&str> {
@@ -653,15 +790,19 @@ fn parse_message(
         .map(|html| ammonia::Builder::default().clean(&html).to_string());
     let (sanitized_html, html_truncated) = truncate(sanitized.as_deref(), limit);
     let mut attachments = Vec::new();
+    let mut attachment_truncated = message.attachment_count() > MAX_ATTACHMENTS;
     for (index, part) in message.attachments().take(MAX_ATTACHMENTS).enumerate() {
+        let (filename, filename_truncated) = truncate(part.attachment_name(), MAX_HEADER_CHARS);
+        let raw_mime_type = part_mime_type(part);
+        let (mime_type, mime_truncated) = truncate(Some(&raw_mime_type), MAX_HEADER_CHARS);
+        attachment_truncated |= filename_truncated || mime_truncated;
         attachments.push(AttachmentMetadata {
             part_id: format!("attachment-{}", index + 1),
-            filename: part.attachment_name().map(str::to_owned),
-            mime_type: part_mime_type(part),
+            filename,
+            mime_type: mime_type.unwrap_or_else(|| "application/octet-stream".to_owned()),
             size: u64::try_from(part.len()).unwrap_or(u64::MAX),
         });
     }
-    let attachment_truncated = message.attachment_count() > MAX_ATTACHMENTS;
     let (subject, subject_truncated) = truncate(message.subject(), MAX_HEADER_CHARS);
     let mut from = message.from().map(parser_addresses).unwrap_or_default();
     let mut to = message.to().map(parser_addresses).unwrap_or_default();
@@ -687,6 +828,45 @@ fn parse_message(
             || attachment_truncated
             || subject_truncated
             || address_truncated,
+    })
+}
+
+fn parse_attachment(read: &AttachmentRead, raw: &[u8]) -> Result<AttachmentContent, MailError> {
+    let message = MessageParser::default().parse(raw).ok_or_else(|| {
+        MailError::new(
+            MailErrorCode::Protocol,
+            "message is not valid RFC 5322/MIME content",
+            false,
+        )
+    })?;
+    let index = read.attachment_index()?;
+    let part = message
+        .attachment(u32::try_from(index).map_err(|_| {
+            MailError::invalid_input("attachment index exceeds the supported range")
+        })?)
+        .ok_or_else(|| {
+            MailError::new(
+                MailErrorCode::AttachmentNotFound,
+                "requested attachment does not exist",
+                false,
+            )
+        })?;
+    let bytes = part.contents();
+    let limit = usize::try_from(read.max_bytes).unwrap_or(usize::MAX);
+    let truncated = bytes.len() > limit;
+    let (filename, filename_truncated) = truncate(part.attachment_name(), MAX_HEADER_CHARS);
+    let raw_mime_type = part_mime_type(part);
+    let (mime_type, mime_truncated) = truncate(Some(&raw_mime_type), MAX_HEADER_CHARS);
+
+    Ok(AttachmentContent {
+        reference: read.reference.clone(),
+        part_id: read.part_id.clone(),
+        filename,
+        mime_type: mime_type.unwrap_or_else(|| "application/octet-stream".to_owned()),
+        size: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+        content_base64: BASE64_STANDARD.encode(&bytes[..bytes.len().min(limit)]),
+        untrusted: true,
+        truncated: truncated || filename_truncated || mime_truncated,
     })
 }
 
@@ -810,7 +990,7 @@ mod tests {
     use io_imap::{
         codec::fragmentizer::Fragmentizer,
         coroutine::{ImapCoroutine, ImapCoroutineState, ImapYield},
-        rfc3501::fetch::ImapMessageFetch,
+        rfc3501::{fetch::ImapMessageFetch, search::ImapMessageSearch},
         types::sequence::SeqOrUid,
     };
     use kirje_core::{CredentialKind, Endpoint};
@@ -847,6 +1027,71 @@ mod tests {
     }
 
     #[test]
+    fn sync_uses_newest_initial_window_and_oldest_incremental_batch() {
+        let mut initial = [1, 2, 3, 4]
+            .into_iter()
+            .map(|uid| NonZeroU32::new(uid).expect("uid"))
+            .collect();
+        assert!(select_sync_uids(&mut initial, 2, false));
+        assert_eq!(
+            initial.iter().map(|uid| uid.get()).collect::<Vec<_>>(),
+            vec![4, 3]
+        );
+
+        let mut incremental = [7, 5, 6]
+            .into_iter()
+            .map(|uid| NonZeroU32::new(uid).expect("uid"))
+            .collect();
+        assert!(select_sync_uids(&mut incremental, 2, true));
+        assert_eq!(
+            incremental.iter().map(|uid| uid.get()).collect::<Vec<_>>(),
+            vec![5, 6]
+        );
+    }
+
+    #[test]
+    fn incremental_sync_search_starts_above_high_water_uid() {
+        let keys = sync_search_keys(Some(41)).expect("sync keys");
+        assert!(matches!(&keys.as_ref()[0], SearchKey::Uid(_)));
+    }
+
+    #[test]
+    fn incremental_sync_search_round_trips_a_uid_range_transcript() {
+        let mut coroutine = ImapMessageSearch::new(
+            sync_search_keys(Some(41)).expect("sync keys"),
+            ImapMessageSearchOptions { uid: true },
+        );
+        let mut fragmentizer = Fragmentizer::new(1024);
+        let transcript = b"* SEARCH 42 43\r\nA001 OK SEARCH completed\r\n";
+        let mut input = None;
+        let mut fed = false;
+        let mut command = Vec::new();
+
+        let ids = loop {
+            match coroutine.resume(&mut fragmentizer, input.take()) {
+                ImapCoroutineState::Yielded(ImapYield::WantsWrite(bytes)) => {
+                    command.extend(bytes);
+                }
+                ImapCoroutineState::Yielded(ImapYield::WantsRead) => {
+                    input = Some(if fed { b"" } else { transcript });
+                    fed = true;
+                }
+                ImapCoroutineState::Complete(Ok(ids)) => break ids,
+                ImapCoroutineState::Complete(Err(error)) => {
+                    panic!("transcript failed: {error}")
+                }
+            }
+        };
+
+        let wire = String::from_utf8(command).expect("ASCII command");
+        assert!(wire.contains("UID SEARCH UID 42:*"));
+        assert_eq!(
+            ids.iter().map(|uid| uid.get()).collect::<Vec<_>>(),
+            vec![42, 43]
+        );
+    }
+
+    #[test]
     fn raw_message_is_sanitized_bounded_and_untrusted() {
         let raw = b"From: Alice <alice@example.com>\r\nTo: Agent <agent@163.com>\r\nSubject: Test\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<p>Hello</p><script>alert('x')</script>world";
         let reference = MessageReference {
@@ -865,6 +1110,38 @@ mod tests {
                 .as_deref()
                 .is_some_and(|html| !html.contains("script"))
         );
+    }
+
+    #[test]
+    fn attachment_selection_is_bounded_base64_and_untrusted() {
+        let raw = concat!(
+            "From: Alice <alice@example.com>\r\n",
+            "To: Agent <agent@163.com>\r\n",
+            "Subject: Files\r\n",
+            "MIME-Version: 1.0\r\n",
+            "Content-Type: multipart/mixed; boundary=x\r\n\r\n",
+            "--x\r\nContent-Type: text/plain\r\n\r\nHello\r\n",
+            "--x\r\nContent-Type: application/octet-stream\r\n",
+            "Content-Disposition: attachment; filename=test.bin\r\n",
+            "Content-Transfer-Encoding: base64\r\n\r\n",
+            "AQIDBAU=\r\n--x--\r\n"
+        );
+        let read = AttachmentRead {
+            reference: MessageReference {
+                account_id: "personal".to_owned(),
+                mailbox: "INBOX".to_owned(),
+                uid_validity: Some(1),
+                uid: 2,
+            },
+            part_id: "attachment-1".to_owned(),
+            max_bytes: 3,
+        };
+        let attachment = parse_attachment(&read, raw.as_bytes()).expect("attachment");
+        assert_eq!(attachment.content_base64, "AQID");
+        assert_eq!(attachment.size, 5);
+        assert!(attachment.truncated);
+        assert!(attachment.untrusted);
+        assert_eq!(attachment.filename.as_deref(), Some("test.bin"));
     }
 
     #[test]

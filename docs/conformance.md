@@ -9,8 +9,10 @@ checks. Public CI never receives mailbox credentials.
 - NetEase Coremail disables the falsely advertised SASL initial response.
 - QQ Mail and Fastmail receive the RFC 2971 client ID exchange they require.
 - Mailboxes open with `EXAMINE`; message bodies use bounded `BODY.PEEK[]`.
+- Initial and incremental sync use bounded UID FETCH batches and persist scoped
+  UIDVALIDITY cursors transactionally.
 - Search input, result counts, mailbox counts, message bytes, decoded bodies,
-  headers, addresses, and attachment metadata are bounded.
+  headers, addresses, attachment metadata, and attachment content are bounded.
 - MIME parsing, UTF-8 truncation, HTML sanitization, stale reference handling,
   JSON envelopes, MCP schemas, and stdout cleanliness are regression-tested.
 
@@ -32,7 +34,8 @@ cargo build -p kirje-cli
 ./scripts/live-imap-smoke.sh <account-id>
 ```
 
-The script authenticates, lists mailboxes, searches one INBOX envelope, and
-reads at most one bounded message. It performs no mailbox writes and prints no
-message content. Record provider, server capabilities, Kirje commit, date, and
-the final JSON summary; never record addresses, UIDs, subjects, or credentials.
+The script authenticates, lists mailboxes, searches one INBOX envelope, reads at
+most one bounded message, synchronizes a temporary local index, and verifies an
+offline query. It performs no remote mailbox writes and prints no message
+content. Record provider, server capabilities, Kirje commit, date, and the final
+JSON summary; never record addresses, UIDs, subjects, or credentials.
