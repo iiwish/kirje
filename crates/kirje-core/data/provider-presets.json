@@ -1,0 +1,210 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-08-26",
+  "providers": [
+    {
+      "id": "netease-163",
+      "provider_id": "netease",
+      "name": "NetEase 163 Mail",
+      "domains": ["163.com"],
+      "credential_kind": "app_password",
+      "endpoints": [
+        {"protocol": "imap", "host": "imap.163.com", "port": 993, "security": "implicit_tls", "runtime_default": true},
+        {"protocol": "smtp", "host": "smtp.163.com", "port": 465, "security": "implicit_tls", "runtime_default": true},
+        {"protocol": "pop3", "host": "pop.163.com", "port": 995, "security": "implicit_tls", "runtime_default": false}
+      ],
+      "guidance": ["Enable IMAP/SMTP and use the provider-issued client authorization password."],
+      "sources": [{"title": "NetEase client settings guide", "url": "https://help.mail.126.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac25c12dcb3d46222b6", "verified_at": "2026-08-26"}]
+    },
+    {
+      "id": "netease-126",
+      "provider_id": "netease",
+      "name": "NetEase 126 Mail",
+      "domains": ["126.com"],
+      "credential_kind": "app_password",
+      "endpoints": [
+        {"protocol": "imap", "host": "imap.126.com", "port": 993, "security": "implicit_tls", "runtime_default": true},
+        {"protocol": "smtp", "host": "smtp.126.com", "port": 465, "security": "implicit_tls", "runtime_default": true},
+        {"protocol": "pop3", "host": "pop.126.com", "port": 995, "security": "implicit_tls", "runtime_default": false}
+      ],
+      "guidance": ["Enable IMAP/SMTP and use the provider-issued client authorization password."],
+      "sources": [{"title": "NetEase client settings guide", "url": "https://help.mail.126.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac25c12dcb3d46222b6", "verified_at": "2026-08-26"}]
+    },
+    {
+      "id": "netease-yeah",
+      "provider_id": "netease",
+      "name": "NetEase Yeah Mail",
+      "domains": ["yeah.net"],
+      "credential_kind": "app_password",
+      "endpoints": [
+        {"protocol": "imap", "host": "imap.yeah.net", "port": 993, "security": "implicit_tls", "runtime_default": true},
+        {"protocol": "smtp", "host": "smtp.yeah.net", "port": 465, "security": "implicit_tls", "runtime_default": true},
+        {"protocol": "pop3", "host": "pop.yeah.net", "port": 995, "security": "implicit_tls", "runtime_default": false}
+      ],
+      "guidance": ["Enable IMAP/SMTP and use the provider-issued client authorization password."],
+      "sources": [{"title": "NetEase client settings guide", "url": "https://help.mail.126.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac25c12dcb3d46222b6", "verified_at": "2026-08-26"}]
+    },
+    {
+      "id": "tencent-qq",
+      "provider_id": "tencent",
+      "name": "QQ Mail / Foxmail",
+      "domains": ["qq.com", "foxmail.com"],
+      "credential_kind": "app_password",
+      "endpoints": [
+        {"protocol": "imap", "host": "imap.qq.com", "port": 993, "security": "implicit_tls", "runtime_default": true},
+        {"protocol": "smtp", "host": "smtp.qq.com", "port": 465, "security": "implicit_tls", "runtime_default": true},
+        {"protocol": "pop3", "host": "pop.qq.com", "port": 995, "security": "implicit_tls", "runtime_default": false}
+      ],
+      "guidance": ["Enable IMAP/SMTP and use the provider-issued authorization code."],
+      "sources": [{"title": "Tencent Cloud email connector guide", "url": "https://main.qcloudimg.com/raw/document/product/pdf/1270_46586_cn.pdf", "verified_at": "2026-08-26"}]
+    },
+    {
+      "id": "china-mobile-139",
+      "provider_id": "china-mobile",
+      "name": "China Mobile 139 Mail",
+      "domains": ["139.com"],
+      "credential_kind": "app_password",
+      "endpoints": [
+        {"protocol": "imap", "host": "imap.139.com", "port": 993, "security": "implicit_tls", "runtime_default": true},
+        {"protocol": "smtp", "host": "smtp.139.com", "port": 465, "security": "implicit_tls", "runtime_default": true},
+        {"protocol": "pop3", "host": "pop.139.com", "port": 995, "security": "implicit_tls", "runtime_default": false}
+      ],
+      "guidance": ["Enable client protocol access and use a provider-issued client credential when required."],
+      "sources": [
+        {"title": "139 Mail server addresses", "url": "https://help.mail.10086.cn/statichtml/6/Content/1454.html", "verified_at": "2026-08-26"},
+        {"title": "139 Mail authorization codes", "url": "https://help.mail.10086.cn/statichtml/15/Content/1234605.html", "verified_at": "2026-08-26"}
+      ]
+    },
+    {
+      "id": "china-telecom-189",
+      "provider_id": "china-telecom",
+      "name": "China Telecom 189 Mail",
+      "domains": ["189.cn"],
+      "credential_kind": "app_password",
+      "endpoints": [
+        {"protocol": "imap", "host": "imap.189.cn", "port": 993, "security": "implicit_tls", "runtime_default": true},
+        {"protocol": "smtp", "host": "smtp.189.cn", "port": 465, "security": "implicit_tls", "runtime_default": true},
+        {"protocol": "pop3", "host": "pop.189.cn", "port": 995, "security": "implicit_tls", "runtime_default": false}
+      ],
+      "guidance": ["Enable IMAP/SMTP and use the provider-issued client password."],
+      "sources": [{"title": "189 Mail client help", "url": "https://help.189.cn/client/client.html", "verified_at": "2026-08-26"}]
+    },
+    {
+      "id": "sina-com",
+      "provider_id": "sina",
+      "name": "Sina Mail",
+      "domains": ["sina.com"],
+      "credential_kind": "app_password",
+      "endpoints": [
+        {"protocol": "imap", "host": "imap.sina.com", "port": 993, "security": "implicit_tls", "runtime_default": true},
+        {"protocol": "smtp", "host": "smtp.sina.com", "port": 465, "security": "implicit_tls", "runtime_default": true},
+        {"protocol": "pop3", "host": "pop.sina.com", "port": 995, "security": "implicit_tls", "runtime_default": false}
+      ],
+      "guidance": ["Enable client protocol access and use the provider-issued client credential."],
+      "sources": [
+        {"title": "Sina Mail client server settings", "url": "https://help.sina.com.cn/comquestiondetail/view/160/", "verified_at": "2026-08-26"},
+        {"title": "Sina Mail client authorization codes", "url": "https://help.sina.com.cn/comquestiondetail/view/1567/", "verified_at": "2026-08-26"}
+      ]
+    },
+    {
+      "id": "sina-cn",
+      "provider_id": "sina",
+      "name": "Sina CN Mail",
+      "domains": ["sina.cn"],
+      "credential_kind": "app_password",
+      "endpoints": [
+        {"protocol": "imap", "host": "imap.sina.cn", "port": 993, "security": "implicit_tls", "runtime_default": true},
+        {"protocol": "smtp", "host": "smtp.sina.cn", "port": 465, "security": "implicit_tls", "runtime_default": true},
+        {"protocol": "pop3", "host": "pop.sina.cn", "port": 995, "security": "implicit_tls", "runtime_default": false}
+      ],
+      "guidance": ["Enable client protocol access and use the provider-issued client credential."],
+      "sources": [
+        {"title": "Sina Mail client server settings", "url": "https://help.sina.com.cn/comquestiondetail/view/160/", "verified_at": "2026-08-26"},
+        {"title": "Sina Mail client authorization codes", "url": "https://help.sina.com.cn/comquestiondetail/view/1567/", "verified_at": "2026-08-26"}
+      ]
+    },
+    {
+      "id": "sina-vip-com",
+      "provider_id": "sina",
+      "name": "Sina VIP Mail",
+      "domains": ["vip.sina.com"],
+      "credential_kind": "app_password",
+      "endpoints": [
+        {"protocol": "imap", "host": "imap.vip.sina.com", "port": 993, "security": "implicit_tls", "runtime_default": true},
+        {"protocol": "smtp", "host": "smtp.vip.sina.com", "port": 465, "security": "implicit_tls", "runtime_default": true},
+        {"protocol": "pop3", "host": "pop.vip.sina.com", "port": 995, "security": "implicit_tls", "runtime_default": false}
+      ],
+      "guidance": ["Enable client protocol access and use the provider-issued client credential."],
+      "sources": [
+        {"title": "Sina Mail client server settings", "url": "https://help.sina.com.cn/comquestiondetail/view/160/", "verified_at": "2026-08-26"},
+        {"title": "Sina Mail client authorization codes", "url": "https://help.sina.com.cn/comquestiondetail/view/1567/", "verified_at": "2026-08-26"}
+      ]
+    },
+    {
+      "id": "sina-vip-cn",
+      "provider_id": "sina",
+      "name": "Sina VIP CN Mail",
+      "domains": ["vip.sina.cn"],
+      "credential_kind": "app_password",
+      "endpoints": [
+        {"protocol": "imap", "host": "imap.vip.sina.cn", "port": 993, "security": "implicit_tls", "runtime_default": true},
+        {"protocol": "smtp", "host": "smtp.vip.sina.cn", "port": 465, "security": "implicit_tls", "runtime_default": true},
+        {"protocol": "pop3", "host": "pop.vip.sina.cn", "port": 995, "security": "implicit_tls", "runtime_default": false}
+      ],
+      "guidance": ["Enable client protocol access and use the provider-issued client credential."],
+      "sources": [
+        {"title": "Sina Mail client server settings", "url": "https://help.sina.com.cn/comquestiondetail/view/160/", "verified_at": "2026-08-26"},
+        {"title": "Sina Mail client authorization codes", "url": "https://help.sina.com.cn/comquestiondetail/view/1567/", "verified_at": "2026-08-26"}
+      ]
+    },
+    {
+      "id": "aliyun-personal",
+      "provider_id": "aliyun",
+      "name": "Aliyun Personal Mail",
+      "domains": ["aliyun.com"],
+      "credential_kind": "password",
+      "endpoints": [
+        {"protocol": "imap", "host": "imap.aliyun.com", "port": 993, "security": "implicit_tls", "runtime_default": true},
+        {"protocol": "smtp", "host": "smtp.aliyun.com", "port": 465, "security": "implicit_tls", "runtime_default": true},
+        {"protocol": "pop3", "host": "pop3.aliyun.com", "port": 995, "security": "implicit_tls", "runtime_default": false}
+      ],
+      "guidance": ["Aliyun personal mail documents the mailbox login password for third-party IMAP clients; enter it only through the OS-keyring TTY flow."],
+      "sources": [
+        {"title": "Aliyun personal mail server settings", "url": "https://help.aliyun.com/zh/document_detail/465307.html", "verified_at": "2026-08-26"},
+        {"title": "Aliyun personal mail Android client setup", "url": "https://help.aliyun.com/zh/document_detail/465545.html", "verified_at": "2026-08-26"}
+      ]
+    },
+    {
+      "id": "fastmail",
+      "provider_id": "fastmail",
+      "name": "Fastmail",
+      "domains": ["fastmail.com", "fastmail.fm"],
+      "credential_kind": "app_password",
+      "endpoints": [
+        {"protocol": "imap", "host": "imap.fastmail.com", "port": 993, "security": "implicit_tls", "runtime_default": true},
+        {"protocol": "smtp", "host": "smtp.fastmail.com", "port": 465, "security": "implicit_tls", "runtime_default": true},
+        {"protocol": "smtp", "host": "smtp.fastmail.com", "port": 587, "security": "start_tls", "runtime_default": false},
+        {"protocol": "pop3", "host": "pop.fastmail.com", "port": 995, "security": "implicit_tls", "runtime_default": false},
+        {"protocol": "jmap", "host": "api.fastmail.com", "port": 443, "path": "/jmap/session", "security": "https", "runtime_default": false}
+      ],
+      "guidance": ["Use a Fastmail app password; regular account passwords are not accepted."],
+      "sources": [
+        {"title": "Fastmail server names and ports", "url": "https://www.fastmail.help/hc/en-us/articles/1500000278342", "verified_at": "2026-08-26"},
+        {"title": "Fastmail API documentation", "url": "https://www.fastmail.com/dev/", "verified_at": "2026-08-26"}
+      ]
+    },
+    {
+      "id": "icloud",
+      "provider_id": "icloud",
+      "name": "iCloud Mail",
+      "domains": ["icloud.com", "me.com", "mac.com"],
+      "credential_kind": "app_password",
+      "endpoints": [
+        {"protocol": "imap", "host": "imap.mail.me.com", "port": 993, "security": "implicit_tls", "runtime_default": true},
+        {"protocol": "smtp", "host": "smtp.mail.me.com", "port": 587, "security": "start_tls", "runtime_default": true}
+      ],
+      "guidance": ["Use an app-specific password generated by the Apple Account."],
+      "sources": [{"title": "iCloud Mail server settings", "url": "https://support.apple.com/zh-cn/102525", "verified_at": "2026-08-26"}]
+    }
+  ]
+}

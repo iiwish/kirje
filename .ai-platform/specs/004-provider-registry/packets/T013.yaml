@@ -1,0 +1,33 @@
+schema_version: 1
+packet_id: 004-T013-A001
+task_id: T013
+feature_id: 004-provider-registry
+status: blocked
+title: Provider verification and release readiness
+goal: Verify 163 read-only behavior with isolated state and complete release evidence.
+requirements: [FR-008, FR-009]
+dependencies: [T012]
+governance_inputs:
+  - .ai-platform/specs/004-provider-registry/spec.md
+  - .ai-platform/specs/004-provider-registry/plan.md
+work_unit:
+  title: Provider verification and release readiness
+  goal: Verify secure 163 endpoints and run authenticated smoke only when the OS keyring is available.
+codebase_context:
+  patterns: [TTY-only secret entry, OS keyring, bounded read-only smoke script]
+execution_constraints:
+  branch: codex/provider-presets
+  adapter: direct_execute
+allowed_files: [docs/**, scripts/**, .ai-platform/**]
+tdd:
+  red: Not applicable to credentialed release QA.
+  green: Run the existing bounded smoke workflow against isolated config and index paths.
+  refactor: Keep only sanitized aggregate evidence.
+tdd_plan: [verify secret-store precondition, probe TLS endpoints, run bounded smoke, verify cleanup]
+validation: [workspace quality gates, isolated live 163 smoke, credential cleanup check]
+validation_loop: [doctor preflight, endpoint probes, credentialed smoke, cleanup audit]
+evidence: .ai-platform/evidence/T013/summary.md
+evidence_contract: [sanitized aggregate results, cleanup result, residual risk]
+review_contract: [no remote writes, no content disclosure, credential deleted, temporary files removed]
+handoff: {commit: conventional, pull_request: required}
+stop_conditions: [credential cannot be entered through TTY, cleanup cannot be verified, live command attempts a remote write]

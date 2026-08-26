@@ -1,0 +1,35 @@
+schema_version: 1
+packet_id: 004-T012-A001
+task_id: T012
+feature_id: 004-provider-registry
+status: complete
+title: Registry contract and discovery
+goal: Replace hard-coded provider presets with validated embedded JSON and expose bounded CLI inspection.
+requirements: [FR-001, FR-002, FR-003, FR-004, FR-005, FR-006, FR-007]
+dependencies: [T011]
+governance_inputs:
+  - .ai-platform/memory/constitution.md
+  - .ai-platform/specs/004-provider-registry/spec.md
+  - .ai-platform/specs/004-provider-registry/plan.md
+  - .ai-platform/specs/004-provider-registry/analysis.md
+work_unit:
+  title: Registry contract and discovery
+  goal: Make validated embedded JSON the sole built-in provider preset source.
+codebase_context:
+  patterns: [provider-neutral core contracts, versioned JSON envelopes, compact MCP tools]
+execution_constraints:
+  branch: codex/provider-presets
+  adapter: direct_execute
+allowed_files: [Cargo.toml, Cargo.lock, crates/kirje-core/**, crates/kirje-cli/**]
+tdd:
+  red: Add registry invariant, provider-specific discovery, and CLI contract tests before implementation.
+  green: Add typed JSON loading, validated lookup, and the smallest CLI surface that passes.
+  refactor: Keep discovery provider-neutral and POP3 reference-only.
+tdd_plan: [registry invariant RED, provider-specific discovery RED, JSON-backed GREEN, CLI contract GREEN]
+validation: [cargo test -p kirje-core -p kirje-cli --all-features]
+validation_loop: [targeted tests, workspace Clippy, full workspace gates, MCP Inspector]
+evidence: .ai-platform/evidence/T012/summary.md
+evidence_contract: [summary, diff, test results, residual risk]
+review_contract: [source integrity, transport safety, secret absence, contract compatibility]
+handoff: {commit: conventional, pull_request: required}
+stop_conditions: [plaintext endpoints become defaults, POP3 enters runtime account configuration, secret material enters files]

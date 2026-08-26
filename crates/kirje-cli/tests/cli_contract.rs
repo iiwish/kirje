@@ -1,6 +1,41 @@
 use assert_cmd::Command;
 
 #[test]
+fn provider_registry_is_inspectable_without_configuration_or_credentials() {
+    let list = Command::cargo_bin("kirje")
+        .expect("kirje binary")
+        .args(["provider", "list"])
+        .output()
+        .expect("provider list");
+    assert!(list.status.success());
+    let list_json: serde_json::Value =
+        serde_json::from_slice(&list.stdout).expect("provider list JSON");
+    assert_eq!(list_json["data"]["schema_version"], 1);
+    assert!(
+        list_json["data"]["returned"]
+            .as_u64()
+            .is_some_and(|count| count <= 128)
+    );
+
+    let show = Command::cargo_bin("kirje")
+        .expect("kirje binary")
+        .args(["provider", "show", "163.com"])
+        .output()
+        .expect("provider show");
+    assert!(show.status.success());
+    let show_json: serde_json::Value =
+        serde_json::from_slice(&show.stdout).expect("provider show JSON");
+    assert_eq!(show_json["data"]["id"], "netease-163");
+    assert!(
+        show_json["data"]["endpoints"]
+            .as_array()
+            .expect("endpoints")
+            .iter()
+            .any(|endpoint| endpoint["protocol"] == "pop3" && endpoint["runtime_default"] == false)
+    );
+}
+
+#[test]
 fn account_add_and_list_share_a_versioned_json_contract() {
     let directory = tempfile::tempdir().expect("temp dir");
     let config = directory.path().join("accounts.toml");
