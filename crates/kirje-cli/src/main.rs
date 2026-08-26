@@ -6,19 +6,20 @@ use std::{
 };
 
 use anyhow::Context as _;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use clap::{Parser, Subcommand, ValueEnum};
 use kirje_core::{
-    AttachmentRead, CONTRACT_VERSION, CredentialKind, Endpoint, LocalMessageSearch,
-    MailAccountConfig, MailError, MailErrorCode, MessageRead, MessageReference, MessageSearch,
-    Protocol, SendRequest, TransportSecurity, discover_account, find_provider_preset,
-    provider_registry,
+    AttachmentRead, CONTRACT_VERSION, CredentialKind, DraftInput, Endpoint, LocalMessageSearch,
+    MailAccountConfig, MailError, MailErrorCode, MailboxOperationRequest, MessageRead,
+    MessageReference, MessageSearch, Protocol, SendAttachment, SendRequest, TransportSecurity,
+    discover_account, find_provider_preset, provider_registry,
 };
 use kirje_runtime::{
     AccountRepository, KeyringSecretStore, KirjeRuntime, TomlAccountRepository, resolve_index_path,
     resolve_outbox_path,
 };
 use secrecy::SecretString;
-use serde::Serialize;
+use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
 #[derive(Parser)]
@@ -93,6 +94,16 @@ enum Command {
     Send {
         #[command(subcommand)]
         command: SendCommand,
+    },
+    /// Compose and manage private local drafts.
+    Draft {
+        #[command(subcommand)]
+        command: DraftCommand,
+    },
+    /// Plan, approve, apply, and audit governed remote operations.
+    Operation {
+        #[command(subcommand)]
+        command: OperationCommand,
     },
     /// Run protocol adapters for agent harnesses.
     Mcp {
@@ -239,6 +250,14 @@ enum SyncCommand {
 
 #[derive(Subcommand)]
 enum AttachmentCommand {
+    /// Import a bounded local file as a sendable attachment snapshot.
+    Import {
+        path: PathBuf,
+        #[arg(long)]
+        filename: Option<String>,
+        #[arg(long)]
+        mime_type: String,
+    },
     /// Read one server-returned attachment id as bounded untrusted base64.
     Read {
         #[arg(long)]
@@ -264,6 +283,8 @@ enum SendCommand {
         #[arg(long)]
         input: String,
     },
+    /// Create an immutable send plan from one active private draft.
+    FromDraft { draft_id: String },
     /// Inspect one full immutable plan and its current state.
     Show { plan_id: String },
     /// List bounded plan summaries without message bodies.
@@ -277,6 +298,64 @@ enum SendCommand {
     Approve { plan_id: String },
     /// Apply an already approved plan at most once.
     Apply { plan_id: String },
+}
+
+#[derive(Subcommand)]
+enum DraftCommand {
+    /// Create a private draft from bounded JSON input.
+    Create {
+        /// JSON file path, or '-' to read from stdin.
+        #[arg(long)]
+        input: String,
+    },
+    /// Inspect one private draft.
+    Show { draft_id: String },
+    /// List bounded private drafts for one account.
+    List {
+        #[arg(long)]
+        account: String,
+        #[arg(long, default_value_t = kirje_core::DEFAULT_OPERATION_LIMIT)]
+        limit: u16,
+    },
+    /// Replace a private draft while preserving its id.
+    Update {
+        draft_id: String,
+        #[arg(long)]
+        input: String,
+    },
+    /// Discard a private draft while retaining its audit record.
+    Discard { draft_id: String },
+}
+
+#[derive(Subcommand)]
+enum OperationCommand {
+    /// Create a governed remote-operation record from bounded JSON input.
+    Plan {
+        /// JSON file path, or '-' to read from stdin.
+        #[arg(long)]
+        input: String,
+    },
+    /// Inspect one operation and its certainty state.
+    Show { operation_id: String },
+    /// List bounded operation records.
+    List {
+        #[arg(long)]
+        account: Option<String>,
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long, default_value_t = kirje_core::DEFAULT_OPERATION_LIMIT)]
+        limit: u16,
+    },
+    /// Approve one exact operation in an interactive human terminal.
+    Approve { operation_id: String },
+    /// Apply one already-approved operation at most once.
+    Apply { operation_id: String },
+    /// Read the append-only audit trail for one operation.
+    Audit {
+        operation_id: String,
+        #[arg(long, default_value_t = kirje_core::DEFAULT_OPERATION_LIMIT)]
+        limit: u16,
+    },
 }
 
 #[derive(Subcommand)]
@@ -464,6 +543,8 @@ fn execute_local(cli: &Cli) -> Result<Value, MailError> {
         Command::Sync { command } => handle_sync(cli, command),
         Command::Attachment { command } => handle_attachment(cli, command),
         Command::Send { command } => handle_send(cli, command),
+        Command::Draft { command } => handle_draft(cli, command),
+        Command::Operation { command } => handle_operation(cli, command),
         Command::Mcp { .. } => unreachable!("MCP command handled before local dispatch"),
     }
 }
@@ -658,6 +739,11 @@ fn handle_sync(cli: &Cli, command: &SyncCommand) -> Result<Value, MailError> {
 
 fn handle_attachment(cli: &Cli, command: &AttachmentCommand) -> Result<Value, MailError> {
     match command {
+        AttachmentCommand::Import {
+            path,
+            filename,
+            mime_type,
+        } => import_attachment(path, filename.as_deref(), mime_type),
         AttachmentCommand::Read {
             account,
             mailbox,
@@ -678,11 +764,55 @@ fn handle_attachment(cli: &Cli, command: &AttachmentCommand) -> Result<Value, Ma
     }
 }
 
+fn import_attachment(
+    path: &PathBuf,
+    filename: Option<&str>,
+    mime_type: &str,
+) -> Result<Value, MailError> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|_| MailError::invalid_input("cannot read attachment file metadata"))?;
+    if !metadata.file_type().is_file() {
+        return Err(MailError::invalid_input(
+            "attachment import requires a regular file",
+        ));
+    }
+    if metadata.len() > kirje_core::MAX_SEND_ATTACHMENT_BYTES as u64 {
+        return Err(MailError::new(
+            MailErrorCode::ResourceLimit,
+            format!(
+                "each imported attachment cannot exceed {} bytes",
+                kirje_core::MAX_SEND_ATTACHMENT_BYTES
+            ),
+            false,
+        ));
+    }
+    let bytes =
+        fs::read(path).map_err(|_| MailError::invalid_input("cannot read attachment file"))?;
+    let default_filename = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| MailError::invalid_input("attachment filename is not valid UTF-8"))?;
+    let attachment = SendAttachment {
+        filename: filename.unwrap_or(default_filename).to_owned(),
+        mime_type: mime_type.to_owned(),
+        content_base64: BASE64_STANDARD.encode(bytes),
+    };
+    let summary = attachment.summary()?;
+    json_value(serde_json::json!({
+        "attachment": attachment,
+        "summary": summary,
+        "untrusted": true,
+    }))
+}
+
 fn handle_send(cli: &Cli, command: &SendCommand) -> Result<Value, MailError> {
     match command {
         SendCommand::Plan { input } => {
             let request = read_send_request(input)?;
             json_value(runtime(cli)?.plan_send(request)?)
+        }
+        SendCommand::FromDraft { draft_id } => {
+            json_value(runtime(cli)?.plan_send_from_draft(draft_id)?)
         }
         SendCommand::Show { plan_id } => json_value(runtime(cli)?.send_plan(plan_id)?),
         SendCommand::List { account, limit } => {
@@ -692,7 +822,17 @@ fn handle_send(cli: &Cli, command: &SendCommand) -> Result<Value, MailError> {
             require_interactive_approval_terminal()?;
             let runtime = runtime(cli)?;
             let plan = runtime.send_plan(plan_id)?;
-            let review = serde_json::to_string_pretty(&plan.request).map_err(|_| {
+            let review = serde_json::to_string_pretty(&serde_json::json!({
+                "account_id": plan.request.account_id,
+                "to": plan.request.to,
+                "cc": plan.request.cc,
+                "bcc": plan.request.bcc,
+                "subject": plan.request.subject,
+                "text": plan.request.text,
+                "html": plan.request.html,
+                "attachment_summaries": plan.attachment_summaries,
+            }))
+            .map_err(|_| {
                 MailError::new(MailErrorCode::Internal, "cannot render send plan", false)
             })?;
             eprintln!(
@@ -719,39 +859,126 @@ fn handle_send(cli: &Cli, command: &SendCommand) -> Result<Value, MailError> {
     }
 }
 
-const MAX_SEND_INPUT_BYTES: u64 = 600 * 1024;
+const MAX_SEND_INPUT_BYTES: u64 = 12 * 1024 * 1024;
+const MAX_OPERATION_INPUT_BYTES: u64 = 600 * 1024;
+const MAX_DRAFT_INPUT_BYTES: u64 = 12 * 1024 * 1024;
 
 fn read_send_request(input: &str) -> Result<SendRequest, MailError> {
+    let request: SendRequest = read_json_input(input, MAX_SEND_INPUT_BYTES, "send request")?;
+    request.validate()?;
+    Ok(request)
+}
+
+fn handle_draft(cli: &Cli, command: &DraftCommand) -> Result<Value, MailError> {
+    match command {
+        DraftCommand::Create { input } => {
+            let draft: DraftInput = read_json_input(input, MAX_DRAFT_INPUT_BYTES, "draft input")?;
+            json_value(runtime(cli)?.create_draft(draft)?)
+        }
+        DraftCommand::Show { draft_id } => json_value(runtime(cli)?.draft(draft_id)?),
+        DraftCommand::List { account, limit } => {
+            json_value(runtime(cli)?.list_drafts(account, *limit)?)
+        }
+        DraftCommand::Update { draft_id, input } => {
+            let draft: DraftInput = read_json_input(input, MAX_DRAFT_INPUT_BYTES, "draft input")?;
+            json_value(runtime(cli)?.update_draft(draft_id, draft)?)
+        }
+        DraftCommand::Discard { draft_id } => json_value(runtime(cli)?.discard_draft(draft_id)?),
+    }
+}
+
+fn handle_operation(cli: &Cli, command: &OperationCommand) -> Result<Value, MailError> {
+    match command {
+        OperationCommand::Plan { input } => {
+            let request: MailboxOperationRequest =
+                read_json_input(input, MAX_OPERATION_INPUT_BYTES, "operation input")?;
+            json_value(runtime(cli)?.plan_mail_operation(request)?)
+        }
+        OperationCommand::Show { operation_id } => {
+            json_value(runtime(cli)?.mail_operation(operation_id)?)
+        }
+        OperationCommand::List {
+            account,
+            kind,
+            limit,
+        } => json_value(runtime(cli)?.list_operations(
+            account.as_deref(),
+            kind.as_deref(),
+            *limit,
+        )?),
+        OperationCommand::Approve { operation_id } => {
+            require_interactive_approval_terminal()?;
+            let runtime = runtime(cli)?;
+            let operation = runtime.mail_operation(operation_id)?;
+            let review = serde_json::to_string_pretty(&operation).map_err(|_| {
+                MailError::new(MailErrorCode::Internal, "cannot render operation", false)
+            })?;
+            eprintln!(
+                "Review immutable operation {} (sha256 {}):\n{}",
+                operation.id, operation.payload_sha256, review
+            );
+            let confirmation = rpassword::prompt_password(format!(
+                "Type operation id '{}' to approve: ",
+                operation.id
+            ))
+            .map_err(|_| {
+                MailError::new(
+                    MailErrorCode::InvalidInput,
+                    "cannot read approval from the terminal",
+                    false,
+                )
+            })?;
+            if confirmation != operation.id {
+                return Err(MailError::invalid_input(
+                    "operation approval did not match the operation id",
+                ));
+            }
+            json_value(runtime.approve_operation(operation_id)?)
+        }
+        OperationCommand::Apply { operation_id } => {
+            json_value(runtime(cli)?.apply_mail_operation(operation_id)?)
+        }
+        OperationCommand::Audit {
+            operation_id,
+            limit,
+        } => json_value(runtime(cli)?.operation_audit(operation_id, *limit)?),
+    }
+}
+
+fn read_json_input<T: DeserializeOwned>(
+    input: &str,
+    max_bytes: u64,
+    label: &str,
+) -> Result<T, MailError> {
     let bytes = if input == "-" {
         let mut bytes = Vec::new();
         io::stdin()
-            .take(MAX_SEND_INPUT_BYTES + 1)
+            .take(max_bytes + 1)
             .read_to_end(&mut bytes)
-            .map_err(|_| MailError::invalid_input("cannot read send request from stdin"))?;
+            .map_err(|_| MailError::invalid_input(format!("cannot read {label} from stdin")))?;
         bytes
     } else {
         let metadata = fs::metadata(input)
-            .map_err(|_| MailError::invalid_input("cannot read send request file"))?;
-        if !metadata.is_file() || metadata.len() > MAX_SEND_INPUT_BYTES {
+            .map_err(|_| MailError::invalid_input(format!("cannot read {label} file")))?;
+        if !metadata.is_file() || metadata.len() > max_bytes {
             return Err(MailError::new(
                 MailErrorCode::ResourceLimit,
-                "send request file exceeds the 600 KiB limit",
+                format!("{label} file exceeds the configured input limit"),
                 false,
             ));
         }
-        fs::read(input).map_err(|_| MailError::invalid_input("cannot read send request file"))?
+        fs::read(input)
+            .map_err(|_| MailError::invalid_input(format!("cannot read {label} file")))?
     };
-    if bytes.len() as u64 > MAX_SEND_INPUT_BYTES {
+    if bytes.len() as u64 > max_bytes {
         return Err(MailError::new(
             MailErrorCode::ResourceLimit,
-            "send request exceeds the 600 KiB limit",
+            format!("{label} exceeds the configured input limit"),
             false,
         ));
     }
-    let request: SendRequest = serde_json::from_slice(&bytes)
-        .map_err(|_| MailError::invalid_input("send request must be valid JSON"))?;
-    request.validate()?;
-    Ok(request)
+    serde_json::from_slice(&bytes)
+        .map_err(|_| MailError::invalid_input(format!("{label} must be valid JSON")))
 }
 
 fn runtime(cli: &Cli) -> Result<KirjeRuntime, MailError> {
@@ -949,12 +1176,12 @@ fn schema_report() -> SchemaReport {
                 "sync report or local coverage",
             ),
             command(
-                "attachment read",
-                "remote_read_only_bounded_untrusted",
-                "base64 attachment content",
+                "attachment import|read",
+                "local_import_or_remote_read_only_bounded_untrusted",
+                "attachment snapshot or base64 attachment content",
             ),
             command(
-                "send plan|show|list",
+                "send plan|from-draft|show|list",
                 "local_outbox",
                 "immutable plan or bounded summary",
             ),
@@ -967,6 +1194,21 @@ fn schema_report() -> SchemaReport {
                 "send apply <plan-id>",
                 "approved_remote_write_at_most_once",
                 "terminal send state",
+            ),
+            command(
+                "draft create|show|list|update|discard",
+                "private_local_draft",
+                "draft content and attachment summaries",
+            ),
+            command(
+                "operation plan|show|list|audit",
+                "governed_remote_operation",
+                "immutable operation state and audit trail",
+            ),
+            command(
+                "operation approve|apply",
+                "interactive_approval_or_approved_remote_write",
+                "remote operation certainty state",
             ),
             command("mcp serve", "governed_send_tools", "MCP stdio transport"),
         ],

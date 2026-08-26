@@ -5,9 +5,11 @@ use chrono::{DateTime, Utc};
 use io_imap::{
     client::{ImapClient as _, ImapClientError, ImapClientStd},
     rfc3501::{
-        examine::ImapMailboxExamineOptions, fetch::ImapMessageFetchOptions,
-        search::ImapMessageSearchOptions,
+        copy::ImapMessageCopyOptions, examine::ImapMailboxExamineOptions,
+        fetch::ImapMessageFetchOptions, search::ImapMessageSearchOptions,
+        select::ImapMailboxSelectOptions, store::ImapMessageStoreOptions,
     },
+    rfc6851::r#move::ImapMessageMoveOptions,
     session::ImapSessionOpenOptions,
     types::{
         body::BodyStructure,
@@ -25,9 +27,10 @@ use io_imap::{
 use io_sasl::{mechanism::Sasl, rfc4616::plain::SaslPlainCreds};
 use kirje_core::{
     AttachmentContent, AttachmentMetadata, AttachmentRead, ConnectionReport, MailAccountConfig,
-    MailAddress, MailError, MailErrorCode, Mailbox, MailboxReader, MailboxSyncBatch,
-    MailboxSyncRequest, MessageContent, MessageEnvelope, MessagePage, MessageRead,
-    MessageReference, MessageSearch, Protocol, TransportSecurity,
+    MailAddress, MailError, MailErrorCode, MailOperationKind, Mailbox, MailboxMutator,
+    MailboxOperationReceipt, MailboxOperationRequest, MailboxReader, MailboxSpecialUse,
+    MailboxSyncBatch, MailboxSyncRequest, MessageContent, MessageEnvelope, MessagePage,
+    MessageRead, MessageReference, MessageSearch, Protocol, RemoteAttemptError, TransportSecurity,
 };
 use mail_parser::{Addr, Address, MessageParser, MimeHeaders};
 use pimalaya_stream::tls::{Rustls, Tls};
@@ -330,6 +333,165 @@ impl MailboxReader for PimalayaImapReader {
         ensure_account_scope(account, &read.reference.account_id)?;
         let raw = fetch_raw_message(account, secret, &read.reference)?;
         parse_attachment(read, &raw)
+    }
+
+    fn special_mailbox(
+        &self,
+        account: &MailAccountConfig,
+        secret: &SecretString,
+        use_kind: MailboxSpecialUse,
+    ) -> Result<Option<String>, MailError> {
+        account.validate()?;
+        let (mut client, _) = connect(account, secret)?;
+        let reference: ImapMailbox<'static> = ""
+            .try_into()
+            .map_err(|_| protocol_error("invalid IMAP list reference"))?;
+        let pattern: ListMailbox<'static> = "*"
+            .try_into()
+            .map_err(|_| protocol_error("invalid IMAP list pattern"))?;
+        let rows = client
+            .list(reference, pattern)
+            .map_err(|error| classify_error(&error))?;
+        let wanted = match use_kind {
+            MailboxSpecialUse::Archive => "\\archive",
+            MailboxSpecialUse::Trash => "\\trash",
+        };
+        let matches: Vec<String> = rows
+            .into_iter()
+            .filter(|(_, _, attributes)| {
+                attributes
+                    .iter()
+                    .any(|attribute| attribute.to_string().eq_ignore_ascii_case(wanted))
+            })
+            .map(|(mailbox, _, _)| mailbox_name(mailbox))
+            .collect();
+        match matches.as_slice() {
+            [] => Ok(None),
+            [mailbox] => Ok(Some(mailbox.clone())),
+            _ => Err(MailError::invalid_input(
+                "server declared multiple mailboxes for the requested special use",
+            )),
+        }
+    }
+}
+
+impl MailboxMutator for PimalayaImapReader {
+    #[allow(clippy::too_many_lines)]
+    fn apply(
+        &self,
+        account: &MailAccountConfig,
+        secret: &SecretString,
+        operation_id: &str,
+        operation: &MailboxOperationRequest,
+    ) -> Result<MailboxOperationReceipt, RemoteAttemptError> {
+        operation
+            .validate()
+            .map_err(RemoteAttemptError::before_mutation)?;
+        account
+            .validate()
+            .map_err(RemoteAttemptError::before_mutation)?;
+        ensure_account_scope(account, &operation.account_id)
+            .map_err(RemoteAttemptError::before_mutation)?;
+        let (mut client, capabilities) =
+            connect(account, secret).map_err(RemoteAttemptError::before_mutation)?;
+        let mailbox = parse_mailbox(&operation.reference.mailbox)
+            .map_err(RemoteAttemptError::before_mutation)?;
+        let selected = client
+            .select(mailbox, ImapMailboxSelectOptions::default())
+            .map_err(|error| RemoteAttemptError::before_mutation(classify_error(&error)))?;
+        ensure_uid_validity(
+            operation.reference.uid_validity,
+            selected.uid_validity.map(NonZeroU32::get),
+        )
+        .map_err(RemoteAttemptError::before_mutation)?;
+        let uid = NonZeroU32::new(operation.reference.uid).ok_or_else(|| {
+            RemoteAttemptError::before_mutation(MailError::invalid_input(
+                "message UID must be positive",
+            ))
+        })?;
+        let sequence_set = SequenceSet::try_from(vec![uid]).map_err(|_| {
+            RemoteAttemptError::before_mutation(MailError::invalid_input("invalid message UID"))
+        })?;
+
+        let destination = operation.destination.clone();
+        let changed = match operation.kind {
+            MailOperationKind::SetRead | MailOperationKind::SetStarred => {
+                let flag = if operation.kind == MailOperationKind::SetRead {
+                    ImapFlag::Seen
+                } else {
+                    ImapFlag::Flagged
+                };
+                let kind = if operation.value == Some(true) {
+                    io_imap::types::flag::StoreType::Add
+                } else {
+                    io_imap::types::flag::StoreType::Remove
+                };
+                client
+                    .store(
+                        sequence_set,
+                        kind,
+                        vec![flag],
+                        ImapMessageStoreOptions { uid: true },
+                    )
+                    .map_err(|error| RemoteAttemptError::after_mutation(classify_error(&error)))?;
+                true
+            }
+            MailOperationKind::Move | MailOperationKind::Archive | MailOperationKind::Delete => {
+                let destination = destination.clone().ok_or_else(|| {
+                    RemoteAttemptError::before_mutation(MailError::invalid_input(
+                        "remote mailbox operation requires a resolved destination",
+                    ))
+                })?;
+                if destination == operation.reference.mailbox {
+                    false
+                } else if capabilities.contains(&Capability::Move) {
+                    client
+                        .r#move(
+                            sequence_set.clone(),
+                            parse_mailbox(&destination)
+                                .map_err(RemoteAttemptError::before_mutation)?,
+                            ImapMessageMoveOptions { uid: true },
+                        )
+                        .map_err(|error| {
+                            RemoteAttemptError::after_mutation(classify_error(&error))
+                        })?;
+                    true
+                } else {
+                    client
+                        .copy(
+                            sequence_set.clone(),
+                            parse_mailbox(&destination)
+                                .map_err(RemoteAttemptError::before_mutation)?,
+                            ImapMessageCopyOptions { uid: true },
+                        )
+                        .map_err(|error| {
+                            RemoteAttemptError::after_mutation(classify_error(&error))
+                        })?;
+                    client
+                        .store(
+                            sequence_set,
+                            io_imap::types::flag::StoreType::Add,
+                            vec![ImapFlag::Deleted],
+                            ImapMessageStoreOptions { uid: true },
+                        )
+                        .map_err(|error| {
+                            RemoteAttemptError::after_mutation(classify_error(&error))
+                        })?;
+                    true
+                }
+            }
+        };
+
+        Ok(MailboxOperationReceipt {
+            operation_id: operation_id.to_owned(),
+            kind: operation.kind,
+            account_id: operation.account_id.clone(),
+            reference: operation.reference.clone(),
+            destination,
+            changed,
+            applied_at: Utc::now(),
+            untrusted: true,
+        })
     }
 }
 
@@ -807,15 +969,21 @@ fn parse_message(
     let mut from = message.from().map(parser_addresses).unwrap_or_default();
     let mut to = message.to().map(parser_addresses).unwrap_or_default();
     let mut cc = message.cc().map(parser_addresses).unwrap_or_default();
-    let address_truncated =
-        bound_addresses(&mut from) | bound_addresses(&mut to) | bound_addresses(&mut cc);
+    let mut reply_to = message.reply_to().map(parser_addresses).unwrap_or_default();
+    let (message_id, message_id_truncated) = truncate(message.message_id(), MAX_HEADER_CHARS);
+    let address_truncated = bound_addresses(&mut from)
+        | bound_addresses(&mut to)
+        | bound_addresses(&mut cc)
+        | bound_addresses(&mut reply_to);
 
     Ok(MessageContent {
         reference: reference.clone(),
+        message_id,
         subject: subject.unwrap_or_default(),
         from,
         to,
         cc,
+        reply_to,
         sent_at: message
             .date()
             .and_then(|date| DateTime::from_timestamp(date.to_timestamp(), 0)),
@@ -823,7 +991,8 @@ fn parse_message(
         sanitized_html,
         attachments,
         untrusted: true,
-        truncated: text_truncated
+        truncated: message_id_truncated
+            || text_truncated
             || html_truncated
             || attachment_truncated
             || subject_truncated
@@ -990,7 +1159,13 @@ mod tests {
     use io_imap::{
         codec::fragmentizer::Fragmentizer,
         coroutine::{ImapCoroutine, ImapCoroutineState, ImapYield},
-        rfc3501::{fetch::ImapMessageFetch, search::ImapMessageSearch},
+        rfc3501::{
+            copy::{ImapMessageCopy, ImapMessageCopyOptions},
+            fetch::ImapMessageFetch,
+            search::ImapMessageSearch,
+            store::ImapMessageStore,
+        },
+        rfc6851::r#move::{ImapMessageMove, ImapMessageMoveOptions},
         types::sequence::SeqOrUid,
     };
     use kirje_core::{CredentialKind, Endpoint};
@@ -1183,6 +1358,49 @@ mod tests {
             partial.map(|(_, length)| length.get()),
             Some(u32::try_from(MAX_RAW_MESSAGE_BYTES + 1).expect("bound fits u32"))
         );
+    }
+
+    fn first_wire<C: ImapCoroutine<Yield = ImapYield>>(mut coroutine: C) -> String {
+        let mut fragmentizer = Fragmentizer::new(1024);
+        match coroutine.resume(&mut fragmentizer, None) {
+            ImapCoroutineState::Yielded(ImapYield::WantsWrite(bytes)) => {
+                String::from_utf8(bytes).expect("ASCII IMAP command")
+            }
+            _ => panic!("expected an IMAP command"),
+        }
+    }
+
+    #[test]
+    fn mutation_commands_are_uid_scoped_and_fallback_has_no_expunge() {
+        let uid = NonZeroU32::new(42).expect("positive uid");
+        let sequence_set = SequenceSet::from(SeqOrUid::from(uid));
+        let store_wire = first_wire(ImapMessageStore::new(
+            sequence_set.clone(),
+            io_imap::types::flag::StoreType::Add,
+            vec![ImapFlag::Seen],
+            ImapMessageStoreOptions { uid: true },
+        ));
+        assert!(store_wire.contains("UID STORE 42"));
+        assert!(store_wire.contains("\\Seen"));
+
+        let destination = parse_mailbox("Archive").expect("mailbox");
+        let move_wire = first_wire(ImapMessageMove::new(
+            sequence_set.clone(),
+            destination,
+            ImapMessageMoveOptions { uid: true },
+        ));
+        assert!(move_wire.contains("UID MOVE 42"));
+        assert!(move_wire.contains("Archive"));
+
+        let destination = parse_mailbox("Trash").expect("mailbox");
+        let copy_wire = first_wire(ImapMessageCopy::new(
+            sequence_set,
+            destination,
+            ImapMessageCopyOptions { uid: true },
+        ));
+        assert!(copy_wire.contains("UID COPY 42"));
+        assert!(copy_wire.contains("Trash"));
+        assert!(!copy_wire.contains("EXPUNGE"));
     }
 
     #[test]

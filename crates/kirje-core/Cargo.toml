@@ -8,6 +8,7 @@ repository.workspace = true
 description = "Provider-neutral domain model for the Kirje agent email runtime"
 
 [dependencies]
+base64.workspace = true
 chrono.workspace = true
 schemars.workspace = true
 secrecy.workspace = true

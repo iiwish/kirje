@@ -300,3 +300,27 @@ fn send_plan_is_local_and_approval_rejects_piped_input() {
     let apply: serde_json::Value = serde_json::from_slice(&apply.stdout).expect("apply JSON");
     assert_eq!(apply["error"]["code"], "send_plan_state");
 }
+
+#[test]
+fn attachment_import_is_local_and_returns_a_bounded_summary() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let file = directory.path().join("note.txt");
+    std::fs::write(&file, "hello from a file").expect("attachment");
+    let output = Command::cargo_bin("kirje")
+        .expect("kirje binary")
+        .args([
+            "attachment",
+            "import",
+            file.to_str().expect("file"),
+            "--mime-type",
+            "text/plain",
+        ])
+        .output()
+        .expect("import");
+    assert!(output.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).expect("import JSON");
+    assert_eq!(json["data"]["attachment"]["filename"], "note.txt");
+    assert_eq!(json["data"]["summary"]["size"], 17);
+    assert_eq!(json["data"]["summary"]["text_preview"], "hello from a file");
+    assert_eq!(json["data"]["untrusted"], true);
+}

@@ -7,18 +7,20 @@ email accounts. The project targets IMAP, SMTP, and JMAP across consumer,
 enterprise, and self-hosted providers without routing mailbox data through a
 Kirje cloud service.
 
-> Status: governed send MVP. Kirje can read and index mail without remote
-> mutation, create immutable local send plans, require human TTY approval, and
-> apply an approved plan through encrypted SMTP at most once.
+> Status: v0.3 Agent Mail Operations. Kirje provides bounded IMAP reads, private
+> local drafts, multipart SMTP sending, and governed IMAP mailbox operations
+> through one auditable local operation ledger.
 
 ## Why Kirje
 
 - One local binary for CLI and MCP clients.
 - JSON-first, versioned output designed for deterministic automation.
-- Read-only mailbox access plus separately governed SMTP sending.
+- Bounded IMAP mailbox access plus separately governed SMTP and IMAP writes.
 - Explicit incremental sync into a private local SQLite metadata index.
-- A private transactional outbox with immutable plans and explicit ambiguous
-  delivery states.
+- Private local drafts with reply, reply-all, and forward composition.
+- Local attachment import and bounded content summaries; multipart SMTP bodies.
+- A unified transactional operation ledger with immutable plans, migration,
+  audit events, crash recovery, and explicit ambiguous states.
 - Credential-free offline envelope search and sync coverage inspection.
 - A source-backed JSON provider registry for NetEase 163/126/Yeah, QQ/Foxmail,
   139, 189, Sina, Aliyun, Fastmail, and iCloud.
@@ -42,6 +44,11 @@ cargo build --release
 ./target/release/kirje send plan --input ./send-request.json --pretty
 ./target/release/kirje send approve <plan-id> --pretty
 ./target/release/kirje send apply <plan-id> --pretty
+./target/release/kirje draft create --input ./draft.json --pretty
+./target/release/kirje send from-draft <draft-id> --pretty
+./target/release/kirje operation plan --input ./mail-operation.json --pretty
+./target/release/kirje operation approve <operation-id> --pretty
+./target/release/kirje operation apply <operation-id> --pretty
 ./target/release/kirje schema --pretty
 ```
 
@@ -72,9 +79,9 @@ Example client configuration:
 }
 ```
 
-The MCP server exposes thirteen task-level tools. Mailbox inspection remains
-read-only; `mailbox_sync` writes the local index and governed send adds three
-tools. MCP deliberately has no approval tool:
+The MCP server exposes 24 task-level tools. It can create private drafts,
+prepare and apply governed operations, and inspect the ledger. MCP deliberately
+has no approval tool; approval is an interactive CLI-only boundary:
 
 - `account_discover`: discover provider endpoints without credentials.
 - `account_status`: inspect one configured account and credential presence.
@@ -86,8 +93,15 @@ tools. MCP deliberately has no approval tool:
 - `message_search_local`: search indexed envelope metadata offline.
 - `attachment_read`: retrieve one bounded attachment as untrusted base64.
 - `message_send_plan`: persist an immutable local plan without credentials.
+- `message_send_plan_draft`: plan a send from a private local draft.
 - `message_send_status`: inspect plan state and delivery certainty.
 - `message_send_apply`: apply a separately human-approved plan at most once.
+- `draft_create`, `draft_status`, `draft_update`, `draft_list`, `draft_discard`:
+  manage bounded local draft snapshots.
+- `mail_operation_plan`, `mail_operation_status`, `mail_operation_list`:
+  prepare or inspect governed IMAP flag, move, archive, and safe-delete work.
+- `mail_operation_apply`: apply an operation after CLI approval.
+- `mail_operation_audit`: inspect bounded operation audit events.
 - `system_status`: inspect the runtime contract and safety mode.
 
 ## For Agents
@@ -108,7 +122,8 @@ The core product invariants are:
 
 1. CLI, MCP, and future SDKs share one application contract.
 2. Read operations and write operations have separate permission boundaries.
-3. Sending, deletion, movement, and credential changes use plan/approve/apply.
+3. Sending, deletion, movement, flag changes, and credential changes use
+   plan/approve/apply. MCP has no approval entrypoint.
 4. Email bodies, headers, links, and attachments are untrusted data.
 5. Unknown providers remain unknown; Kirje does not guess unsafe endpoints.
 6. Local operation never requires a Kirje account or Kirje-hosted relay.
@@ -119,29 +134,38 @@ testing is documented in [docs/conformance.md](docs/conformance.md).
 Registry ownership and source policy are documented in
 [docs/provider-presets.md](docs/provider-presets.md).
 
-## Local Index
+## Local Index And Ledger
 
 Kirje stores envelope metadata only. It does not persist message bodies,
 attachments, credentials, or raw MIME. The first sync imports the newest
 bounded window; later runs request UIDs above the stored cursor. Use `sync run
 --refresh` to rebuild that window after flags or deletions change. Full archive
-backfill and background `IDLE` watching are outside the current scope.
+backfill and background `IDLE` watching are outside the current scope. The
+private `outbox.sqlite3` database contains the unified operation ledger. Schema
+version 2 migrates legacy send rows transactionally and records operation
+events. Stale `applying` operations become `ambiguous`; Kirje never retries
+them automatically.
 
 ## Governed Send
 
-The private outbox binds approval to the account, all recipients, subject,
-bodies, content hash, Message-ID, and 24-hour expiry. `send approve` displays
-the immutable request and requires the exact plan id in a human terminal. SMTP
-is invoked only after an atomic `approved -> applying` claim. A lost or unclear
-SMTP result becomes `ambiguous` and Kirje will not retry it automatically.
+The private ledger binds approval to the account, operation kind, scoped message
+reference, payload digest, and 24-hour expiry. `send approve` and `operation
+approve` display the immutable request and require the exact id in a human
+terminal. Remote work is invoked only after an atomic `approved -> applying`
+claim. A lost or unclear result becomes `ambiguous` and Kirje will not retry it
+automatically.
+
+Archive and safe delete use a server-declared `\\Archive` or `\\Trash` mailbox,
+or an explicit destination supplied by the caller. Safe delete never issues
+`EXPUNGE`; the default is a reversible move to Trash.
 
 ## Roadmap
 
-- Draft workflows, replies, attachments, and operator reconciliation for
-  ambiguous sends.
 - Historical backfill, thread reconstruction, reconciliation, and event watching.
-- JMAP discovery and mail operations.
+- JMAP discovery and JMAP mailbox operations.
 - Provider conformance fixtures and real-mailbox compatibility reports.
+- Permanent deletion, bulk mailbox workflows, and automatic ambiguous-state
+  reconciliation.
 
 The archived desktop predecessor is preserved at
 [iiwish/kirje-desktop-archive](https://github.com/iiwish/kirje-desktop-archive).
@@ -153,8 +177,8 @@ selectively rather than copying the desktop architecture.
 ```bash
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --all-features
-cargo build --workspace --all-features
+cargo test --workspace --all-features --locked
+cargo build --workspace --all-features --locked
 cargo deny check
 ```
 

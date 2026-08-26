@@ -10,15 +10,19 @@ use std::{
 use chrono::Utc;
 use directories::ProjectDirs;
 use kirje_core::{
-    AttachmentContent, AttachmentRead, ConnectionReport, LocalMessageSearch, MailAccountConfig,
-    MailError, MailErrorCode, MailSender, MailboxPage, MailboxReader, MailboxSyncReport,
-    MailboxSyncRequest, MailboxSyncState, MessageContent, MessageIndex, MessagePage, MessageRead,
-    MessageSearch, Outbox, SendAttemptError, SendPlan, SendPlanSummary, SendReceipt, SendRequest,
-    SyncCursor,
+    AttachmentContent, AttachmentRead, ConnectionReport, Draft, DraftInput, DraftSummary,
+    LocalMessageSearch, MAX_OPERATION_LIMIT, MailAccountConfig, MailError, MailErrorCode,
+    MailOperationKind, MailSender, MailboxMutator, MailboxOperationRequest, MailboxPage,
+    MailboxReader, MailboxSpecialUse, MailboxSyncReport, MailboxSyncRequest, MailboxSyncState,
+    MessageContent, MessageIndex, MessagePage, MessageRead, MessageSearch, OperationEvent,
+    OperationLedger, OperationRecord, OperationSummary, Outbox, RemoteAttemptError,
+    SendAttemptError, SendPlan, SendPlanSummary, SendReceipt, SendRequest, SyncCursor, digest_json,
+    operation_record,
 };
 use schemars::JsonSchema;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 const CONFIG_VERSION: u16 = 1;
 const KEYRING_SERVICE: &str = "dev.kirje.mail";
@@ -317,6 +321,7 @@ pub struct KirjeRuntime {
     accounts: Arc<dyn AccountRepository>,
     secrets: Arc<dyn SecretStore>,
     reader: Arc<dyn MailboxReader>,
+    mutator: Arc<dyn MailboxMutator>,
     index: Arc<dyn MessageIndex>,
     outbox: Arc<dyn Outbox>,
     sender: Arc<dyn MailSender>,
@@ -363,9 +368,10 @@ impl KirjeRuntime {
         let index_path = resolve_index_path(custom_config.then_some(path.as_path()), index_path)?;
         let outbox_path =
             resolve_outbox_path(custom_config.then_some(path.as_path()), outbox_path)?;
-        Ok(Self::with_services(
+        Ok(Self::with_services_and_mutator(
             Arc::new(TomlAccountRepository::new(path)),
             Arc::new(KeyringSecretStore),
+            Arc::new(kirje_protocol::PimalayaImapReader),
             Arc::new(kirje_protocol::PimalayaImapReader),
             Arc::new(kirje_store::SqliteMessageIndex::open(index_path)?),
             Arc::new(kirje_store::SqliteOutbox::open(outbox_path)?),
@@ -412,6 +418,28 @@ impl KirjeRuntime {
             accounts,
             secrets,
             reader,
+            mutator: Arc::new(UnavailableMutator),
+            index,
+            outbox,
+            sender,
+        }
+    }
+
+    #[must_use]
+    pub fn with_services_and_mutator(
+        accounts: Arc<dyn AccountRepository>,
+        secrets: Arc<dyn SecretStore>,
+        reader: Arc<dyn MailboxReader>,
+        mutator: Arc<dyn MailboxMutator>,
+        index: Arc<dyn MessageIndex>,
+        outbox: Arc<dyn Outbox>,
+        sender: Arc<dyn MailSender>,
+    ) -> Self {
+        Self {
+            accounts,
+            secrets,
+            reader,
+            mutator,
             index,
             outbox,
             sender,
@@ -601,6 +629,274 @@ impl KirjeRuntime {
         self.reader.read_attachment(&account, &secret, read)
     }
 
+    /// Compose and persist one private local draft. The source snapshot, if
+    /// present, is stored with the draft and never fetched implicitly.
+    ///
+    /// # Errors
+    ///
+    /// Returns account, validation, or local-ledger errors.
+    pub fn create_draft(&self, input: DraftInput) -> Result<Draft, MailError> {
+        let account = self.account(&input.account_id)?;
+        let draft = Draft::create(input, &account.email, Utc::now())?;
+        self.outbox.create_draft(&draft)
+    }
+
+    /// Return one draft, including its immutable attachment summaries.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable not-found or local-ledger error.
+    pub fn draft(&self, draft_id: &str) -> Result<Draft, MailError> {
+        self.outbox.get_draft(draft_id)?.ok_or_else(|| {
+            MailError::new(
+                MailErrorCode::SendPlanNotFound,
+                "draft was not found",
+                false,
+            )
+        })
+    }
+
+    /// List private drafts for one configured account.
+    ///
+    /// # Errors
+    ///
+    /// Returns account, validation, or local-ledger errors.
+    pub fn list_drafts(
+        &self,
+        account_id: &str,
+        limit: u16,
+    ) -> Result<Vec<DraftSummary>, MailError> {
+        let _account = self.account(account_id)?;
+        self.outbox
+            .list_drafts(account_id, limit)
+            .map(|drafts| drafts.iter().map(Draft::summary).collect())
+    }
+
+    /// Replace a draft while preserving its local identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns account, validation, state, or local-ledger errors.
+    pub fn update_draft(&self, draft_id: &str, input: DraftInput) -> Result<Draft, MailError> {
+        let account = self.account(&input.account_id)?;
+        let existing = self.draft(draft_id)?;
+        if existing.account_id != input.account_id {
+            return Err(MailError::invalid_input(
+                "draft account does not match the configured account",
+            ));
+        }
+        let updated = existing.update(input, &account.email, Utc::now())?;
+        self.outbox.update_draft(&updated)
+    }
+
+    /// Mark a draft discarded without deleting its audit record.
+    ///
+    /// # Errors
+    ///
+    /// Returns not-found, state, or local-ledger errors.
+    pub fn discard_draft(&self, draft_id: &str) -> Result<Draft, MailError> {
+        let _draft = self.draft(draft_id)?;
+        self.outbox.discard_draft(draft_id, Utc::now())
+    }
+
+    /// Create an immutable send plan from an active private draft.
+    ///
+    /// # Errors
+    ///
+    /// Returns draft, account, validation, SMTP configuration, or local-ledger
+    /// errors.
+    pub fn plan_send_from_draft(&self, draft_id: &str) -> Result<SendPlan, MailError> {
+        let draft = self.draft(draft_id)?;
+        if draft.status != kirje_core::DraftStatus::Draft {
+            return Err(MailError::new(
+                MailErrorCode::SendPlanState,
+                "discarded draft cannot become a send plan",
+                false,
+            ));
+        }
+        self.plan_send(draft.request)
+    }
+
+    /// Plan one exact governed IMAP mutation. Archive and safe-delete resolve
+    /// only server-declared special-use mailboxes; no conventional names are guessed.
+    ///
+    /// # Errors
+    ///
+    /// Returns account, validation, special-use resolution, or local-ledger
+    /// errors. Explicit destinations do not require credentials until apply.
+    pub fn plan_mail_operation(
+        &self,
+        mut request: MailboxOperationRequest,
+    ) -> Result<OperationRecord, MailError> {
+        request.validate()?;
+        if request.destination.is_none()
+            && matches!(
+                request.kind,
+                MailOperationKind::Archive | MailOperationKind::Delete
+            )
+        {
+            let account = self.account(&request.account_id)?;
+            let secret = self.secrets.get(&request.account_id)?;
+            let special_use = match request.kind {
+                MailOperationKind::Archive => MailboxSpecialUse::Archive,
+                MailOperationKind::Delete => MailboxSpecialUse::Trash,
+                _ => unreachable!(),
+            };
+            request.destination = Some(
+                self.reader
+                    .special_mailbox(&account, &secret, special_use)?
+                    .ok_or_else(|| MailError::invalid_input("server did not declare the requested special-use mailbox; provide --destination"))?,
+            );
+        }
+        request.validate()?;
+        let (payload_json, payload_sha256) = digest_json(&request)?;
+        let mut record = operation_record(
+            Uuid::new_v4().to_string(),
+            mail_operation_kind_name(request.kind),
+            request.account_id.clone(),
+            payload_json,
+            payload_sha256,
+            Utc::now(),
+        );
+        record.message_id = Some(format!(
+            "{}:{}",
+            request.reference.mailbox, request.reference.uid
+        ));
+        self.outbox.create_operation(&record)
+    }
+
+    /// Read one governed IMAP operation and reconcile stale applying state.
+    ///
+    /// # Errors
+    ///
+    /// Returns validation, local-ledger, or not-found errors.
+    pub fn mail_operation(&self, operation_id: &str) -> Result<OperationRecord, MailError> {
+        self.outbox
+            .get_operation(operation_id, Utc::now())?
+            .ok_or_else(|| {
+                MailError::new(
+                    MailErrorCode::SendPlanNotFound,
+                    "operation was not found",
+                    false,
+                )
+            })
+    }
+
+    /// List bounded operation records for audit and operational inspection.
+    ///
+    /// # Errors
+    ///
+    /// Returns account, validation, or local-ledger errors.
+    pub fn list_operations(
+        &self,
+        account_id: Option<&str>,
+        kind: Option<&str>,
+        limit: u16,
+    ) -> Result<Vec<OperationSummary>, MailError> {
+        if limit == 0 || limit > MAX_OPERATION_LIMIT {
+            return Err(MailError::invalid_input(format!(
+                "limit must be between 1 and {MAX_OPERATION_LIMIT}"
+            )));
+        }
+        if let Some(account_id) = account_id {
+            let _account = self.account(account_id)?;
+        }
+        self.outbox
+            .list_operations(account_id, kind, limit, Utc::now())
+            .map(|operations| operations.iter().map(OperationRecord::summary).collect())
+    }
+
+    /// Record interactive human approval for a send or IMAP operation.
+    ///
+    /// # Errors
+    ///
+    /// Returns validation, expiry, state, or local-ledger errors.
+    pub fn approve_operation(&self, operation_id: &str) -> Result<OperationRecord, MailError> {
+        self.outbox.approve_operation(operation_id, Utc::now())
+    }
+
+    /// Apply one approved governed IMAP operation at most once.
+    ///
+    /// # Errors
+    ///
+    /// Returns validation, credential, remote-operation, state, or local-ledger
+    /// errors.
+    pub fn apply_mail_operation(&self, operation_id: &str) -> Result<OperationRecord, MailError> {
+        let pending = self.mail_operation(operation_id)?;
+        if pending.kind == "send" || pending.kind == "draft" {
+            return Err(MailError::new(
+                MailErrorCode::SendPlanState,
+                "operation is not an IMAP mailbox mutation",
+                false,
+            ));
+        }
+        let claimed = self.outbox.claim_operation(operation_id, Utc::now())?;
+        let operation: MailboxOperationRequest = match serde_json::from_str(&claimed.payload_json) {
+            Ok(operation) => operation,
+            Err(_) => {
+                return self.outbox.fail_operation(
+                    operation_id,
+                    MailError::new(
+                        MailErrorCode::StoreRead,
+                        "stored operation payload is invalid",
+                        false,
+                    ),
+                    Utc::now(),
+                );
+            }
+        };
+        if claimed.kind != mail_operation_kind_name(operation.kind)
+            || claimed.account_id != operation.account_id
+        {
+            return self.outbox.fail_operation(
+                operation_id,
+                MailError::new(
+                    MailErrorCode::StoreRead,
+                    "stored operation payload does not match its ledger record",
+                    false,
+                ),
+                Utc::now(),
+            );
+        }
+        let (account, secret) = match self.credentials(&operation.account_id) {
+            Ok(credentials) => credentials,
+            Err(error) => return self.outbox.fail_operation(operation_id, error, Utc::now()),
+        };
+        match self
+            .mutator
+            .apply(&account, &secret, operation_id, &operation)
+        {
+            Ok(receipt) => {
+                let (receipt_json, _) = digest_json(&receipt)?;
+                self.outbox
+                    .succeed_operation(operation_id, receipt_json, Utc::now())
+            }
+            Err(RemoteAttemptError {
+                error,
+                mutation_started: true,
+            }) => self
+                .outbox
+                .ambiguous_operation(operation_id, error, Utc::now()),
+            Err(RemoteAttemptError {
+                error,
+                mutation_started: false,
+            }) => self.outbox.fail_operation(operation_id, error, Utc::now()),
+        }
+    }
+
+    /// Return the append-only audit trail for one operation.
+    ///
+    /// # Errors
+    ///
+    /// Returns validation or local-ledger errors.
+    pub fn operation_audit(
+        &self,
+        operation_id: &str,
+        limit: u16,
+    ) -> Result<Vec<OperationEvent>, MailError> {
+        self.outbox.audit(operation_id, limit)
+    }
+
     /// Validate and persist a credential-free immutable send plan.
     ///
     /// # Errors
@@ -713,6 +1009,16 @@ impl KirjeRuntime {
     }
 }
 
+fn mail_operation_kind_name(kind: MailOperationKind) -> &'static str {
+    match kind {
+        MailOperationKind::SetRead => "set_read",
+        MailOperationKind::SetStarred => "set_starred",
+        MailOperationKind::Move => "move",
+        MailOperationKind::Archive => "archive",
+        MailOperationKind::Delete => "delete",
+    }
+}
+
 /// Resolve an explicit, config-colocated, or platform-native index path.
 ///
 /// # Errors
@@ -769,9 +1075,122 @@ pub fn resolve_outbox_path(
         })
 }
 
+struct UnavailableMutator;
+
+impl MailboxMutator for UnavailableMutator {
+    fn apply(
+        &self,
+        _account: &MailAccountConfig,
+        _secret: &SecretString,
+        _operation_id: &str,
+        _operation: &kirje_core::MailboxOperationRequest,
+    ) -> Result<kirje_core::MailboxOperationReceipt, RemoteAttemptError> {
+        Err(RemoteAttemptError::before_mutation(MailError::new(
+            MailErrorCode::Network,
+            "IMAP mutation service is not configured",
+            false,
+        )))
+    }
+}
+
 struct UnavailableMessageIndex;
 
 struct UnavailableOutbox;
+
+impl OperationLedger for UnavailableOutbox {
+    fn create_operation(&self, _operation: &OperationRecord) -> Result<OperationRecord, MailError> {
+        Err(outbox_unavailable())
+    }
+
+    fn get_operation(
+        &self,
+        _operation_id: &str,
+        _now: chrono::DateTime<Utc>,
+    ) -> Result<Option<OperationRecord>, MailError> {
+        Err(outbox_unavailable())
+    }
+
+    fn list_operations(
+        &self,
+        _account_id: Option<&str>,
+        _kind: Option<&str>,
+        _limit: u16,
+        _now: chrono::DateTime<Utc>,
+    ) -> Result<Vec<OperationRecord>, MailError> {
+        Err(outbox_unavailable())
+    }
+
+    fn approve_operation(
+        &self,
+        _operation_id: &str,
+        _now: chrono::DateTime<Utc>,
+    ) -> Result<OperationRecord, MailError> {
+        Err(outbox_unavailable())
+    }
+
+    fn claim_operation(
+        &self,
+        _operation_id: &str,
+        _now: chrono::DateTime<Utc>,
+    ) -> Result<OperationRecord, MailError> {
+        Err(outbox_unavailable())
+    }
+
+    fn succeed_operation(
+        &self,
+        _operation_id: &str,
+        _receipt_json: String,
+        _now: chrono::DateTime<Utc>,
+    ) -> Result<OperationRecord, MailError> {
+        Err(outbox_unavailable())
+    }
+
+    fn fail_operation(
+        &self,
+        _operation_id: &str,
+        _error: MailError,
+        _now: chrono::DateTime<Utc>,
+    ) -> Result<OperationRecord, MailError> {
+        Err(outbox_unavailable())
+    }
+
+    fn ambiguous_operation(
+        &self,
+        _operation_id: &str,
+        _error: MailError,
+        _now: chrono::DateTime<Utc>,
+    ) -> Result<OperationRecord, MailError> {
+        Err(outbox_unavailable())
+    }
+
+    fn audit(&self, _operation_id: &str, _limit: u16) -> Result<Vec<OperationEvent>, MailError> {
+        Err(outbox_unavailable())
+    }
+
+    fn create_draft(&self, _draft: &Draft) -> Result<Draft, MailError> {
+        Err(outbox_unavailable())
+    }
+
+    fn get_draft(&self, _draft_id: &str) -> Result<Option<Draft>, MailError> {
+        Err(outbox_unavailable())
+    }
+
+    fn list_drafts(&self, _account_id: &str, _limit: u16) -> Result<Vec<Draft>, MailError> {
+        Err(outbox_unavailable())
+    }
+
+    fn update_draft(&self, _draft: &Draft) -> Result<Draft, MailError> {
+        Err(outbox_unavailable())
+    }
+
+    fn discard_draft(
+        &self,
+        _draft_id: &str,
+        _now: chrono::DateTime<Utc>,
+    ) -> Result<Draft, MailError> {
+        Err(outbox_unavailable())
+    }
+}
 
 impl Outbox for UnavailableOutbox {
     fn create(&self, _plan: &SendPlan) -> Result<SendPlan, MailError> {
@@ -898,9 +1317,10 @@ mod tests {
 
     use chrono::{TimeZone as _, Utc};
     use kirje_core::{
-        CredentialKind, Endpoint, MailAddress, MailSender, Mailbox, MailboxSyncBatch,
-        MessageEnvelope, MessageReference, Protocol, SendAttemptError, SendPlan, SendPlanStatus,
-        SendReceipt, SendRequest, TransportSecurity,
+        CredentialKind, Endpoint, MailAddress, MailOperationKind, MailSender, Mailbox,
+        MailboxMutator, MailboxOperationReceipt, MailboxOperationRequest, MailboxSyncBatch,
+        MessageEnvelope, MessageReference, Protocol, RemoteAttemptError, SendAttemptError,
+        SendPlan, SendPlanStatus, SendReceipt, SendRequest, TransportSecurity,
     };
 
     use super::*;
@@ -1129,6 +1549,33 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct RecordingMutator {
+        calls: AtomicUsize,
+    }
+
+    impl MailboxMutator for RecordingMutator {
+        fn apply(
+            &self,
+            _account: &MailAccountConfig,
+            _secret: &SecretString,
+            operation_id: &str,
+            operation: &MailboxOperationRequest,
+        ) -> Result<MailboxOperationReceipt, RemoteAttemptError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(MailboxOperationReceipt {
+                operation_id: operation_id.to_owned(),
+                kind: operation.kind,
+                account_id: operation.account_id.clone(),
+                reference: operation.reference.clone(),
+                destination: operation.destination.clone(),
+                changed: true,
+                applied_at: Utc::now(),
+                untrusted: true,
+            })
+        }
+    }
+
     fn send_request() -> SendRequest {
         SendRequest {
             account_id: "work".to_owned(),
@@ -1141,6 +1588,7 @@ mod tests {
             subject: "Runtime send".to_owned(),
             text: Some("body".to_owned()),
             html: None,
+            attachments: Vec::new(),
         }
     }
 
@@ -1166,6 +1614,32 @@ mod tests {
                     .expect("outbox"),
             ),
             sender,
+        )
+    }
+
+    fn mailbox_runtime(
+        directory: &tempfile::TempDir,
+        secrets: Arc<MemorySecrets>,
+        mutator: Arc<RecordingMutator>,
+    ) -> KirjeRuntime {
+        let accounts = Arc::new(TomlAccountRepository::new(
+            directory.path().join("accounts.toml"),
+        ));
+        accounts.upsert(account()).expect("account");
+        KirjeRuntime::with_services_and_mutator(
+            accounts,
+            secrets,
+            Arc::new(NoopReader),
+            mutator,
+            Arc::new(
+                kirje_store::SqliteMessageIndex::open(directory.path().join("index.sqlite3"))
+                    .expect("index"),
+            ),
+            Arc::new(
+                kirje_store::SqliteOutbox::open(directory.path().join("outbox.sqlite3"))
+                    .expect("outbox"),
+            ),
+            Arc::new(RecordingSender::default()),
         )
     }
 
@@ -1214,6 +1688,88 @@ mod tests {
             runtime.apply_send(&planned.id).unwrap_err().code,
             MailErrorCode::SendPlanState
         );
+    }
+
+    #[test]
+    fn drafts_and_mail_operations_use_the_shared_runtime_services() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let secrets = Arc::new(MemorySecrets::default());
+        secrets
+            .set("work", &SecretString::from("secret"))
+            .expect("secret");
+        let mutator = Arc::new(RecordingMutator::default());
+        let runtime = mailbox_runtime(&directory, secrets, mutator.clone());
+
+        let draft = runtime
+            .create_draft(kirje_core::DraftInput {
+                account_id: "work".to_owned(),
+                mode: kirje_core::DraftMode::New,
+                source: None,
+                to: vec![MailAddress {
+                    name: None,
+                    email: "recipient@example.com".to_owned(),
+                }],
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: Some("Local draft".to_owned()),
+                text: Some("body".to_owned()),
+                html: None,
+                attachments: Vec::new(),
+            })
+            .expect("draft");
+        assert_eq!(runtime.list_drafts("work", 10).expect("list").len(), 1);
+        runtime.discard_draft(&draft.id).expect("discard");
+
+        let operation = runtime
+            .plan_mail_operation(MailboxOperationRequest {
+                account_id: "work".to_owned(),
+                kind: MailOperationKind::Move,
+                reference: MessageReference {
+                    account_id: "work".to_owned(),
+                    mailbox: "INBOX".to_owned(),
+                    uid_validity: Some(7),
+                    uid: 42,
+                },
+                value: None,
+                destination: Some("Archive".to_owned()),
+            })
+            .expect("operation");
+        runtime.approve_operation(&operation.id).expect("approve");
+        let applied = runtime.apply_mail_operation(&operation.id).expect("apply");
+        assert_eq!(applied.status, kirje_core::OperationStatus::Succeeded);
+        assert_eq!(mutator.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            runtime
+                .apply_mail_operation(&operation.id)
+                .unwrap_err()
+                .code,
+            MailErrorCode::SendPlanState
+        );
+    }
+
+    #[test]
+    fn explicit_mail_operation_planning_does_not_need_a_credential() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let runtime = mailbox_runtime(
+            &directory,
+            Arc::new(MemorySecrets::default()),
+            Arc::new(RecordingMutator::default()),
+        );
+        let operation = runtime
+            .plan_mail_operation(MailboxOperationRequest {
+                account_id: "work".to_owned(),
+                kind: MailOperationKind::SetStarred,
+                reference: MessageReference {
+                    account_id: "work".to_owned(),
+                    mailbox: "INBOX".to_owned(),
+                    uid_validity: Some(7),
+                    uid: 42,
+                },
+                value: Some(true),
+                destination: None,
+            })
+            .expect("local plan");
+        assert_eq!(operation.status, kirje_core::OperationStatus::Planned);
     }
 
     #[test]
