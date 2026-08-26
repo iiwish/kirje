@@ -15,4 +15,10 @@ controlled live mailbox check is blocked in this environment because no
 dedicated account or OS-stored credential is configured. No secret fallback or
 remote mutation was attempted.
 
-Commit, PR, CI, and merge references are recorded after remote delivery.
+Delivery references:
+
+- Feature commit: `069a09e`
+- CI/manual-validation commit: `0835ded`
+- Pull request: `https://github.com/iiwish/kirje/pull/5`
+- CI run: `https://github.com/iiwish/kirje/actions/runs/33024740375` (green)
+- Merge: pending final review and merge command.
