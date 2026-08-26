@@ -1,0 +1,15 @@
+[package]
+name = "kirje-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Provider-neutral domain model for the Kirje agent email runtime"
+
+[dependencies]
+schemars.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,9 @@
+Kirje
+Copyright 2026 Kirje contributors
+
+The project is a new agent-first implementation informed by the archived Kirje
+desktop application at https://github.com/iiwish/kirje-desktop-archive.
+
+The archived desktop application began as a fork of Velo by Avihay Menahem.
+Any code later migrated from that application must retain applicable
+Apache-2.0 attribution and copyright notices.

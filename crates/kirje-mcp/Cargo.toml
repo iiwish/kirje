@@ -1,0 +1,19 @@
+[package]
+name = "kirje-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Typed MCP interface for the Kirje agent email runtime"
+
+[dependencies]
+anyhow.workspace = true
+kirje-core.workspace = true
+rmcp.workspace = true
+schemars.workspace = true
+serde.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true
