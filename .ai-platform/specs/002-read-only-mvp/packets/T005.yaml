@@ -1,0 +1,22 @@
+task_id: T005
+status: in_review
+objective: Complete documentation, supply-chain checks, smoke tooling, and release verification.
+dependencies: [T002, T003, T004]
+allowed_files:
+  - README.md
+  - NOTICE
+  - deny.toml
+  - .github/**
+  - docs/**
+  - scripts/**
+  - skills/**
+  - .ai-platform/**
+validation:
+  - cargo fmt --all --check
+  - cargo clippy --workspace --all-targets --all-features -- -D warnings
+  - cargo test --workspace --all-features --locked
+  - cargo build --workspace --all-features --locked
+  - cargo deny check
+evidence: .ai-platform/evidence/T005/summary.md
+stop_conditions:
+  - Any local quality gate or GitHub CI check fails.

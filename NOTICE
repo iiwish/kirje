@@ -7,3 +7,7 @@ desktop application at https://github.com/iiwish/kirje-desktop-archive.
 The archived desktop application began as a fork of Velo by Avihay Menahem.
 Any code later migrated from that application must retain applicable
 Apache-2.0 attribution and copyright notices.
+
+The protocol adapter is informed by and contains adapted portions of the
+Pimalaya Himalaya project by Clement Douin and contributors, licensed under
+MIT OR Apache-2.0: https://github.com/pimalaya/himalaya.
