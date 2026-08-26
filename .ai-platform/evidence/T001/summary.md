@@ -28,5 +28,7 @@ Verified locally on 2026-08-26 with Rust 1.95.0:
   idempotent.
 - `doctor` and `system_status` report `exposed_write_tools: false`.
 
-GitHub Actions verification is tracked separately in the feature requirements
-checklist because it can only complete after the initial push.
+GitHub Actions run
+[`32927350693`](https://github.com/iiwish/kirje/actions/runs/32927350693)
+passed formatting, Clippy, tests, and the locked workspace build for the initial
+public commit.

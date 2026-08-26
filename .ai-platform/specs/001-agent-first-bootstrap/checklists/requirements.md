@@ -9,4 +9,4 @@
 - [x] Agent documentation forbids unsupported commands.
 - [x] Security documentation treats mailbox content as untrusted.
 - [x] Archived desktop lineage and attribution are preserved.
-- [ ] GitHub CI has passed on the initial public commit.
+- [x] GitHub CI has passed on the initial public commit.
