@@ -22,6 +22,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 cargo build --workspace --all-features
+cargo deny check
 cargo run -p kirje-cli -- doctor --pretty
 cargo run -p kirje-cli -- account discover agent@163.com --pretty
 cargo run -p kirje-cli -- schema --pretty
@@ -31,13 +32,14 @@ cargo run -p kirje-cli -- mcp serve
 ## Architecture
 
 - `crates/kirje-core`: provider-neutral types and application contracts.
+- `crates/kirje-protocol`: Pimalaya-backed protocol adapters.
+- `crates/kirje-runtime`: account, credential, and mailbox application services.
 - `crates/kirje-cli`: the `kirje` binary and JSON command envelope.
 - `crates/kirje-mcp`: typed MCP tools using the core contract.
 - `skills/kirje`: the distributable Agent Skill.
 - `docs`: human and agent operational documentation.
 - `.ai-platform`: canonical product and delivery contracts.
 
-Protocol crates may be added only after their domain boundary is explicit.
 Provider quirks belong in capability or adapter code, never in generic command
 handlers.
 

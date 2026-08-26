@@ -1,9 +1,19 @@
-use std::process::ExitCode;
+use std::{
+    io::{self, IsTerminal as _},
+    path::PathBuf,
+    process::ExitCode,
+};
 
-use anyhow::Context;
-use clap::{Parser, Subcommand};
-use kirje_core::{CONTRACT_VERSION, discover_account};
+use anyhow::Context as _;
+use clap::{Parser, Subcommand, ValueEnum};
+use kirje_core::{
+    CONTRACT_VERSION, CredentialKind, Endpoint, MailAccountConfig, MailError, MailErrorCode,
+    MessageRead, MessageReference, MessageSearch, Protocol, TransportSecurity, discover_account,
+};
+use kirje_runtime::{AccountRepository, KeyringSecretStore, KirjeRuntime, TomlAccountRepository};
+use secrecy::SecretString;
 use serde::Serialize;
+use serde_json::Value;
 
 #[derive(Parser)]
 #[command(
@@ -16,6 +26,10 @@ struct Cli {
     #[arg(long, global = true)]
     pretty: bool,
 
+    /// Override the platform-native account configuration path.
+    #[arg(long, global = true, env = "KIRJE_CONFIG")]
+    config: Option<PathBuf>,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -26,10 +40,25 @@ enum Command {
     Schema,
     /// Inspect local runtime readiness without accessing a mailbox.
     Doctor,
-    /// Discover and manage email accounts.
+    /// Discover, configure, and inspect email accounts.
     Account {
         #[command(subcommand)]
         command: AccountCommand,
+    },
+    /// Manage credentials through the OS credential store.
+    Secret {
+        #[command(subcommand)]
+        command: SecretCommand,
+    },
+    /// Inspect remote mailboxes without modifying them.
+    Mailbox {
+        #[command(subcommand)]
+        command: MailboxCommand,
+    },
+    /// Search and read messages without modifying them.
+    Message {
+        #[command(subcommand)]
+        command: MessageCommand,
     },
     /// Run protocol adapters for agent harnesses.
     Mcp {
@@ -42,6 +71,82 @@ enum Command {
 enum AccountCommand {
     /// Discover safe provider settings without accepting credentials.
     Discover { email: String },
+    /// Save a non-secret IMAP account configuration.
+    Add {
+        id: String,
+        email: String,
+        #[arg(long)]
+        username: Option<String>,
+        #[arg(long)]
+        imap_host: Option<String>,
+        #[arg(long)]
+        imap_port: Option<u16>,
+        #[arg(long)]
+        security: Option<SecurityArg>,
+        #[arg(long)]
+        credential_kind: Option<CredentialArg>,
+    },
+    /// List configured accounts without credentials.
+    List,
+    /// Inspect one account and credential presence.
+    Status { account_id: String },
+    /// Verify TLS, IMAP negotiation, and authentication.
+    Check { account_id: String },
+}
+
+#[derive(Subcommand)]
+enum SecretCommand {
+    /// Prompt for and store a credential. Interactive terminal input is required.
+    Set { account_id: String },
+    /// Delete a stored credential after interactive account-bound confirmation.
+    Delete { account_id: String },
+}
+
+#[derive(Subcommand)]
+enum MailboxCommand {
+    /// List selectable mailboxes for an account.
+    List {
+        #[arg(long)]
+        account: String,
+        #[arg(long)]
+        counts: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum MessageCommand {
+    /// Search bounded message metadata using structured fields.
+    Search {
+        #[arg(long)]
+        account: String,
+        #[arg(long)]
+        mailbox: String,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long)]
+        subject: Option<String>,
+        #[arg(long)]
+        text: Option<String>,
+        #[arg(long)]
+        unread: Option<bool>,
+        #[arg(long, default_value_t = kirje_core::DEFAULT_MESSAGE_LIMIT)]
+        limit: u16,
+    },
+    /// Read one scoped message using IMAP BODY.PEEK.
+    Read {
+        #[arg(long)]
+        account: String,
+        #[arg(long)]
+        mailbox: String,
+        #[arg(long)]
+        uid: u32,
+        #[arg(long)]
+        uid_validity: Option<u32>,
+        #[arg(long, default_value_t = kirje_core::DEFAULT_BODY_CHARS)]
+        max_body_chars: u32,
+    },
 }
 
 #[derive(Subcommand)]
@@ -50,11 +155,44 @@ enum McpCommand {
     Serve,
 }
 
+#[derive(Clone, Copy, ValueEnum)]
+enum SecurityArg {
+    ImplicitTls,
+    StartTls,
+}
+
+impl From<SecurityArg> for TransportSecurity {
+    fn from(value: SecurityArg) -> Self {
+        match value {
+            SecurityArg::ImplicitTls => Self::ImplicitTls,
+            SecurityArg::StartTls => Self::StartTls,
+        }
+    }
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum CredentialArg {
+    AppPassword,
+    Password,
+}
+
+impl From<CredentialArg> for CredentialKind {
+    fn from(value: CredentialArg) -> Self {
+        match value {
+            CredentialArg::AppPassword => Self::AppPassword,
+            CredentialArg::Password => Self::Password,
+        }
+    }
+}
+
 #[derive(Serialize)]
-struct Envelope<T> {
+struct Envelope {
     contract_version: &'static str,
     ok: bool,
-    data: T,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<MailError>,
     warnings: Vec<String>,
 }
 
@@ -65,6 +203,11 @@ struct DoctorReport {
     interfaces: [&'static str; 2],
     default_mode: &'static str,
     exposed_write_tools: bool,
+    config_path: String,
+    config_exists: bool,
+    configured_accounts: usize,
+    credential_store: &'static str,
+    credential_store_available: bool,
 }
 
 #[derive(Serialize)]
@@ -90,55 +233,301 @@ struct ExitCodeContract {
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    match run(Cli::parse()).await {
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(error)
+            if matches!(
+                error.kind(),
+                clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
+            ) =>
+        {
+            let _ = error.print();
+            return ExitCode::SUCCESS;
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            let pretty = std::env::args().any(|argument| argument == "--pretty");
+            let _ = print_error(
+                MailError::invalid_input("invalid command arguments; inspect `kirje schema`"),
+                pretty,
+            );
+            return ExitCode::from(2);
+        }
+    };
+    let pretty = cli.pretty;
+    match run(cli).await {
         Ok(code) => code,
         Err(error) => {
             eprintln!("kirje: {error:#}");
+            let _ = print_error(
+                MailError::new(
+                    MailErrorCode::Internal,
+                    "Kirje could not complete the local operation",
+                    false,
+                ),
+                pretty,
+            );
             ExitCode::FAILURE
         }
     }
 }
 
 async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
-    match cli.command {
-        Command::Schema => {
-            print_json(
-                &Envelope {
-                    contract_version: CONTRACT_VERSION,
-                    ok: true,
-                    data: schema_report(),
-                    warnings: Vec::new(),
-                },
-                cli.pretty,
-            )?;
-            Ok(ExitCode::SUCCESS)
-        }
-        Command::Doctor => {
-            print_json(
-                &Envelope {
-                    contract_version: CONTRACT_VERSION,
-                    ok: true,
-                    data: doctor_report(),
-                    warnings: vec![
-                        "Mailbox connections are not part of the bootstrap release yet.".to_owned(),
-                    ],
-                },
-                cli.pretty,
-            )?;
-            Ok(ExitCode::SUCCESS)
-        }
-        Command::Account {
-            command: AccountCommand::Discover { email },
-        } => handle_discovery(&email, cli.pretty),
+    if matches!(
+        cli.command,
         Command::Mcp {
-            command: McpCommand::Serve,
-        } => {
-            kirje_mcp::serve_stdio()
-                .await
-                .context("MCP stdio server stopped unexpectedly")?;
+            command: McpCommand::Serve
+        }
+    ) {
+        kirje_mcp::serve_stdio(cli.config)
+            .await
+            .context("MCP stdio server stopped unexpectedly")?;
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    let result = execute_local(&cli);
+    match result {
+        Ok(value) => {
+            print_success(value, cli.pretty)?;
             Ok(ExitCode::SUCCESS)
+        }
+        Err(error) => {
+            let exit = if error.code == MailErrorCode::InvalidInput {
+                ExitCode::from(2)
+            } else {
+                ExitCode::FAILURE
+            };
+            print_error(error, cli.pretty)?;
+            Ok(exit)
         }
     }
+}
+
+fn execute_local(cli: &Cli) -> Result<Value, MailError> {
+    match &cli.command {
+        Command::Schema => json_value(schema_report()),
+        Command::Doctor => json_value(doctor_report(cli.config.clone())?),
+        Command::Account { command } => handle_account(cli, command),
+        Command::Secret { command } => handle_secret(cli, command),
+        Command::Mailbox { command } => handle_mailbox(cli, command),
+        Command::Message { command } => handle_message(cli, command),
+        Command::Mcp { .. } => unreachable!("MCP command handled before local dispatch"),
+    }
+}
+
+fn handle_account(cli: &Cli, command: &AccountCommand) -> Result<Value, MailError> {
+    match command {
+        AccountCommand::Discover { email } => {
+            let result = discover_account(email);
+            if !result.valid {
+                return Err(MailError::invalid_input("email address is malformed"));
+            }
+            json_value(result)
+        }
+        AccountCommand::Add {
+            id,
+            email,
+            username,
+            imap_host,
+            imap_port,
+            security,
+            credential_kind,
+        } => {
+            let account = build_account(
+                id,
+                email,
+                username.as_deref(),
+                imap_host.as_deref(),
+                *imap_port,
+                *security,
+                *credential_kind,
+            )?;
+            json_value(runtime(cli)?.upsert_account(account)?)
+        }
+        AccountCommand::List => json_value(runtime(cli)?.list_accounts()?),
+        AccountCommand::Status { account_id } => {
+            json_value(runtime(cli)?.account_status(account_id)?)
+        }
+        AccountCommand::Check { account_id } => {
+            json_value(runtime(cli)?.check_account(account_id)?)
+        }
+    }
+}
+
+fn handle_secret(cli: &Cli, command: &SecretCommand) -> Result<Value, MailError> {
+    match command {
+        SecretCommand::Set { account_id } => {
+            require_interactive_secret_terminal()?;
+            let secret = rpassword::prompt_password("Credential: ").map_err(|_| {
+                MailError::new(
+                    MailErrorCode::SecretStoreUnavailable,
+                    "cannot read credential from the terminal",
+                    false,
+                )
+            })?;
+            runtime(cli)?.set_secret(account_id, &SecretString::from(secret))?;
+            json_value(serde_json::json!({
+                "account_id": account_id,
+                "stored": true
+            }))
+        }
+        SecretCommand::Delete { account_id } => {
+            require_interactive_secret_terminal()?;
+            let confirmation = rpassword::prompt_password(format!(
+                "Type account id '{account_id}' to delete its credential: "
+            ))
+            .map_err(|_| {
+                MailError::new(
+                    MailErrorCode::SecretStoreUnavailable,
+                    "cannot read confirmation from the terminal",
+                    false,
+                )
+            })?;
+            if confirmation != *account_id {
+                return Err(MailError::invalid_input(
+                    "credential deletion confirmation did not match the account id",
+                ));
+            }
+            runtime(cli)?.delete_secret(account_id)?;
+            json_value(serde_json::json!({
+                "account_id": account_id,
+                "stored": false
+            }))
+        }
+    }
+}
+
+fn handle_mailbox(cli: &Cli, command: &MailboxCommand) -> Result<Value, MailError> {
+    match command {
+        MailboxCommand::List { account, counts } => {
+            json_value(runtime(cli)?.list_mailboxes(account, *counts)?)
+        }
+    }
+}
+
+fn handle_message(cli: &Cli, command: &MessageCommand) -> Result<Value, MailError> {
+    match command {
+        MessageCommand::Search {
+            account,
+            mailbox,
+            from,
+            to,
+            subject,
+            text,
+            unread,
+            limit,
+        } => json_value(runtime(cli)?.search_messages(&MessageSearch {
+            account_id: account.clone(),
+            mailbox: mailbox.clone(),
+            from: from.clone(),
+            to: to.clone(),
+            subject: subject.clone(),
+            text: text.clone(),
+            unread: *unread,
+            limit: *limit,
+        })?),
+        MessageCommand::Read {
+            account,
+            mailbox,
+            uid,
+            uid_validity,
+            max_body_chars,
+        } => json_value(runtime(cli)?.read_message(&MessageRead {
+            reference: MessageReference {
+                account_id: account.clone(),
+                mailbox: mailbox.clone(),
+                uid_validity: *uid_validity,
+                uid: *uid,
+            },
+            max_body_chars: *max_body_chars,
+        })?),
+    }
+}
+
+fn runtime(cli: &Cli) -> Result<KirjeRuntime, MailError> {
+    KirjeRuntime::local(cli.config.clone())
+}
+
+fn require_interactive_secret_terminal() -> Result<(), MailError> {
+    if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
+        return Err(MailError::invalid_input(
+            "secret operations require an interactive terminal; credentials are never accepted as arguments or piped stdin",
+        ));
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_account(
+    id: &str,
+    email: &str,
+    username: Option<&str>,
+    imap_host: Option<&str>,
+    imap_port: Option<u16>,
+    security: Option<SecurityArg>,
+    credential_kind: Option<CredentialArg>,
+) -> Result<MailAccountConfig, MailError> {
+    let discovery = discover_account(email);
+    if !discovery.valid {
+        return Err(MailError::invalid_input("email address is malformed"));
+    }
+    let discovered_endpoint = discovery.incoming.first();
+    let host = imap_host
+        .map(str::to_owned)
+        .or_else(|| discovered_endpoint.map(|endpoint| endpoint.host.clone()))
+        .ok_or_else(|| {
+            MailError::invalid_input("unknown providers require an explicit --imap-host")
+        })?;
+    let port = imap_port
+        .or_else(|| discovered_endpoint.map(|endpoint| endpoint.port))
+        .ok_or_else(|| {
+            MailError::invalid_input("unknown providers require an explicit --imap-port")
+        })?;
+    let transport = security
+        .map(TransportSecurity::from)
+        .or_else(|| discovered_endpoint.map(|endpoint| endpoint.security))
+        .ok_or_else(|| MailError::invalid_input("unknown providers require explicit --security"))?;
+    let credential = credential_kind
+        .map(CredentialKind::from)
+        .or(discovery.credential_kind)
+        .ok_or_else(|| {
+            MailError::invalid_input("unknown providers require explicit --credential-kind")
+        })?;
+
+    let account = MailAccountConfig {
+        id: id.to_owned(),
+        email: email.trim().to_ascii_lowercase(),
+        username: username.unwrap_or(email).to_owned(),
+        incoming: Endpoint {
+            protocol: Protocol::Imap,
+            host,
+            port,
+            security: transport,
+        },
+        credential_kind: credential,
+    };
+    account.validate()?;
+    Ok(account)
+}
+
+fn doctor_report(config: Option<PathBuf>) -> Result<DoctorReport, MailError> {
+    let path = match config {
+        Some(path) => path,
+        None => TomlAccountRepository::default_path()?,
+    };
+    let configured_accounts = TomlAccountRepository::new(path.clone()).list()?.len();
+    Ok(DoctorReport {
+        name: "kirje",
+        version: env!("CARGO_PKG_VERSION"),
+        interfaces: ["cli", "mcp_stdio"],
+        default_mode: "read_only",
+        exposed_write_tools: false,
+        config_exists: path.exists(),
+        config_path: path.display().to_string(),
+        configured_accounts,
+        credential_store: "os_native",
+        credential_store_available: KeyringSecretStore::available(),
+    })
 }
 
 fn schema_report() -> SchemaReport {
@@ -146,26 +535,30 @@ fn schema_report() -> SchemaReport {
         name: "kirje",
         version: env!("CARGO_PKG_VERSION"),
         commands: vec![
-            CommandContract {
-                name: "schema",
-                safety: "read_only",
-                output: "command contract",
-            },
-            CommandContract {
-                name: "doctor",
-                safety: "read_only",
-                output: "runtime readiness",
-            },
-            CommandContract {
-                name: "account discover <email>",
-                safety: "read_only_no_credentials",
-                output: "provider discovery",
-            },
-            CommandContract {
-                name: "mcp serve",
-                safety: "read_only_tools_only",
-                output: "MCP stdio transport",
-            },
+            command("schema", "read_only", "command contract"),
+            command("doctor", "local_read_only", "runtime readiness"),
+            command(
+                "account discover <email>",
+                "read_only_no_credentials",
+                "provider discovery",
+            ),
+            command(
+                "account add|list|status|check",
+                "local_config_or_remote_read_only",
+                "account state",
+            ),
+            command(
+                "secret set|delete <account-id>",
+                "interactive_local_secret_write",
+                "credential presence only",
+            ),
+            command("mailbox list", "remote_read_only", "mailbox metadata"),
+            command(
+                "message search|read",
+                "remote_read_only_bounded_untrusted",
+                "message metadata or sanitized content",
+            ),
+            command("mcp serve", "read_only_tools_only", "MCP stdio transport"),
         ],
         stable_exit_codes: vec![
             ExitCodeContract {
@@ -184,33 +577,52 @@ fn schema_report() -> SchemaReport {
     }
 }
 
-fn doctor_report() -> DoctorReport {
-    DoctorReport {
-        name: "kirje",
-        version: env!("CARGO_PKG_VERSION"),
-        interfaces: ["cli", "mcp_stdio"],
-        default_mode: "read_only",
-        exposed_write_tools: false,
+const fn command(
+    name: &'static str,
+    safety: &'static str,
+    output: &'static str,
+) -> CommandContract {
+    CommandContract {
+        name,
+        safety,
+        output,
     }
 }
 
-fn handle_discovery(email: &str, pretty: bool) -> anyhow::Result<ExitCode> {
-    let result = discover_account(email);
-    let exit_code = if result.valid {
-        ExitCode::SUCCESS
-    } else {
-        ExitCode::from(2)
-    };
+fn json_value(value: impl Serialize) -> Result<Value, MailError> {
+    serde_json::to_value(value).map_err(|_| {
+        MailError::new(
+            MailErrorCode::Internal,
+            "cannot serialize command result",
+            false,
+        )
+    })
+}
+
+fn print_success(value: Value, pretty: bool) -> anyhow::Result<()> {
     print_json(
         &Envelope {
             contract_version: CONTRACT_VERSION,
-            ok: result.valid,
-            data: result,
+            ok: true,
+            data: Some(value),
+            error: None,
             warnings: Vec::new(),
         },
         pretty,
-    )?;
-    Ok(exit_code)
+    )
+}
+
+fn print_error(error: MailError, pretty: bool) -> anyhow::Result<()> {
+    print_json(
+        &Envelope {
+            contract_version: CONTRACT_VERSION,
+            ok: false,
+            data: None,
+            error: Some(error),
+            warnings: Vec::new(),
+        },
+        pretty,
+    )
 }
 
 fn print_json(value: &impl Serialize, pretty: bool) -> anyhow::Result<()> {
@@ -229,16 +641,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn envelopes_carry_the_contract_version() {
-        let json = serde_json::to_value(Envelope {
-            contract_version: CONTRACT_VERSION,
-            ok: true,
-            data: "ready",
-            warnings: Vec::new(),
-        })
-        .expect("serialize envelope");
+    fn known_provider_builds_a_safe_account_without_a_secret() {
+        let account = build_account("personal", "Agent@163.com", None, None, None, None, None)
+            .expect("build account");
+        assert_eq!(account.incoming.host, "imap.163.com");
+        assert_eq!(account.email, "agent@163.com");
+        let serialized = serde_json::to_string(&account).expect("serialize account");
+        assert!(!serialized.contains("password\":"));
+    }
 
-        assert_eq!(json["contract_version"], CONTRACT_VERSION);
-        assert_eq!(json["ok"], true);
+    #[test]
+    fn unknown_provider_requires_explicit_transport_configuration() {
+        let error =
+            build_account("work", "agent@example.org", None, None, None, None, None).unwrap_err();
+        assert_eq!(error.code, MailErrorCode::InvalidInput);
+    }
+
+    #[test]
+    fn schema_contains_no_remote_write_commands() {
+        let schema = schema_report();
+        assert!(!schema.commands.iter().any(|entry| {
+            entry.name.contains("message send")
+                || entry.name.contains("message delete")
+                || entry.name.contains("message move")
+                || entry.safety.contains("remote_write")
+        }));
     }
 }

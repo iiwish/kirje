@@ -1,0 +1,16 @@
+task_id: T004
+status: complete
+objective: Expose the shared read-only runtime through versioned JSON CLI commands and typed MCP tools.
+dependencies: [T002, T003]
+allowed_files:
+  - crates/kirje-cli/**
+  - crates/kirje-mcp/**
+  - docs/**
+  - skills/kirje/**
+validation:
+  - cargo test -p kirje-cli -p kirje-mcp --all-features
+  - npx -y @modelcontextprotocol/inspector --cli ./target/debug/kirje mcp serve --method tools/list --format json
+evidence: .ai-platform/evidence/T004/summary.md
+stop_conditions:
+  - MCP stdout contains non-protocol output.
+  - A mailbox write or credential-management MCP tool is exposed.

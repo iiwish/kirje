@@ -3,6 +3,10 @@
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 
+mod mail;
+
+pub use mail::*;
+
 pub const CONTRACT_VERSION: &str = "2026-08-26";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -25,6 +29,7 @@ pub enum TransportSecurity {
 #[serde(rename_all = "snake_case")]
 pub enum CredentialKind {
     AppPassword,
+    #[serde(rename = "oauth2")]
     OAuth2,
     Password,
 }
@@ -73,10 +78,26 @@ struct Preset {
 const PRESETS: &[Preset] = &[
     Preset {
         id: "netease",
-        name: "NetEase Mail",
-        domains: &["163.com", "126.com", "yeah.net"],
+        name: "NetEase 163 Mail",
+        domains: &["163.com"],
         imap_host: "imap.163.com",
         smtp_host: "smtp.163.com",
+        credential_kind: CredentialKind::AppPassword,
+    },
+    Preset {
+        id: "netease",
+        name: "NetEase 126 Mail",
+        domains: &["126.com"],
+        imap_host: "imap.126.com",
+        smtp_host: "smtp.126.com",
+        credential_kind: CredentialKind::AppPassword,
+    },
+    Preset {
+        id: "netease",
+        name: "NetEase Yeah Mail",
+        domains: &["yeah.net"],
+        imap_host: "imap.yeah.net",
+        smtp_host: "smtp.yeah.net",
         credential_kind: CredentialKind::AppPassword,
     },
     Preset {
@@ -229,6 +250,18 @@ mod tests {
         assert_eq!(result.incoming[0].host, "imap.163.com");
         assert_eq!(result.outgoing[0].host, "smtp.163.com");
         assert_eq!(result.credential_kind, Some(CredentialKind::AppPassword));
+    }
+
+    #[test]
+    fn netease_domains_use_their_documented_hosts() {
+        for (address, expected_host) in [
+            ("agent@163.com", "imap.163.com"),
+            ("agent@126.com", "imap.126.com"),
+            ("agent@yeah.net", "imap.yeah.net"),
+        ] {
+            let result = discover_account(address);
+            assert_eq!(result.incoming[0].host, expected_host);
+        }
     }
 
     #[test]

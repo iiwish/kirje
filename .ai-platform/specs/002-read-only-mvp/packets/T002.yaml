@@ -1,0 +1,20 @@
+task_id: T002
+status: ready
+objective: Build the provider-neutral read contract and Pimalaya-backed IMAP adapter.
+allowed_files:
+  - Cargo.toml
+  - Cargo.lock
+  - NOTICE
+  - crates/kirje-core/**
+  - crates/kirje-protocol/**
+dependencies: []
+tdd:
+  - Add failing tests for bounds, scoped references, mailbox conversion, and BODY.PEEK semantics.
+  - Implement the smallest domain and adapter surface that passes them.
+validation:
+  - cargo test -p kirje-core -p kirje-protocol
+  - cargo clippy -p kirje-core -p kirje-protocol --all-targets --all-features -- -D warnings
+evidence: .ai-platform/evidence/T002/summary.md
+stop_conditions:
+  - A required Pimalaya API cannot express read-only fetches with TLS verification.
+  - The adapter would need to expose a credential in a public domain object.

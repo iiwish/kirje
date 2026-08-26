@@ -10,9 +10,11 @@ description = "Typed MCP interface for the Kirje agent email runtime"
 [dependencies]
 anyhow.workspace = true
 kirje-core.workspace = true
+kirje-runtime.workspace = true
 rmcp.workspace = true
 schemars.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
 
 [lints]

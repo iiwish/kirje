@@ -1,0 +1,15 @@
+task_id: T003
+status: complete
+objective: Implement local non-secret account storage, OS keyring credentials, and shared mailbox services.
+dependencies: [T002]
+allowed_files:
+  - Cargo.toml
+  - Cargo.lock
+  - crates/kirje-runtime/**
+validation:
+  - cargo test -p kirje-runtime --all-features
+  - cargo clippy -p kirje-runtime --all-targets --all-features -- -D warnings
+evidence: .ai-platform/evidence/T003/summary.md
+stop_conditions:
+  - A credential value would be serialized or accepted as a process argument.
+  - Account updates could not be made atomic on the local filesystem.

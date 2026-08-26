@@ -1,0 +1,24 @@
+[package]
+name = "kirje-protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Protocol adapters for the Kirje agent email runtime"
+
+[dependencies]
+anyhow.workspace = true
+ammonia.workspace = true
+chrono.workspace = true
+io-imap.workspace = true
+io-sasl.workspace = true
+kirje-core.workspace = true
+mail-parser.workspace = true
+pimalaya-stream.workspace = true
+rfc2047-decoder.workspace = true
+secrecy.workspace = true
+url.workspace = true
+
+[lints]
+workspace = true
