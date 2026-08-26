@@ -19,6 +19,8 @@ Delivery references:
 
 - Feature commit: `069a09e`
 - CI/manual-validation commit: `0835ded`
+- Evidence commit: `70bdcd1`
 - Pull request: `https://github.com/iiwish/kirje/pull/5`
 - CI run: `https://github.com/iiwish/kirje/actions/runs/33024740375` (green)
+- Final-head CI run: `https://github.com/iiwish/kirje/actions/runs/33024829162` (green)
 - Merge: pending final review and merge command.
