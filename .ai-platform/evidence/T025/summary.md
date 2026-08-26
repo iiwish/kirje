@@ -23,4 +23,5 @@ Delivery references:
 - Pull request: `https://github.com/iiwish/kirje/pull/5`
 - CI run: `https://github.com/iiwish/kirje/actions/runs/33024740375` (green)
 - Final-head CI run: `https://github.com/iiwish/kirje/actions/runs/33024829162` (green)
+- Latest branch CI run: `https://github.com/iiwish/kirje/actions/runs/33024924816` (green)
 - Merge: pending final review and merge command.
