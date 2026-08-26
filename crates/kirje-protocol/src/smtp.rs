@@ -7,7 +7,7 @@ use kirje_core::{
 };
 use lettre::{
     Address, Message, SmtpTransport, Transport,
-    message::{Mailbox, MultiPart, SinglePart},
+    message::{Attachment, Mailbox, MultiPart, SinglePart, header::ContentType},
     transport::smtp::{Error as SmtpError, authentication::Credentials},
 };
 use secrecy::{ExposeSecret as _, SecretString};
@@ -98,23 +98,48 @@ fn build_message(account: &MailAccountConfig, plan: &SendPlan) -> Result<Message
         builder = builder.bcc(mailbox(address)?);
     }
 
-    match (&plan.request.text, &plan.request.html) {
-        (Some(text), Some(html)) => builder
-            .multipart(MultiPart::alternative_plain_html(
-                text.clone(),
-                html.clone(),
-            ))
-            .map_err(|_| MailError::invalid_input("cannot construct MIME message")),
-        (Some(text), None) => builder
-            .body(text.clone())
-            .map_err(|_| MailError::invalid_input("cannot construct MIME message")),
-        (None, Some(html)) => builder
-            .singlepart(SinglePart::html(html.clone()))
-            .map_err(|_| MailError::invalid_input("cannot construct MIME message")),
-        (None, None) => Err(MailError::invalid_input(
-            "send request requires a non-empty text or HTML body",
-        )),
+    if plan.request.attachments.is_empty() {
+        return match (&plan.request.text, &plan.request.html) {
+            (Some(text), Some(html)) => builder
+                .multipart(MultiPart::alternative_plain_html(
+                    text.clone(),
+                    html.clone(),
+                ))
+                .map_err(|_| MailError::invalid_input("cannot construct MIME message")),
+            (Some(text), None) => builder
+                .body(text.clone())
+                .map_err(|_| MailError::invalid_input("cannot construct MIME message")),
+            (None, Some(html)) => builder
+                .singlepart(SinglePart::html(html.clone()))
+                .map_err(|_| MailError::invalid_input("cannot construct MIME message")),
+            (None, None) => Err(MailError::invalid_input(
+                "send request requires a non-empty text or HTML body",
+            )),
+        };
     }
+
+    let mut mixed = match (&plan.request.text, &plan.request.html) {
+        (Some(text), Some(html)) => MultiPart::mixed().multipart(
+            MultiPart::alternative_plain_html(text.clone(), html.clone()),
+        ),
+        (Some(text), None) => MultiPart::mixed().singlepart(SinglePart::plain(text.clone())),
+        (None, Some(html)) => MultiPart::mixed().singlepart(SinglePart::html(html.clone())),
+        (None, None) => {
+            return Err(MailError::invalid_input(
+                "send request requires a non-empty text or HTML body",
+            ));
+        }
+    };
+    for attachment in &plan.request.attachments {
+        let bytes = attachment.validate()?;
+        let content_type = ContentType::parse(&attachment.mime_type)
+            .map_err(|_| MailError::invalid_input("attachment MIME type is invalid"))?;
+        mixed = mixed
+            .singlepart(Attachment::new(attachment.filename.clone()).body(bytes, content_type));
+    }
+    builder
+        .multipart(mixed)
+        .map_err(|_| MailError::invalid_input("cannot construct MIME message"))
 }
 
 fn mailbox(address: &MailAddress) -> Result<Mailbox, MailError> {
@@ -176,7 +201,7 @@ fn sanitize_response(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use chrono::{TimeZone as _, Utc};
-    use kirje_core::{CredentialKind, Endpoint, MailAddress, SendRequest};
+    use kirje_core::{CredentialKind, Endpoint, MailAddress, SendAttachment, SendRequest};
 
     use super::*;
 
@@ -214,6 +239,7 @@ mod tests {
                 subject: "Kirje 世界".to_owned(),
                 text: Some("plain body".to_owned()),
                 html: Some("<p>HTML body</p>".to_owned()),
+                attachments: Vec::new(),
             },
             Utc.with_ymd_and_hms(2026, 8, 26, 12, 0, 0).unwrap(),
         )
@@ -237,5 +263,20 @@ mod tests {
         let response = sanitize_response(&format!("250 queued\r\n{}", "x".repeat(400)));
         assert!(response.chars().count() <= MAX_RESPONSE_CHARS);
         assert!(!response.contains('\n'));
+    }
+
+    #[test]
+    fn attachments_are_encoded_as_mixed_mime_parts() {
+        let (account, mut plan) = fixture();
+        plan.request.attachments.push(SendAttachment {
+            filename: "note.txt".to_owned(),
+            mime_type: "text/plain".to_owned(),
+            content_base64: "aGVsbG8=".to_owned(),
+        });
+        let message = build_message(&account, &plan).expect("message");
+        let formatted = String::from_utf8(message.formatted()).expect("UTF-8 MIME");
+        assert!(formatted.contains("multipart/mixed"));
+        assert!(formatted.contains("note.txt"));
+        assert!(formatted.contains("hello"));
     }
 }

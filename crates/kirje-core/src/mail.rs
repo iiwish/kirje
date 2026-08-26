@@ -6,7 +6,10 @@ use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{CredentialKind, Endpoint, Protocol, TransportSecurity};
+use crate::{
+    CredentialKind, Endpoint, MailboxOperationReceipt, MailboxOperationRequest, Protocol,
+    TransportSecurity,
+};
 
 pub const DEFAULT_MESSAGE_LIMIT: u16 = 25;
 pub const MAX_MESSAGE_LIMIT: u16 = 100;
@@ -146,6 +149,37 @@ pub struct Mailbox {
     pub name: String,
     pub total: Option<u64>,
     pub unread: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MailboxSpecialUse {
+    Archive,
+    Trash,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RemoteAttemptError {
+    pub error: MailError,
+    pub mutation_started: bool,
+}
+
+impl RemoteAttemptError {
+    #[must_use]
+    pub fn before_mutation(error: MailError) -> Self {
+        Self {
+            error,
+            mutation_started: false,
+        }
+    }
+
+    #[must_use]
+    pub fn after_mutation(error: MailError) -> Self {
+        Self {
+            error,
+            mutation_started: true,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -484,10 +518,14 @@ pub struct AttachmentContent {
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 pub struct MessageContent {
     pub reference: MessageReference,
+    #[serde(default)]
+    pub message_id: Option<String>,
     pub subject: String,
     pub from: Vec<MailAddress>,
     pub to: Vec<MailAddress>,
     pub cc: Vec<MailAddress>,
+    #[serde(default)]
+    pub reply_to: Vec<MailAddress>,
     pub sent_at: Option<DateTime<Utc>>,
     pub text: Option<String>,
     pub sanitized_html: Option<String>,
@@ -689,6 +727,38 @@ pub trait MailboxReader: Send + Sync {
         secret: &SecretString,
         read: &AttachmentRead,
     ) -> Result<AttachmentContent, MailError>;
+
+    /// Resolve one server-declared special-use mailbox without guessing names.
+    /// Implementations return `None` when the server did not declare the use.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable account, credential, network, or protocol error when
+    /// resolution cannot be completed.
+    fn special_mailbox(
+        &self,
+        _account: &MailAccountConfig,
+        _secret: &SecretString,
+        _use_kind: MailboxSpecialUse,
+    ) -> Result<Option<String>, MailError> {
+        Ok(None)
+    }
+}
+
+pub trait MailboxMutator: Send + Sync {
+    /// Apply one exact, already approved IMAP mutation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RemoteAttemptError`] with the mutation boundary explicitly
+    /// marked when the remote result is known or ambiguous.
+    fn apply(
+        &self,
+        account: &MailAccountConfig,
+        secret: &SecretString,
+        operation_id: &str,
+        operation: &MailboxOperationRequest,
+    ) -> Result<MailboxOperationReceipt, RemoteAttemptError>;
 }
 
 fn validate_scope(account_id: &str, mailbox: &str) -> Result<(), MailError> {

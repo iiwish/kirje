@@ -15,9 +15,14 @@ checks. Public CI never receives mailbox credentials.
   headers, addresses, attachment metadata, and attachment content are bounded.
 - MIME parsing, UTF-8 truncation, HTML sanitization, stale reference handling,
   JSON envelopes, MCP schemas, and stdout cleanliness are regression-tested.
+- Draft composition, reply-all self-removal, recipient de-duplication, forward
+  recipient requirements, local attachment bounds and summaries, and private
+  draft audit records are regression-tested.
 - Send request bounds, MIME generation, hidden Bcc headers, immutable plan
-  identity, outbox expiry, concurrent claim exclusion, terminal receipts, and
-  ambiguous outcomes are regression-tested.
+  identity, ledger migration, expiry, concurrent claim exclusion, terminal
+  receipts, and ambiguous outcomes are regression-tested.
+- Governed IMAP flag, move, archive, and safe-delete requests validate scoped
+  UID references, use capability-aware commands, and never issue `EXPUNGE`.
 
 ## Preset Evidence
 
@@ -65,3 +70,21 @@ same configured address:
 The script creates an isolated outbox and benign self-addressed plan, pauses for
 the human's exact interactive approval, applies it once, and searches INBOX for
 the unique subject. It emits only aggregate delivery state and match count.
+
+For a governed IMAP mutation check, use a dedicated mailbox and a message whose
+initial state is known. The script toggles the star flag on one exact scoped
+message and toggles it back, leaving the mailbox in its starting state:
+
+```bash
+KIRJE_ALLOW_REMOTE_MUTATION=1 \
+KIRJE_LIVE_MAILBOX=INBOX \
+KIRJE_LIVE_UID=<known-uid> \
+KIRJE_LIVE_UID_VALIDITY=<known-uidvalidity> \
+./scripts/live-operations-smoke.sh <account-id>
+```
+
+The operation script requires an interactive human terminal for both approvals,
+uses an isolated ledger, prints no mailbox content, and does not test delete or
+expunge. Record only provider, capability summary, Kirje commit, date, and the
+aggregate JSON result. A missing keychain credential, unknown UIDVALIDITY, or
+uncertain remote result is a hard stop; do not retry an ambiguous operation.

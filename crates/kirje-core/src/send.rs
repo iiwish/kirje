@@ -1,3 +1,4 @@
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use chrono::{DateTime, Duration, Utc};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -11,6 +12,11 @@ use crate::{MailAccountConfig, MailAddress, MailError, MailErrorCode};
 pub const MAX_SEND_RECIPIENTS: usize = 50;
 pub const MAX_SEND_SUBJECT_CHARS: usize = 998;
 pub const MAX_SEND_BODY_CHARS: usize = 262_144;
+pub const MAX_ATTACHMENTS: usize = 25;
+pub const MAX_SEND_ATTACHMENT_BYTES: usize = 1024 * 1024;
+pub const MAX_TOTAL_ATTACHMENT_BYTES: usize = 8 * 1024 * 1024;
+pub const MAX_ATTACHMENT_FILENAME_CHARS: usize = 255;
+pub const MAX_ATTACHMENT_MIME_CHARS: usize = 127;
 pub const SEND_PLAN_TTL_HOURS: i64 = 24;
 pub const DEFAULT_SEND_PLAN_LIMIT: u16 = 25;
 pub const MAX_SEND_PLAN_LIMIT: u16 = 100;
@@ -26,6 +32,95 @@ pub struct SendRequest {
     pub subject: String,
     pub text: Option<String>,
     pub html: Option<String>,
+    #[serde(default)]
+    pub attachments: Vec<SendAttachment>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct SendAttachment {
+    pub filename: String,
+    pub mime_type: String,
+    pub content_base64: String,
+}
+
+impl SendAttachment {
+    /// Validate a bounded base64 attachment snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable validation or resource-limit error when metadata or
+    /// decoded content is unsafe or too large.
+    pub fn validate(&self) -> Result<Vec<u8>, MailError> {
+        if self.filename.is_empty()
+            || self.filename.chars().count() > MAX_ATTACHMENT_FILENAME_CHARS
+            || self.filename.chars().any(char::is_control)
+            || self.filename.contains(['/', '\\'])
+            || self.mime_type.is_empty()
+            || self.mime_type.chars().count() > MAX_ATTACHMENT_MIME_CHARS
+            || self.mime_type.chars().any(char::is_control)
+            || !valid_mime_type(&self.mime_type)
+        {
+            return Err(MailError::invalid_input("attachment metadata is malformed"));
+        }
+        let max_encoded_bytes = 4 * MAX_SEND_ATTACHMENT_BYTES.div_ceil(3);
+        if self.content_base64.len() > max_encoded_bytes {
+            return Err(MailError::new(
+                MailErrorCode::ResourceLimit,
+                format!("each attachment cannot exceed {MAX_SEND_ATTACHMENT_BYTES} bytes"),
+                false,
+            ));
+        }
+        let bytes = BASE64_STANDARD.decode(&self.content_base64).map_err(|_| {
+            MailError::invalid_input("attachment content_base64 must be valid base64")
+        })?;
+        if bytes.len() > MAX_SEND_ATTACHMENT_BYTES {
+            return Err(MailError::new(
+                MailErrorCode::ResourceLimit,
+                format!("each attachment cannot exceed {MAX_SEND_ATTACHMENT_BYTES} bytes"),
+                false,
+            ));
+        }
+        Ok(bytes)
+    }
+
+    /// Produce a deterministic, bounded summary without invoking a model.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same validation or resource-limit error as [`Self::validate`].
+    pub fn summary(&self) -> Result<crate::AttachmentSummary, MailError> {
+        let bytes = self.validate()?;
+        let text_preview = std::str::from_utf8(&bytes).ok().map(|text| {
+            text.chars()
+                .take(crate::MAX_SUMMARY_CHARS)
+                .collect::<String>()
+        });
+        Ok(crate::AttachmentSummary {
+            filename: self.filename.clone(),
+            mime_type: self.mime_type.clone(),
+            size: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+            sha256: format!("{:x}", Sha256::digest(&bytes)),
+            text_preview,
+            untrusted: true,
+        })
+    }
+}
+
+fn valid_mime_type(value: &str) -> bool {
+    let mut parts = value.split('/');
+    let Some(top_level) = parts.next() else {
+        return false;
+    };
+    let Some(subtype) = parts.next() else {
+        return false;
+    };
+    !top_level.is_empty()
+        && !subtype.is_empty()
+        && parts.next().is_none()
+        && top_level
+            .bytes()
+            .chain(subtype.bytes())
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.'))
 }
 
 impl SendRequest {
@@ -94,7 +189,42 @@ impl SendRequest {
                 false,
             ));
         }
+        if self.attachments.len() > MAX_ATTACHMENTS {
+            return Err(MailError::new(
+                MailErrorCode::ResourceLimit,
+                format!("send request cannot exceed {MAX_ATTACHMENTS} attachments"),
+                false,
+            ));
+        }
+        let total_attachment_bytes = self
+            .attachments
+            .iter()
+            .map(SendAttachment::validate)
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .map(|bytes| bytes.len())
+            .sum::<usize>();
+        if total_attachment_bytes > MAX_TOTAL_ATTACHMENT_BYTES {
+            return Err(MailError::new(
+                MailErrorCode::ResourceLimit,
+                format!("attachments cannot exceed {MAX_TOTAL_ATTACHMENT_BYTES} bytes in total"),
+                false,
+            ));
+        }
         Ok(())
+    }
+
+    /// Return deterministic summaries for every imported attachment.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable validation or resource-limit error when an attachment
+    /// snapshot is invalid.
+    pub fn attachment_summaries(&self) -> Result<Vec<crate::AttachmentSummary>, MailError> {
+        self.attachments
+            .iter()
+            .map(SendAttachment::summary)
+            .collect()
     }
 }
 
@@ -188,6 +318,8 @@ pub struct SendPlan {
     pub request: SendRequest,
     pub content_sha256: String,
     pub message_id: String,
+    #[serde(default)]
+    pub attachment_summaries: Vec<crate::AttachmentSummary>,
     pub status: SendPlanStatus,
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
@@ -206,6 +338,7 @@ impl SendPlan {
     /// Returns request validation or serialization errors.
     pub fn create(request: SendRequest, now: DateTime<Utc>) -> Result<Self, MailError> {
         request.validate()?;
+        let attachment_summaries = request.attachment_summaries()?;
         let canonical = serde_json::to_vec(&request).map_err(|_| {
             MailError::new(
                 MailErrorCode::Internal,
@@ -227,6 +360,7 @@ impl SendPlan {
             request,
             content_sha256,
             message_id,
+            attachment_summaries,
             status: SendPlanStatus::Planned,
             created_at: now,
             expires_at: now + Duration::hours(SEND_PLAN_TTL_HOURS),
@@ -247,6 +381,7 @@ impl SendPlan {
             subject: self.request.subject.clone(),
             content_sha256: self.content_sha256.clone(),
             message_id: self.message_id.clone(),
+            attachment_summaries: self.attachment_summaries.clone(),
             status: self.status,
             created_at: self.created_at,
             expires_at: self.expires_at,
@@ -267,6 +402,8 @@ pub struct SendPlanSummary {
     pub subject: String,
     pub content_sha256: String,
     pub message_id: String,
+    #[serde(default)]
+    pub attachment_summaries: Vec<crate::AttachmentSummary>,
     pub status: SendPlanStatus,
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
@@ -277,7 +414,7 @@ pub struct SendPlanSummary {
     pub receipt: Option<SendReceipt>,
 }
 
-pub trait Outbox: Send + Sync {
+pub trait Outbox: crate::OperationLedger + Send + Sync {
     /// Persist a newly planned immutable message.
     ///
     /// # Errors

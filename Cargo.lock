@@ -1384,6 +1384,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "base64 0.22.1",
  "clap",
  "kirje-core",
  "kirje-mcp",
@@ -1400,6 +1401,7 @@ dependencies = [
 name = "kirje-core"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "schemars",
  "secrecy",
@@ -1457,8 +1459,10 @@ dependencies = [
  "schemars",
  "secrecy",
  "serde",
+ "serde_json",
  "tempfile",
  "toml",
+ "uuid",
 ]
 
 [[package]]
@@ -1469,6 +1473,7 @@ dependencies = [
  "kirje-core",
  "rusqlite",
  "serde_json",
+ "sha2",
  "tempfile",
  "uuid",
 ]

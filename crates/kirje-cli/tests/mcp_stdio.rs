@@ -43,7 +43,7 @@ fn stdio_handshake_is_protocol_clean_and_declares_local_write_safety() {
         .iter()
         .filter_map(|tool| tool["name"].as_str())
         .collect();
-    assert_eq!(names.len(), 13);
+    assert_eq!(names.len(), 24);
     assert!(names.contains(&"mailbox_list"));
     assert!(names.contains(&"mailbox_sync"));
     assert!(names.contains(&"message_search_local"));
@@ -63,5 +63,12 @@ fn stdio_handshake_is_protocol_clean_and_declares_local_write_safety() {
     assert!(names.contains(&"message_send_plan"));
     assert!(names.contains(&"message_send_status"));
     assert!(names.contains(&"message_send_apply"));
+    assert!(names.contains(&"message_send_plan_draft"));
+    assert!(names.contains(&"draft_create"));
+    assert!(names.contains(&"draft_update"));
+    assert!(names.contains(&"draft_discard"));
+    assert!(names.contains(&"mail_operation_plan"));
+    assert!(names.contains(&"mail_operation_apply"));
+    assert!(names.contains(&"mail_operation_audit"));
     assert!(!names.iter().any(|name| name.contains("approve")));
 }

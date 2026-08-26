@@ -2,7 +2,7 @@
 
 mod outbox;
 
-pub use outbox::SqliteOutbox;
+pub use outbox::{SqliteOutbox, SqliteOutbox as SqliteOperationLedger};
 
 use std::{
     path::{Path, PathBuf},

@@ -1,5 +1,8 @@
 use chrono::{TimeZone as _, Utc};
-use kirje_core::{MailAddress, MailErrorCode, SendPlan, SendPlanStatus, SendRequest};
+use kirje_core::{
+    MAX_SEND_ATTACHMENT_BYTES, MailAddress, MailErrorCode, SendAttachment, SendPlan,
+    SendPlanStatus, SendRequest,
+};
 
 fn request() -> SendRequest {
     SendRequest {
@@ -13,6 +16,7 @@ fn request() -> SendRequest {
         subject: "Governed send test".to_owned(),
         text: Some("This is a bounded test body.".to_owned()),
         html: None,
+        attachments: Vec::new(),
     }
 }
 
@@ -59,6 +63,31 @@ fn request_rejects_header_injection_and_excessive_recipients() {
     assert_eq!(
         candidate.validate().unwrap_err().code,
         MailErrorCode::InvalidInput
+    );
+}
+
+#[test]
+fn attachment_metadata_is_bounded_and_mime_safe() {
+    let mut candidate = request();
+    candidate.attachments.push(SendAttachment {
+        filename: "report.pdf".to_owned(),
+        mime_type: "application/pdf".to_owned(),
+        content_base64: "AQID".to_owned(),
+    });
+    assert!(candidate.validate().is_ok());
+
+    candidate.attachments[0].mime_type = "text/plain\r\nX-Injected: yes".to_owned();
+    assert_eq!(
+        candidate.validate().unwrap_err().code,
+        MailErrorCode::InvalidInput
+    );
+
+    candidate.attachments[0].mime_type = "text/plain".to_owned();
+    candidate.attachments[0].content_base64 =
+        "A".repeat(4 * MAX_SEND_ATTACHMENT_BYTES.div_ceil(3) + 4);
+    assert_eq!(
+        candidate.validate().unwrap_err().code,
+        MailErrorCode::ResourceLimit
     );
 }
 

@@ -3,7 +3,7 @@
 ## Metadata
 
 - Status: Confirmed
-- Updated: 2026-08-26
+- Updated: 2026-08-27
 
 ## Decisions
 
@@ -48,12 +48,31 @@ newest bounded window; later runs fetch above a persisted UID high-water mark.
 UIDVALIDITY changes replace one mailbox scope atomically. Background `IDLE`,
 historical backfill, and reconciliation are separate future capabilities.
 
-### Transactional Send Outbox
+### Unified Transactional Operation Ledger
 
-Kirje stores immutable bounded send requests in a separate private SQLite
-outbox. Immediate transactions enforce approval and one-time claim transitions.
-SMTP uncertainty is terminal and non-retryable rather than hidden behind an
-automatic retry.
+Kirje stores private drafts, immutable bounded send requests, and governed IMAP
+mutations in the private SQLite outbox path as one versioned operation ledger.
+Schema migration preserves legacy send rows and appends audit events. Immediate
+transactions enforce approval and one-time claim transitions. SMTP or IMAP
+uncertainty is terminal and non-retryable rather than hidden behind an
+automatic retry. Stale applying records reconcile to `ambiguous`.
+
+### Deterministic Draft Composition
+
+Drafts are local records with new, reply, reply-all, and forward modes. Reply
+uses Reply-To when present; reply-all removes the configured account and
+de-duplicates recipients; forward requires explicit recipients. Source content
+is a bounded caller-provided snapshot, and local attachment imports are regular
+file snapshots with deterministic summaries.
+
+### Governed IMAP Mutations
+
+Mailbox flags and move/archive/safe-delete work use the same ledger and
+plan/CLI-approval/apply state machine as send. The adapter validates
+UIDVALIDITY immediately before mutation, uses UID MOVE when available, and
+falls back to UID COPY plus UID-scoped `\\Deleted`. Safe delete never invokes
+`EXPUNGE`; archive and Trash targets come from server special-use declarations
+or explicit input.
 
 ### Lettre SMTP Adapter
 
