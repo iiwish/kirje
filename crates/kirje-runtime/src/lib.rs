@@ -7,11 +7,13 @@ use std::{
     sync::Arc,
 };
 
+use chrono::Utc;
 use directories::ProjectDirs;
 use kirje_core::{
     AttachmentContent, AttachmentRead, ConnectionReport, LocalMessageSearch, MailAccountConfig,
-    MailError, MailErrorCode, MailboxPage, MailboxReader, MailboxSyncReport, MailboxSyncRequest,
-    MailboxSyncState, MessageContent, MessageIndex, MessagePage, MessageRead, MessageSearch,
+    MailError, MailErrorCode, MailSender, MailboxPage, MailboxReader, MailboxSyncReport,
+    MailboxSyncRequest, MailboxSyncState, MessageContent, MessageIndex, MessagePage, MessageRead,
+    MessageSearch, Outbox, SendAttemptError, SendPlan, SendPlanSummary, SendReceipt, SendRequest,
     SyncCursor,
 };
 use schemars::JsonSchema;
@@ -247,7 +249,13 @@ pub struct KeyringSecretStore;
 impl KeyringSecretStore {
     #[must_use]
     pub fn available() -> bool {
-        keyring::Entry::store_status().is_ok()
+        if keyring::Entry::store_status().is_err() {
+            return false;
+        }
+        let Ok(probe) = keyring::Entry::new(KEYRING_SERVICE, "__kirje_readiness_probe__") else {
+            return false;
+        };
+        matches!(probe.get_password(), Ok(_) | Err(keyring::Error::NoEntry))
     }
 
     fn entry(account_id: &str) -> Result<keyring::Entry, MailError> {
@@ -310,6 +318,8 @@ pub struct KirjeRuntime {
     secrets: Arc<dyn SecretStore>,
     reader: Arc<dyn MailboxReader>,
     index: Arc<dyn MessageIndex>,
+    outbox: Arc<dyn Outbox>,
+    sender: Arc<dyn MailSender>,
 }
 
 impl KirjeRuntime {
@@ -332,17 +342,34 @@ impl KirjeRuntime {
         config_path: Option<PathBuf>,
         index_path: Option<PathBuf>,
     ) -> Result<Self, MailError> {
+        Self::local_with_paths(config_path, index_path, None)
+    }
+
+    /// Build the production runtime with explicit local data paths.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable configuration or store initialization errors.
+    pub fn local_with_paths(
+        config_path: Option<PathBuf>,
+        index_path: Option<PathBuf>,
+        outbox_path: Option<PathBuf>,
+    ) -> Result<Self, MailError> {
         let custom_config = config_path.is_some();
         let path = match config_path {
             Some(path) => path,
             None => TomlAccountRepository::default_path()?,
         };
         let index_path = resolve_index_path(custom_config.then_some(path.as_path()), index_path)?;
-        Ok(Self::with_index(
+        let outbox_path =
+            resolve_outbox_path(custom_config.then_some(path.as_path()), outbox_path)?;
+        Ok(Self::with_services(
             Arc::new(TomlAccountRepository::new(path)),
             Arc::new(KeyringSecretStore),
             Arc::new(kirje_protocol::PimalayaImapReader),
             Arc::new(kirje_store::SqliteMessageIndex::open(index_path)?),
+            Arc::new(kirje_store::SqliteOutbox::open(outbox_path)?),
+            Arc::new(kirje_protocol::LettreSmtpSender),
         ))
     }
 
@@ -362,11 +389,32 @@ impl KirjeRuntime {
         reader: Arc<dyn MailboxReader>,
         index: Arc<dyn MessageIndex>,
     ) -> Self {
+        Self::with_services(
+            accounts,
+            secrets,
+            reader,
+            index,
+            Arc::new(UnavailableOutbox),
+            Arc::new(UnavailableSender),
+        )
+    }
+
+    #[must_use]
+    pub fn with_services(
+        accounts: Arc<dyn AccountRepository>,
+        secrets: Arc<dyn SecretStore>,
+        reader: Arc<dyn MailboxReader>,
+        index: Arc<dyn MessageIndex>,
+        outbox: Arc<dyn Outbox>,
+        sender: Arc<dyn MailSender>,
+    ) -> Self {
         Self {
             accounts,
             secrets,
             reader,
             index,
+            outbox,
+            sender,
         }
     }
 
@@ -553,6 +601,98 @@ impl KirjeRuntime {
         self.reader.read_attachment(&account, &secret, read)
     }
 
+    /// Validate and persist a credential-free immutable send plan.
+    ///
+    /// # Errors
+    ///
+    /// Returns account, validation, or outbox errors.
+    pub fn plan_send(&self, request: SendRequest) -> Result<SendPlan, MailError> {
+        request.validate()?;
+        let account = self.account(&request.account_id)?;
+        account.validate()?;
+        if account.outgoing.is_none() {
+            return Err(MailError::invalid_input(
+                "account has no SMTP endpoint; update its account configuration",
+            ));
+        }
+        let plan = SendPlan::create(request, Utc::now())?;
+        self.outbox.create(&plan)
+    }
+
+    /// Return one send plan, reconciling local expiry and stale applying state.
+    ///
+    /// # Errors
+    ///
+    /// Returns validation, store, or not-found errors.
+    pub fn send_plan(&self, plan_id: &str) -> Result<SendPlan, MailError> {
+        self.outbox.get(plan_id, Utc::now())?.ok_or_else(|| {
+            MailError::new(
+                MailErrorCode::SendPlanNotFound,
+                "send plan was not found",
+                false,
+            )
+        })
+    }
+
+    /// List bounded send-plan summaries without bodies.
+    ///
+    /// # Errors
+    ///
+    /// Returns validation or store errors.
+    pub fn list_send_plans(
+        &self,
+        account_id: Option<&str>,
+        limit: u16,
+    ) -> Result<Vec<SendPlanSummary>, MailError> {
+        if let Some(account_id) = account_id {
+            let _account = self.account(account_id)?;
+        }
+        self.outbox.list(account_id, limit, Utc::now())
+    }
+
+    /// Record local human approval for an immutable plan.
+    ///
+    /// This service does not decide interactivity; only the CLI calls it after
+    /// enforcing a TTY confirmation. MCP intentionally has no approval tool.
+    ///
+    /// # Errors
+    ///
+    /// Returns not-found, expired, invalid-state, or store errors.
+    pub fn approve_send(&self, plan_id: &str) -> Result<SendPlan, MailError> {
+        self.outbox.approve(plan_id, Utc::now())
+    }
+
+    /// Claim and apply an approved plan once.
+    ///
+    /// SMTP errors after invocation are recorded as ambiguous and never retried.
+    /// Pre-invocation failures are recorded as failed.
+    ///
+    /// # Errors
+    ///
+    /// Returns state or outbox errors. Delivery failures are returned as a
+    /// persisted terminal plan so callers can inspect certainty.
+    pub fn apply_send(&self, plan_id: &str) -> Result<SendPlan, MailError> {
+        let claimed = self.outbox.claim(plan_id, Utc::now())?;
+        let credentials = self.credentials(&claimed.request.account_id);
+        let (account, secret) = match credentials {
+            Ok(credentials) => credentials,
+            Err(error) => {
+                return self.outbox.mark_failed(plan_id, error, Utc::now());
+            }
+        };
+        match self.sender.send(&account, &secret, &claimed) {
+            Ok(receipt) => self.outbox.mark_sent(plan_id, receipt),
+            Err(SendAttemptError {
+                error,
+                delivery_started: true,
+            }) => self.outbox.mark_ambiguous(plan_id, error, Utc::now()),
+            Err(SendAttemptError {
+                error,
+                delivery_started: false,
+            }) => self.outbox.mark_failed(plan_id, error, Utc::now()),
+        }
+    }
+
     fn account(&self, account_id: &str) -> Result<MailAccountConfig, MailError> {
         self.accounts.get(account_id)?.ok_or_else(|| {
             MailError::new(
@@ -601,7 +741,96 @@ pub fn resolve_index_path(
         })
 }
 
+/// Resolve an explicit, config-colocated, or platform-native outbox path.
+///
+/// # Errors
+///
+/// Returns a stable store error when the platform data directory is unavailable.
+pub fn resolve_outbox_path(
+    config_path: Option<&Path>,
+    explicit_outbox: Option<PathBuf>,
+) -> Result<PathBuf, MailError> {
+    if let Some(path) = explicit_outbox {
+        return Ok(path);
+    }
+    if let Some(config_path) = config_path
+        && let Some(parent) = config_path.parent()
+    {
+        return Ok(parent.join("outbox.sqlite3"));
+    }
+    ProjectDirs::from("", "", "kirje")
+        .map(|dirs| dirs.data_local_dir().join("outbox.sqlite3"))
+        .ok_or_else(|| {
+            MailError::new(
+                MailErrorCode::StoreRead,
+                "cannot determine the Kirje data directory",
+                false,
+            )
+        })
+}
+
 struct UnavailableMessageIndex;
+
+struct UnavailableOutbox;
+
+impl Outbox for UnavailableOutbox {
+    fn create(&self, _plan: &SendPlan) -> Result<SendPlan, MailError> {
+        Err(outbox_unavailable())
+    }
+    fn get(
+        &self,
+        _plan_id: &str,
+        _now: chrono::DateTime<Utc>,
+    ) -> Result<Option<SendPlan>, MailError> {
+        Err(outbox_unavailable())
+    }
+    fn list(
+        &self,
+        _account_id: Option<&str>,
+        _limit: u16,
+        _now: chrono::DateTime<Utc>,
+    ) -> Result<Vec<SendPlanSummary>, MailError> {
+        Err(outbox_unavailable())
+    }
+    fn approve(&self, _plan_id: &str, _now: chrono::DateTime<Utc>) -> Result<SendPlan, MailError> {
+        Err(outbox_unavailable())
+    }
+    fn claim(&self, _plan_id: &str, _now: chrono::DateTime<Utc>) -> Result<SendPlan, MailError> {
+        Err(outbox_unavailable())
+    }
+    fn mark_sent(&self, _plan_id: &str, _receipt: SendReceipt) -> Result<SendPlan, MailError> {
+        Err(outbox_unavailable())
+    }
+    fn mark_failed(
+        &self,
+        _plan_id: &str,
+        _error: MailError,
+        _now: chrono::DateTime<Utc>,
+    ) -> Result<SendPlan, MailError> {
+        Err(outbox_unavailable())
+    }
+    fn mark_ambiguous(
+        &self,
+        _plan_id: &str,
+        _error: MailError,
+        _now: chrono::DateTime<Utc>,
+    ) -> Result<SendPlan, MailError> {
+        Err(outbox_unavailable())
+    }
+}
+
+struct UnavailableSender;
+
+impl MailSender for UnavailableSender {
+    fn send(
+        &self,
+        _account: &MailAccountConfig,
+        _secret: &SecretString,
+        _plan: &SendPlan,
+    ) -> Result<SendReceipt, SendAttemptError> {
+        Err(SendAttemptError::before_delivery(outbox_unavailable()))
+    }
+}
 
 impl MessageIndex for UnavailableMessageIndex {
     fn state(
@@ -633,6 +862,14 @@ fn index_unavailable() -> MailError {
     )
 }
 
+fn outbox_unavailable() -> MailError {
+    MailError::new(
+        MailErrorCode::StoreRead,
+        "local send outbox is not configured",
+        false,
+    )
+}
+
 fn config_write_error() -> MailError {
     MailError::new(
         MailErrorCode::ConfigWrite,
@@ -651,12 +888,19 @@ fn secret_store_error() -> MailError {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, sync::Mutex};
+    use std::{
+        collections::BTreeMap,
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicUsize, Ordering},
+        },
+    };
 
     use chrono::{TimeZone as _, Utc};
     use kirje_core::{
-        CredentialKind, Endpoint, MailAddress, Mailbox, MailboxSyncBatch, MessageEnvelope,
-        MessageReference, Protocol, TransportSecurity,
+        CredentialKind, Endpoint, MailAddress, MailSender, Mailbox, MailboxSyncBatch,
+        MessageEnvelope, MessageReference, Protocol, SendAttemptError, SendPlan, SendPlanStatus,
+        SendReceipt, SendRequest, TransportSecurity,
     };
 
     use super::*;
@@ -845,8 +1089,152 @@ mod tests {
                 port: 993,
                 security: TransportSecurity::ImplicitTls,
             },
+            outgoing: Some(Endpoint {
+                protocol: Protocol::Smtp,
+                host: "smtp.163.com".to_owned(),
+                port: 465,
+                security: TransportSecurity::ImplicitTls,
+            }),
             credential_kind: CredentialKind::AppPassword,
         }
+    }
+
+    #[derive(Default)]
+    struct RecordingSender {
+        calls: AtomicUsize,
+        ambiguous: bool,
+    }
+
+    impl MailSender for RecordingSender {
+        fn send(
+            &self,
+            _account: &MailAccountConfig,
+            _secret: &SecretString,
+            _plan: &SendPlan,
+        ) -> Result<SendReceipt, SendAttemptError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            if self.ambiguous {
+                Err(SendAttemptError::after_delivery_started(MailError::new(
+                    MailErrorCode::Network,
+                    "unknown SMTP result",
+                    true,
+                )))
+            } else {
+                Ok(SendReceipt {
+                    accepted: true,
+                    server_response: Some("250 accepted".to_owned()),
+                    sent_at: Utc::now(),
+                })
+            }
+        }
+    }
+
+    fn send_request() -> SendRequest {
+        SendRequest {
+            account_id: "work".to_owned(),
+            to: vec![MailAddress {
+                name: None,
+                email: "agent@163.com".to_owned(),
+            }],
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Runtime send".to_owned(),
+            text: Some("body".to_owned()),
+            html: None,
+        }
+    }
+
+    fn send_runtime(
+        directory: &tempfile::TempDir,
+        secrets: Arc<MemorySecrets>,
+        sender: Arc<RecordingSender>,
+    ) -> KirjeRuntime {
+        let accounts = Arc::new(TomlAccountRepository::new(
+            directory.path().join("accounts.toml"),
+        ));
+        accounts.upsert(account()).expect("account");
+        KirjeRuntime::with_services(
+            accounts,
+            secrets,
+            Arc::new(NoopReader),
+            Arc::new(
+                kirje_store::SqliteMessageIndex::open(directory.path().join("index.sqlite3"))
+                    .expect("index"),
+            ),
+            Arc::new(
+                kirje_store::SqliteOutbox::open(directory.path().join("outbox.sqlite3"))
+                    .expect("outbox"),
+            ),
+            sender,
+        )
+    }
+
+    #[test]
+    fn planning_is_local_and_apply_is_at_most_once() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let secrets = Arc::new(MemorySecrets::default());
+        secrets
+            .set("work", &SecretString::from("secret"))
+            .expect("secret");
+        let sender = Arc::new(RecordingSender::default());
+        let runtime = send_runtime(&directory, secrets, sender.clone());
+
+        let planned = runtime.plan_send(send_request()).expect("plan");
+        assert_eq!(planned.status, SendPlanStatus::Planned);
+        runtime.approve_send(&planned.id).expect("approve");
+        let sent = runtime.apply_send(&planned.id).expect("apply");
+        assert_eq!(sent.status, SendPlanStatus::Sent);
+        assert_eq!(sender.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            runtime.apply_send(&planned.id).unwrap_err().code,
+            MailErrorCode::SendPlanState
+        );
+        assert_eq!(sender.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn failure_after_smtp_invocation_becomes_ambiguous() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let secrets = Arc::new(MemorySecrets::default());
+        secrets
+            .set("work", &SecretString::from("secret"))
+            .expect("secret");
+        let sender = Arc::new(RecordingSender {
+            calls: AtomicUsize::new(0),
+            ambiguous: true,
+        });
+        let runtime = send_runtime(&directory, secrets, sender.clone());
+        let planned = runtime.plan_send(send_request()).expect("plan");
+        runtime.approve_send(&planned.id).expect("approve");
+
+        let result = runtime.apply_send(&planned.id).expect("record ambiguity");
+        assert_eq!(result.status, SendPlanStatus::Ambiguous);
+        assert_eq!(sender.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            runtime.apply_send(&planned.id).unwrap_err().code,
+            MailErrorCode::SendPlanState
+        );
+    }
+
+    #[test]
+    fn missing_secret_fails_without_invoking_smtp() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let sender = Arc::new(RecordingSender::default());
+        let runtime = send_runtime(
+            &directory,
+            Arc::new(MemorySecrets::default()),
+            sender.clone(),
+        );
+        let planned = runtime.plan_send(send_request()).expect("plan");
+        runtime.approve_send(&planned.id).expect("approve");
+
+        let result = runtime.apply_send(&planned.id).expect("record failure");
+        assert_eq!(result.status, SendPlanStatus::Failed);
+        assert_eq!(
+            result.last_error.expect("error").code,
+            MailErrorCode::SecretMissing
+        );
+        assert_eq!(sender.calls.load(Ordering::SeqCst), 0);
     }
 
     fn message(uid: u32) -> MessageEnvelope {

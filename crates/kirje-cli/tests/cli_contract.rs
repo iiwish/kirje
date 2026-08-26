@@ -57,6 +57,8 @@ fn account_add_and_list_share_a_versioned_json_contract() {
         serde_json::from_slice(&added.stdout).expect("account add JSON");
     assert_eq!(added_json["ok"], true);
     assert_eq!(added_json["data"]["incoming"]["host"], "imap.163.com");
+    assert_eq!(added_json["data"]["outgoing"]["host"], "smtp.163.com");
+    assert_eq!(added_json["data"]["outgoing"]["port"], 465);
 
     let listed = Command::cargo_bin("kirje")
         .expect("kirje binary")
@@ -214,4 +216,87 @@ fn relative_config_and_index_paths_are_supported() {
     assert!(output.status.success());
     assert!(directory.path().join("accounts.toml").is_file());
     assert!(directory.path().join("index.sqlite3").is_file());
+}
+
+#[test]
+fn send_plan_is_local_and_approval_rejects_piped_input() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let config = directory.path().join("accounts.toml");
+    let index = directory.path().join("index.sqlite3");
+    let outbox = directory.path().join("outbox.sqlite3");
+    let request = directory.path().join("send.json");
+    std::fs::write(
+        &request,
+        r#"{
+            "account_id":"personal",
+            "to":[{"name":null,"email":"agent@163.com"}],
+            "cc":[],
+            "bcc":[],
+            "subject":"CLI governed send",
+            "text":"local planning only",
+            "html":null
+        }"#,
+    )
+    .expect("request");
+    let common = [
+        "--config",
+        config.to_str().expect("config"),
+        "--index",
+        index.to_str().expect("index"),
+        "--outbox",
+        outbox.to_str().expect("outbox"),
+    ];
+    Command::cargo_bin("kirje")
+        .expect("kirje binary")
+        .args(common)
+        .args(["account", "add", "personal", "agent@163.com"])
+        .assert()
+        .success();
+
+    let planned = Command::cargo_bin("kirje")
+        .expect("kirje binary")
+        .args(common)
+        .args([
+            "send",
+            "plan",
+            "--input",
+            request.to_str().expect("request"),
+        ])
+        .output()
+        .expect("plan");
+    assert!(planned.status.success());
+    let planned: serde_json::Value = serde_json::from_slice(&planned.stdout).expect("plan JSON");
+    let plan_id = planned["data"]["id"].as_str().expect("plan id");
+    assert_eq!(planned["data"]["status"], "planned");
+
+    let approval = Command::cargo_bin("kirje")
+        .expect("kirje binary")
+        .args(common)
+        .args(["send", "approve", plan_id])
+        .write_stdin(plan_id)
+        .output()
+        .expect("approve");
+    assert_eq!(approval.status.code(), Some(2));
+    let approval: serde_json::Value =
+        serde_json::from_slice(&approval.stdout).expect("approval JSON");
+    assert_eq!(approval["error"]["code"], "invalid_input");
+
+    let status = Command::cargo_bin("kirje")
+        .expect("kirje binary")
+        .args(common)
+        .args(["send", "show", plan_id])
+        .output()
+        .expect("show");
+    let status: serde_json::Value = serde_json::from_slice(&status.stdout).expect("status JSON");
+    assert_eq!(status["data"]["status"], "planned");
+
+    let apply = Command::cargo_bin("kirje")
+        .expect("kirje binary")
+        .args(common)
+        .args(["send", "apply", plan_id])
+        .output()
+        .expect("apply");
+    assert_eq!(apply.status.code(), Some(1));
+    let apply: serde_json::Value = serde_json::from_slice(&apply.stdout).expect("apply JSON");
+    assert_eq!(apply["error"]["code"], "send_plan_state");
 }

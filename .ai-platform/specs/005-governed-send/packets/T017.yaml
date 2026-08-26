@@ -1,0 +1,18 @@
+schema_version: 1
+packet_id: 005-T017-A001
+task_id: T017
+feature_id: 005-governed-send
+status: complete
+title: Runtime CLI and MCP workflow
+goal: Expose the shared governed-send workflow without an agent approval path.
+requirements: [FR-005, FR-006, FR-007, FR-008, FR-009, FR-010]
+dependencies: [T015, T016]
+execution_constraints: {branch: codex/governed-send, adapter: direct_execute}
+allowed_files: [crates/kirje-runtime/**, crates/kirje-cli/**, crates/kirje-mcp/**]
+tdd:
+  red: Add runtime lifecycle, CLI TTY, and exact MCP tool-list tests.
+  green: Add shared services and thin interface handlers.
+  refactor: Preserve protocol-clean stdout and bounded envelopes.
+validation: [cargo test -p kirje-runtime -p kirje-cli -p kirje-mcp --all-features]
+evidence: .ai-platform/evidence/T017/summary.md
+stop_conditions: [MCP exposes approval, apply bypasses approved state]

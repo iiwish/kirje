@@ -1,0 +1,18 @@
+schema_version: 1
+packet_id: 005-T016-A001
+task_id: T016
+feature_id: 005-governed-send
+status: complete
+title: SMTP adapter
+goal: Build stable MIME and submit only through encrypted SMTP.
+requirements: [FR-007, FR-010, FR-011]
+dependencies: [T014]
+execution_constraints: {branch: codex/governed-send, adapter: direct_execute}
+allowed_files: [Cargo.toml, Cargo.lock, crates/kirje-protocol/**]
+tdd:
+  red: Add MIME, endpoint, and adapter error tests.
+  green: Implement the MailSender port with Lettre.
+  refactor: Keep provider quirks behind the adapter.
+validation: [cargo test -p kirje-protocol --all-features]
+evidence: .ai-platform/evidence/T016/summary.md
+stop_conditions: [plaintext or opportunistic TLS, credentials enter output]

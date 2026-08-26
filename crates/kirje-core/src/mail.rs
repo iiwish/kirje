@@ -25,6 +25,8 @@ pub struct MailAccountConfig {
     pub email: String,
     pub username: String,
     pub incoming: Endpoint,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outgoing: Option<Endpoint>,
     pub credential_kind: CredentialKind,
 }
 
@@ -86,9 +88,27 @@ impl MailAccountConfig {
                 "IMAP transport must use implicit TLS or STARTTLS",
             ));
         }
+        if let Some(outgoing) = &self.outgoing {
+            if outgoing.protocol != Protocol::Smtp {
+                return Err(MailError::invalid_input("outgoing endpoint must use SMTP"));
+            }
+            if !valid_host(&outgoing.host) || outgoing.port == 0 {
+                return Err(MailError::invalid_input(
+                    "SMTP host must contain 1-253 characters and port must be positive",
+                ));
+            }
+            if !matches!(
+                outgoing.security,
+                TransportSecurity::ImplicitTls | TransportSecurity::StartTls
+            ) {
+                return Err(MailError::invalid_input(
+                    "SMTP transport must use implicit TLS or STARTTLS",
+                ));
+            }
+        }
         if self.credential_kind == CredentialKind::OAuth2 {
             return Err(MailError::invalid_input(
-                "OAuth2 is not available in the read-only MVP",
+                "OAuth2 is not available in this release",
             ));
         }
 
@@ -534,6 +554,8 @@ pub enum MailErrorCode {
     StoreRead,
     StoreWrite,
     StoreMigration,
+    SendPlanNotFound,
+    SendPlanState,
     Internal,
 }
 
@@ -586,6 +608,8 @@ const fn serde_variant_name(code: MailErrorCode) -> &'static str {
         MailErrorCode::StoreRead => "store_read",
         MailErrorCode::StoreWrite => "store_write",
         MailErrorCode::StoreMigration => "store_migration",
+        MailErrorCode::SendPlanNotFound => "send_plan_not_found",
+        MailErrorCode::SendPlanState => "send_plan_state",
         MailErrorCode::Internal => "internal",
     }
 }
@@ -695,6 +719,12 @@ mod tests {
                 port: 993,
                 security: TransportSecurity::ImplicitTls,
             },
+            outgoing: Some(Endpoint {
+                protocol: Protocol::Smtp,
+                host: "smtp.163.com".to_owned(),
+                port: 465,
+                security: TransportSecurity::ImplicitTls,
+            }),
             credential_kind: CredentialKind::AppPassword,
         }
     }
@@ -721,6 +751,39 @@ mod tests {
             candidate.validate().unwrap_err().code,
             MailErrorCode::InvalidInput
         );
+
+        candidate = account();
+        candidate.outgoing.as_mut().expect("SMTP endpoint").protocol = Protocol::Imap;
+        assert_eq!(
+            candidate.validate().unwrap_err().code,
+            MailErrorCode::InvalidInput
+        );
+
+        candidate = account();
+        candidate.outgoing.as_mut().expect("SMTP endpoint").security = TransportSecurity::Https;
+        assert_eq!(
+            candidate.validate().unwrap_err().code,
+            MailErrorCode::InvalidInput
+        );
+    }
+
+    #[test]
+    fn legacy_account_without_outgoing_endpoint_remains_valid() {
+        let serialized = r#"
+            id = "personal"
+            email = "agent@163.com"
+            username = "agent@163.com"
+            credential_kind = "app_password"
+
+            [incoming]
+            protocol = "imap"
+            host = "imap.163.com"
+            port = 993
+            security = "implicit_tls"
+        "#;
+        let parsed: MailAccountConfig = toml::from_str(serialized).expect("legacy config");
+        assert!(parsed.outgoing.is_none());
+        assert!(parsed.validate().is_ok());
     }
 
     #[test]

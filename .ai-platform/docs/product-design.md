@@ -46,6 +46,8 @@ a Kirje service.
 - Explicit bounded incremental sync into a private SQLite envelope index.
 - Credential-free local search and sync coverage inspection.
 - Explicit bounded attachment reads as untrusted base64.
+- Immutable send plans in a private outbox, human TTY approval, encrypted SMTP
+  apply, at-most-once invocation, and explicit ambiguous delivery state.
 - Typed stdio MCP server with the same task-level services as the CLI.
 - Agent guide, reusable Skill, security model, architecture, and CI.
 
@@ -56,12 +58,12 @@ a Kirje service.
 - Embedded LLM inference.
 - Background sync, full historical backfill, body indexing, semantic search,
   and attachment persistence or execution.
-- Remote flag, move, delete, draft, or send operations.
+- Remote flag, move, delete, scheduled send, attachment send, or draft storage.
 
 ## Success Criteria
 
 - An agent can inspect, configure, read, synchronize, and search a 163 or QQ
   mailbox without receiving credentials in its process interface.
 - CLI and MCP use the same runtime and domain contracts.
-- MCP exposes no remote mailbox-write tool and declares local index writes.
+- MCP exposes governed plan/status/apply tools but no approval operation.
 - Format, lint, tests, and build pass locally and in GitHub Actions.

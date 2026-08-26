@@ -8,10 +8,12 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 mod mail;
+mod send;
 
 pub use mail::*;
+pub use send::*;
 
-pub const CONTRACT_VERSION: &str = "2026-08-26.3";
+pub const CONTRACT_VERSION: &str = "2026-08-26.4";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]

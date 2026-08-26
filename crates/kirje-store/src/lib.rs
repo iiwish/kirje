@@ -1,5 +1,9 @@
 //! Transactional `SQLite` message index for Kirje.
 
+mod outbox;
+
+pub use outbox::SqliteOutbox;
+
 use std::{
     path::{Path, PathBuf},
     time::Duration,

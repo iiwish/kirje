@@ -2,6 +2,10 @@ use assert_cmd::Command;
 
 #[test]
 fn stdio_handshake_is_protocol_clean_and_declares_local_write_safety() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let config = directory.path().join("accounts.toml");
+    let index = directory.path().join("index.sqlite3");
+    let outbox = directory.path().join("outbox.sqlite3");
     let requests = concat!(
         "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"contract-test\",\"version\":\"1\"}}}\n",
         "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n",
@@ -9,7 +13,16 @@ fn stdio_handshake_is_protocol_clean_and_declares_local_write_safety() {
     );
     let output = Command::cargo_bin("kirje")
         .expect("kirje binary")
-        .args(["mcp", "serve"])
+        .args([
+            "--config",
+            config.to_str().expect("config"),
+            "--index",
+            index.to_str().expect("index"),
+            "--outbox",
+            outbox.to_str().expect("outbox"),
+            "mcp",
+            "serve",
+        ])
         .write_stdin(requests)
         .output()
         .expect("run MCP server");
@@ -30,7 +43,7 @@ fn stdio_handshake_is_protocol_clean_and_declares_local_write_safety() {
         .iter()
         .filter_map(|tool| tool["name"].as_str())
         .collect();
-    assert_eq!(names.len(), 10);
+    assert_eq!(names.len(), 13);
     assert!(names.contains(&"mailbox_list"));
     assert!(names.contains(&"mailbox_sync"));
     assert!(names.contains(&"message_search_local"));
@@ -47,9 +60,8 @@ fn stdio_handshake_is_protocol_clean_and_declares_local_write_safety() {
         .expect("local search tool");
     assert_eq!(local_search["annotations"]["readOnlyHint"], true);
     assert_eq!(local_search["annotations"]["openWorldHint"], false);
-    assert!(
-        !names.iter().any(|name| {
-            name.contains("send") || name.contains("delete") || name.contains("move")
-        })
-    );
+    assert!(names.contains(&"message_send_plan"));
+    assert!(names.contains(&"message_send_status"));
+    assert!(names.contains(&"message_send_apply"));
+    assert!(!names.iter().any(|name| name.contains("approve")));
 }

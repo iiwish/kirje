@@ -1,5 +1,6 @@
 use std::{
-    io::{self, IsTerminal as _},
+    fs,
+    io::{self, IsTerminal as _, Read as _},
     path::PathBuf,
     process::ExitCode,
 };
@@ -9,10 +10,12 @@ use clap::{Parser, Subcommand, ValueEnum};
 use kirje_core::{
     AttachmentRead, CONTRACT_VERSION, CredentialKind, Endpoint, LocalMessageSearch,
     MailAccountConfig, MailError, MailErrorCode, MessageRead, MessageReference, MessageSearch,
-    Protocol, TransportSecurity, discover_account, find_provider_preset, provider_registry,
+    Protocol, SendRequest, TransportSecurity, discover_account, find_provider_preset,
+    provider_registry,
 };
 use kirje_runtime::{
     AccountRepository, KeyringSecretStore, KirjeRuntime, TomlAccountRepository, resolve_index_path,
+    resolve_outbox_path,
 };
 use secrecy::SecretString;
 use serde::Serialize;
@@ -36,6 +39,10 @@ struct Cli {
     /// Override the local `SQLite` message index path.
     #[arg(long, global = true, env = "KIRJE_INDEX")]
     index: Option<PathBuf>,
+
+    /// Override the private local `SQLite` send outbox path.
+    #[arg(long, global = true, env = "KIRJE_OUTBOX")]
+    outbox: Option<PathBuf>,
 
     #[command(subcommand)]
     command: Command,
@@ -82,6 +89,11 @@ enum Command {
         #[command(subcommand)]
         command: AttachmentCommand,
     },
+    /// Plan, inspect, approve, and apply governed email sends.
+    Send {
+        #[command(subcommand)]
+        command: SendCommand,
+    },
     /// Run protocol adapters for agent harnesses.
     Mcp {
         #[command(subcommand)]
@@ -105,6 +117,12 @@ enum AccountCommand {
         imap_port: Option<u16>,
         #[arg(long)]
         security: Option<SecurityArg>,
+        #[arg(long)]
+        smtp_host: Option<String>,
+        #[arg(long)]
+        smtp_port: Option<u16>,
+        #[arg(long)]
+        smtp_security: Option<SecurityArg>,
         #[arg(long)]
         credential_kind: Option<CredentialArg>,
     },
@@ -239,6 +257,29 @@ enum AttachmentCommand {
 }
 
 #[derive(Subcommand)]
+enum SendCommand {
+    /// Create an immutable local send plan from bounded JSON input.
+    Plan {
+        /// JSON file path, or '-' to read from stdin.
+        #[arg(long)]
+        input: String,
+    },
+    /// Inspect one full immutable plan and its current state.
+    Show { plan_id: String },
+    /// List bounded plan summaries without message bodies.
+    List {
+        #[arg(long)]
+        account: Option<String>,
+        #[arg(long, default_value_t = kirje_core::DEFAULT_SEND_PLAN_LIMIT)]
+        limit: u16,
+    },
+    /// Approve one exact plan in an interactive human terminal.
+    Approve { plan_id: String },
+    /// Apply an already approved plan at most once.
+    Apply { plan_id: String },
+}
+
+#[derive(Subcommand)]
 enum McpCommand {
     /// Start the typed MCP server over standard input/output.
     Serve,
@@ -295,14 +336,17 @@ struct DoctorReport {
     config: FileStatus,
     configured_accounts: usize,
     index: FileStatus,
+    outbox: FileStatus,
     credential_store: &'static str,
-    credential_store_available: bool,
+    credential_store_backend_available: bool,
+    credential_store_operation_check: &'static str,
 }
 
 #[derive(Serialize)]
 struct SafetyReport {
     exposed_remote_write_tools: bool,
     local_index_write_tools: bool,
+    human_send_approval_required: bool,
 }
 
 #[derive(Serialize)]
@@ -380,7 +424,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             command: McpCommand::Serve
         }
     ) {
-        kirje_mcp::serve_stdio(cli.config, cli.index)
+        kirje_mcp::serve_stdio(cli.config, cli.index, cli.outbox)
             .await
             .context("MCP stdio server stopped unexpectedly")?;
         return Ok(ExitCode::SUCCESS);
@@ -407,7 +451,11 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
 fn execute_local(cli: &Cli) -> Result<Value, MailError> {
     match &cli.command {
         Command::Schema => json_value(schema_report()),
-        Command::Doctor => json_value(doctor_report(cli.config.clone(), cli.index.clone())?),
+        Command::Doctor => json_value(doctor_report(
+            cli.config.clone(),
+            cli.index.clone(),
+            cli.outbox.clone(),
+        )?),
         Command::Account { command } => handle_account(cli, command),
         Command::Provider { command } => handle_provider(command),
         Command::Secret { command } => handle_secret(cli, command),
@@ -415,6 +463,7 @@ fn execute_local(cli: &Cli) -> Result<Value, MailError> {
         Command::Message { command } => handle_message(cli, command),
         Command::Sync { command } => handle_sync(cli, command),
         Command::Attachment { command } => handle_attachment(cli, command),
+        Command::Send { command } => handle_send(cli, command),
         Command::Mcp { .. } => unreachable!("MCP command handled before local dispatch"),
     }
 }
@@ -457,6 +506,9 @@ fn handle_account(cli: &Cli, command: &AccountCommand) -> Result<Value, MailErro
             imap_host,
             imap_port,
             security,
+            smtp_host,
+            smtp_port,
+            smtp_security,
             credential_kind,
         } => {
             let account = build_account(
@@ -466,6 +518,9 @@ fn handle_account(cli: &Cli, command: &AccountCommand) -> Result<Value, MailErro
                 imap_host.as_deref(),
                 *imap_port,
                 *security,
+                smtp_host.as_deref(),
+                *smtp_port,
+                *smtp_security,
                 *credential_kind,
             )?;
             json_value(runtime(cli)?.upsert_account(account)?)
@@ -623,14 +678,99 @@ fn handle_attachment(cli: &Cli, command: &AttachmentCommand) -> Result<Value, Ma
     }
 }
 
+fn handle_send(cli: &Cli, command: &SendCommand) -> Result<Value, MailError> {
+    match command {
+        SendCommand::Plan { input } => {
+            let request = read_send_request(input)?;
+            json_value(runtime(cli)?.plan_send(request)?)
+        }
+        SendCommand::Show { plan_id } => json_value(runtime(cli)?.send_plan(plan_id)?),
+        SendCommand::List { account, limit } => {
+            json_value(runtime(cli)?.list_send_plans(account.as_deref(), *limit)?)
+        }
+        SendCommand::Approve { plan_id } => {
+            require_interactive_approval_terminal()?;
+            let runtime = runtime(cli)?;
+            let plan = runtime.send_plan(plan_id)?;
+            let review = serde_json::to_string_pretty(&plan.request).map_err(|_| {
+                MailError::new(MailErrorCode::Internal, "cannot render send plan", false)
+            })?;
+            eprintln!(
+                "Review immutable send plan {} (sha256 {}):\n{}",
+                plan.id, plan.content_sha256, review
+            );
+            let confirmation =
+                rpassword::prompt_password(format!("Type plan id '{}' to approve: ", plan.id))
+                    .map_err(|_| {
+                        MailError::new(
+                            MailErrorCode::InvalidInput,
+                            "cannot read approval from the terminal",
+                            false,
+                        )
+                    })?;
+            if confirmation != plan.id {
+                return Err(MailError::invalid_input(
+                    "send approval did not match the plan id",
+                ));
+            }
+            json_value(runtime.approve_send(plan_id)?)
+        }
+        SendCommand::Apply { plan_id } => json_value(runtime(cli)?.apply_send(plan_id)?),
+    }
+}
+
+const MAX_SEND_INPUT_BYTES: u64 = 600 * 1024;
+
+fn read_send_request(input: &str) -> Result<SendRequest, MailError> {
+    let bytes = if input == "-" {
+        let mut bytes = Vec::new();
+        io::stdin()
+            .take(MAX_SEND_INPUT_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| MailError::invalid_input("cannot read send request from stdin"))?;
+        bytes
+    } else {
+        let metadata = fs::metadata(input)
+            .map_err(|_| MailError::invalid_input("cannot read send request file"))?;
+        if !metadata.is_file() || metadata.len() > MAX_SEND_INPUT_BYTES {
+            return Err(MailError::new(
+                MailErrorCode::ResourceLimit,
+                "send request file exceeds the 600 KiB limit",
+                false,
+            ));
+        }
+        fs::read(input).map_err(|_| MailError::invalid_input("cannot read send request file"))?
+    };
+    if bytes.len() as u64 > MAX_SEND_INPUT_BYTES {
+        return Err(MailError::new(
+            MailErrorCode::ResourceLimit,
+            "send request exceeds the 600 KiB limit",
+            false,
+        ));
+    }
+    let request: SendRequest = serde_json::from_slice(&bytes)
+        .map_err(|_| MailError::invalid_input("send request must be valid JSON"))?;
+    request.validate()?;
+    Ok(request)
+}
+
 fn runtime(cli: &Cli) -> Result<KirjeRuntime, MailError> {
-    KirjeRuntime::local_with_index(cli.config.clone(), cli.index.clone())
+    KirjeRuntime::local_with_paths(cli.config.clone(), cli.index.clone(), cli.outbox.clone())
 }
 
 fn require_interactive_secret_terminal() -> Result<(), MailError> {
     if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
         return Err(MailError::invalid_input(
             "secret operations require an interactive terminal; credentials are never accepted as arguments or piped stdin",
+        ));
+    }
+    Ok(())
+}
+
+fn require_interactive_approval_terminal() -> Result<(), MailError> {
+    if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
+        return Err(MailError::invalid_input(
+            "send approval requires an interactive human terminal and is unavailable through piped stdin",
         ));
     }
     Ok(())
@@ -644,6 +784,9 @@ fn build_account(
     imap_host: Option<&str>,
     imap_port: Option<u16>,
     security: Option<SecurityArg>,
+    smtp_host: Option<&str>,
+    smtp_port: Option<u16>,
+    smtp_security: Option<SecurityArg>,
     credential_kind: Option<CredentialArg>,
 ) -> Result<MailAccountConfig, MailError> {
     let discovery = discover_account(email);
@@ -651,6 +794,7 @@ fn build_account(
         return Err(MailError::invalid_input("email address is malformed"));
     }
     let discovered_endpoint = discovery.incoming.first();
+    let discovered_outgoing = discovery.outgoing.first();
     let host = imap_host
         .map(str::to_owned)
         .or_else(|| discovered_endpoint.map(|endpoint| endpoint.host.clone()))
@@ -673,6 +817,35 @@ fn build_account(
             MailError::invalid_input("unknown providers require explicit --credential-kind")
         })?;
 
+    let outgoing_requested = smtp_host.is_some() || smtp_port.is_some() || smtp_security.is_some();
+    let outgoing = if discovered_outgoing.is_some() || outgoing_requested {
+        let smtp_host = smtp_host
+            .map(str::to_owned)
+            .or_else(|| discovered_outgoing.map(|endpoint| endpoint.host.clone()))
+            .ok_or_else(|| {
+                MailError::invalid_input("unknown providers require an explicit --smtp-host")
+            })?;
+        let smtp_port = smtp_port
+            .or_else(|| discovered_outgoing.map(|endpoint| endpoint.port))
+            .ok_or_else(|| {
+                MailError::invalid_input("unknown providers require an explicit --smtp-port")
+            })?;
+        let smtp_security = smtp_security
+            .map(TransportSecurity::from)
+            .or_else(|| discovered_outgoing.map(|endpoint| endpoint.security))
+            .ok_or_else(|| {
+                MailError::invalid_input("unknown providers require explicit --smtp-security")
+            })?;
+        Some(Endpoint {
+            protocol: Protocol::Smtp,
+            host: smtp_host,
+            port: smtp_port,
+            security: smtp_security,
+        })
+    } else {
+        None
+    };
+
     let account = MailAccountConfig {
         id: id.to_owned(),
         email: email.trim().to_ascii_lowercase(),
@@ -683,6 +856,7 @@ fn build_account(
             port,
             security: transport,
         },
+        outgoing,
         credential_kind: credential,
     };
     account.validate()?;
@@ -692,6 +866,7 @@ fn build_account(
 fn doctor_report(
     config: Option<PathBuf>,
     index: Option<PathBuf>,
+    outbox: Option<PathBuf>,
 ) -> Result<DoctorReport, MailError> {
     let custom_config = config.is_some();
     let path = match config {
@@ -699,15 +874,17 @@ fn doctor_report(
         None => TomlAccountRepository::default_path()?,
     };
     let index_path = resolve_index_path(custom_config.then_some(path.as_path()), index)?;
+    let outbox_path = resolve_outbox_path(custom_config.then_some(path.as_path()), outbox)?;
     let configured_accounts = TomlAccountRepository::new(path.clone()).list()?.len();
     Ok(DoctorReport {
         name: "kirje",
         version: env!("CARGO_PKG_VERSION"),
         interfaces: ["cli", "mcp_stdio"],
-        default_mode: "remote_read_only_local_index",
+        default_mode: "governed_send",
         safety: SafetyReport {
-            exposed_remote_write_tools: false,
+            exposed_remote_write_tools: true,
             local_index_write_tools: true,
+            human_send_approval_required: true,
         },
         config: FileStatus {
             exists: path.exists(),
@@ -718,8 +895,13 @@ fn doctor_report(
             exists: index_path.exists(),
             path: index_path.display().to_string(),
         },
+        outbox: FileStatus {
+            exists: outbox_path.exists(),
+            path: outbox_path.display().to_string(),
+        },
         credential_store: "os_native",
-        credential_store_available: KeyringSecretStore::available(),
+        credential_store_backend_available: KeyringSecretStore::available(),
+        credential_store_operation_check: "use_secret_set_or_account_status",
     })
 }
 
@@ -771,7 +953,22 @@ fn schema_report() -> SchemaReport {
                 "remote_read_only_bounded_untrusted",
                 "base64 attachment content",
             ),
-            command("mcp serve", "read_only_tools_only", "MCP stdio transport"),
+            command(
+                "send plan|show|list",
+                "local_outbox",
+                "immutable plan or bounded summary",
+            ),
+            command(
+                "send approve <plan-id>",
+                "interactive_human_local_write",
+                "approved immutable plan",
+            ),
+            command(
+                "send apply <plan-id>",
+                "approved_remote_write_at_most_once",
+                "terminal send state",
+            ),
+            command("mcp serve", "governed_send_tools", "MCP stdio transport"),
         ],
         stable_exit_codes: vec![
             ExitCodeContract {
@@ -855,8 +1052,19 @@ mod tests {
 
     #[test]
     fn known_provider_builds_a_safe_account_without_a_secret() {
-        let account = build_account("personal", "Agent@163.com", None, None, None, None, None)
-            .expect("build account");
+        let account = build_account(
+            "personal",
+            "Agent@163.com",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect("build account");
         assert_eq!(account.incoming.host, "imap.163.com");
         assert_eq!(account.email, "agent@163.com");
         let serialized = serde_json::to_string(&account).expect("serialize account");
@@ -865,19 +1073,32 @@ mod tests {
 
     #[test]
     fn unknown_provider_requires_explicit_transport_configuration() {
-        let error =
-            build_account("work", "agent@example.org", None, None, None, None, None).unwrap_err();
+        let error = build_account(
+            "work",
+            "agent@example.org",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap_err();
         assert_eq!(error.code, MailErrorCode::InvalidInput);
     }
 
     #[test]
-    fn schema_contains_no_remote_write_commands() {
+    fn schema_contains_governed_send_commands() {
         let schema = schema_report();
-        assert!(!schema.commands.iter().any(|entry| {
-            entry.name.contains("message send")
-                || entry.name.contains("message delete")
-                || entry.name.contains("message move")
-                || entry.safety.contains("remote_write")
+        assert!(schema.commands.iter().any(|entry| {
+            entry.name == "send apply <plan-id>"
+                && entry.safety == "approved_remote_write_at_most_once"
+        }));
+        assert!(schema.commands.iter().any(|entry| {
+            entry.name == "send approve <plan-id>"
+                && entry.safety == "interactive_human_local_write"
         }));
     }
 
