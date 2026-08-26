@@ -1,5 +1,5 @@
 task_id: T005
-status: in_review
+status: complete
 objective: Complete documentation, supply-chain checks, smoke tooling, and release verification.
 dependencies: [T002, T003, T004]
 allowed_files:

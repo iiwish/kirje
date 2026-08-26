@@ -19,4 +19,7 @@ was not run. The repository includes a read-only, content-suppressing smoke
 script and a conformance evidence format for dedicated test accounts. Public CI
 does not receive mailbox credentials.
 
-GitHub CI evidence is pending the feature-branch push.
+GitHub Actions run
+[`32934164234`](https://github.com/iiwish/kirje/actions/runs/32934164234)
+passed formatting, Clippy, all tests, the locked workspace build, and
+`cargo-deny` on the feature branch.

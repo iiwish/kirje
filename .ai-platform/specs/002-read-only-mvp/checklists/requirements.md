@@ -9,4 +9,4 @@
 - [x] Write operations and approval remain out of scope.
 - [x] Test categories and live-test boundary are explicit.
 - [x] All implementation tasks have passed local validation.
-- [ ] GitHub CI has passed the completed feature branch.
+- [x] GitHub CI has passed the completed feature branch.

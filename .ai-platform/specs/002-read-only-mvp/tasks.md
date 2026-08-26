@@ -28,7 +28,7 @@
 
 ## T005 Release Readiness
 
-- Status: In review; local gates passed, GitHub CI pending
+- Status: Complete
 - Dependencies: T002-T004
 - Allowed files: CI, documentation, Agent Skill, evidence and release metadata
 - Deliverable: public MVP documentation and complete verification evidence
