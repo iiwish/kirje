@@ -10,6 +10,7 @@ description = "Protocol adapters for the Kirje agent email runtime"
 [dependencies]
 anyhow.workspace = true
 ammonia.workspace = true
+base64.workspace = true
 chrono.workspace = true
 io-imap.workspace = true
 io-sasl.workspace = true

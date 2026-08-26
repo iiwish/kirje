@@ -1,0 +1,36 @@
+schema_version: 1
+packet_id: 003-T006-A001
+task_id: T006
+feature_id: 003-local-sync-index
+status: complete
+title: Store contract and SQLite adapter
+goal: Add a provider-neutral message index port and transactional versioned SQLite adapter.
+requirements: [FR-001, FR-002, FR-004, FR-007, FR-008, NFR-001, NFR-003]
+dependencies: []
+governance_inputs:
+  - .ai-platform/memory/constitution.md
+  - .ai-platform/specs/003-local-sync-index/spec.md
+  - .ai-platform/specs/003-local-sync-index/plan.md
+  - .ai-platform/specs/003-local-sync-index/data-model.md
+  - .ai-platform/specs/003-local-sync-index/analysis.md
+work_unit:
+  title: Store contract and SQLite adapter
+  goal: Add a provider-neutral message index port and transactional versioned SQLite adapter.
+codebase_context:
+  patterns: [kirje-core ports, adapter isolation, stable MailError]
+execution_constraints:
+  branch: codex/local-sync-index
+  adapter: direct_execute
+allowed_files: [Cargo.toml, Cargo.lock, crates/kirje-core/**, crates/kirje-store/**]
+tdd:
+  red: Add compile-level/domain validation tests and SQLite migration, idempotency, reset, and search tests.
+  green: Implement the smallest typed port and rusqlite adapter that passes them.
+  refactor: Keep SQL private and domain serialization bounded.
+tdd_plan: [migration RED, adapter GREEN, transaction and privacy review]
+validation: [cargo test -p kirje-core -p kirje-store --all-features]
+validation_loop: [targeted tests, workspace Clippy, full workspace tests]
+evidence: .ai-platform/evidence/T006/summary.md
+evidence_contract: [summary, real command results, residual risk]
+review_contract: [spec compliance, data safety, migration safety]
+handoff: {commit: conventional, pull_request: required}
+stop_conditions: [A migration could delete an unrecognized schema, credentials would enter SQLite]

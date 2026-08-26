@@ -7,10 +7,13 @@ use std::{
 use anyhow::Context as _;
 use clap::{Parser, Subcommand, ValueEnum};
 use kirje_core::{
-    CONTRACT_VERSION, CredentialKind, Endpoint, MailAccountConfig, MailError, MailErrorCode,
-    MessageRead, MessageReference, MessageSearch, Protocol, TransportSecurity, discover_account,
+    AttachmentRead, CONTRACT_VERSION, CredentialKind, Endpoint, LocalMessageSearch,
+    MailAccountConfig, MailError, MailErrorCode, MessageRead, MessageReference, MessageSearch,
+    Protocol, TransportSecurity, discover_account,
 };
-use kirje_runtime::{AccountRepository, KeyringSecretStore, KirjeRuntime, TomlAccountRepository};
+use kirje_runtime::{
+    AccountRepository, KeyringSecretStore, KirjeRuntime, TomlAccountRepository, resolve_index_path,
+};
 use secrecy::SecretString;
 use serde::Serialize;
 use serde_json::Value;
@@ -29,6 +32,10 @@ struct Cli {
     /// Override the platform-native account configuration path.
     #[arg(long, global = true, env = "KIRJE_CONFIG")]
     config: Option<PathBuf>,
+
+    /// Override the local `SQLite` message index path.
+    #[arg(long, global = true, env = "KIRJE_INDEX")]
+    index: Option<PathBuf>,
 
     #[command(subcommand)]
     command: Command,
@@ -59,6 +66,16 @@ enum Command {
     Message {
         #[command(subcommand)]
         command: MessageCommand,
+    },
+    /// Explicitly synchronize mailbox metadata into the local index.
+    Sync {
+        #[command(subcommand)]
+        command: SyncCommand,
+    },
+    /// Read explicitly selected attachment content without modifying mail.
+    Attachment {
+        #[command(subcommand)]
+        command: AttachmentCommand,
     },
     /// Run protocol adapters for agent harnesses.
     Mcp {
@@ -134,6 +151,23 @@ enum MessageCommand {
         #[arg(long, default_value_t = kirje_core::DEFAULT_MESSAGE_LIMIT)]
         limit: u16,
     },
+    /// Search indexed envelope metadata without network or credentials.
+    SearchLocal {
+        #[arg(long)]
+        account: String,
+        #[arg(long)]
+        mailbox: String,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long)]
+        subject: Option<String>,
+        #[arg(long)]
+        unread: Option<bool>,
+        #[arg(long, default_value_t = kirje_core::DEFAULT_MESSAGE_LIMIT)]
+        limit: u16,
+    },
     /// Read one scoped message using IMAP BODY.PEEK.
     Read {
         #[arg(long)]
@@ -146,6 +180,48 @@ enum MessageCommand {
         uid_validity: Option<u32>,
         #[arg(long, default_value_t = kirje_core::DEFAULT_BODY_CHARS)]
         max_body_chars: u32,
+    },
+}
+
+#[derive(Subcommand)]
+enum SyncCommand {
+    /// Fetch one bounded metadata batch and transactionally update the index.
+    Run {
+        #[arg(long)]
+        account: String,
+        #[arg(long)]
+        mailbox: String,
+        #[arg(long, default_value_t = kirje_core::DEFAULT_SYNC_LIMIT)]
+        limit: u16,
+        /// Rebuild the indexed newest window for this mailbox.
+        #[arg(long)]
+        refresh: bool,
+    },
+    /// Inspect local mailbox coverage without network or credentials.
+    Status {
+        #[arg(long)]
+        account: String,
+        #[arg(long)]
+        mailbox: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum AttachmentCommand {
+    /// Read one server-returned attachment id as bounded untrusted base64.
+    Read {
+        #[arg(long)]
+        account: String,
+        #[arg(long)]
+        mailbox: String,
+        #[arg(long)]
+        uid: u32,
+        #[arg(long)]
+        uid_validity: Option<u32>,
+        #[arg(long)]
+        part_id: String,
+        #[arg(long, default_value_t = kirje_core::DEFAULT_ATTACHMENT_BYTES)]
+        max_bytes: u32,
     },
 }
 
@@ -202,12 +278,24 @@ struct DoctorReport {
     version: &'static str,
     interfaces: [&'static str; 2],
     default_mode: &'static str,
-    exposed_write_tools: bool,
-    config_path: String,
-    config_exists: bool,
+    safety: SafetyReport,
+    config: FileStatus,
     configured_accounts: usize,
+    index: FileStatus,
     credential_store: &'static str,
     credential_store_available: bool,
+}
+
+#[derive(Serialize)]
+struct SafetyReport {
+    exposed_remote_write_tools: bool,
+    local_index_write_tools: bool,
+}
+
+#[derive(Serialize)]
+struct FileStatus {
+    path: String,
+    exists: bool,
 }
 
 #[derive(Serialize)]
@@ -279,7 +367,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             command: McpCommand::Serve
         }
     ) {
-        kirje_mcp::serve_stdio(cli.config)
+        kirje_mcp::serve_stdio(cli.config, cli.index)
             .await
             .context("MCP stdio server stopped unexpectedly")?;
         return Ok(ExitCode::SUCCESS);
@@ -306,11 +394,13 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
 fn execute_local(cli: &Cli) -> Result<Value, MailError> {
     match &cli.command {
         Command::Schema => json_value(schema_report()),
-        Command::Doctor => json_value(doctor_report(cli.config.clone())?),
+        Command::Doctor => json_value(doctor_report(cli.config.clone(), cli.index.clone())?),
         Command::Account { command } => handle_account(cli, command),
         Command::Secret { command } => handle_secret(cli, command),
         Command::Mailbox { command } => handle_mailbox(cli, command),
         Command::Message { command } => handle_message(cli, command),
+        Command::Sync { command } => handle_sync(cli, command),
+        Command::Attachment { command } => handle_attachment(cli, command),
         Command::Mcp { .. } => unreachable!("MCP command handled before local dispatch"),
     }
 }
@@ -441,11 +531,64 @@ fn handle_message(cli: &Cli, command: &MessageCommand) -> Result<Value, MailErro
             },
             max_body_chars: *max_body_chars,
         })?),
+        MessageCommand::SearchLocal {
+            account,
+            mailbox,
+            from,
+            to,
+            subject,
+            unread,
+            limit,
+        } => json_value(runtime(cli)?.search_index(&LocalMessageSearch {
+            account_id: account.clone(),
+            mailbox: mailbox.clone(),
+            from: from.clone(),
+            to: to.clone(),
+            subject: subject.clone(),
+            unread: *unread,
+            limit: *limit,
+        })?),
+    }
+}
+
+fn handle_sync(cli: &Cli, command: &SyncCommand) -> Result<Value, MailError> {
+    match command {
+        SyncCommand::Run {
+            account,
+            mailbox,
+            limit,
+            refresh,
+        } => json_value(runtime(cli)?.sync_mailbox(account, mailbox, *limit, *refresh)?),
+        SyncCommand::Status { account, mailbox } => {
+            json_value(runtime(cli)?.index_status(account, mailbox)?)
+        }
+    }
+}
+
+fn handle_attachment(cli: &Cli, command: &AttachmentCommand) -> Result<Value, MailError> {
+    match command {
+        AttachmentCommand::Read {
+            account,
+            mailbox,
+            uid,
+            uid_validity,
+            part_id,
+            max_bytes,
+        } => json_value(runtime(cli)?.read_attachment(&AttachmentRead {
+            reference: MessageReference {
+                account_id: account.clone(),
+                mailbox: mailbox.clone(),
+                uid_validity: *uid_validity,
+                uid: *uid,
+            },
+            part_id: part_id.clone(),
+            max_bytes: *max_bytes,
+        })?),
     }
 }
 
 fn runtime(cli: &Cli) -> Result<KirjeRuntime, MailError> {
-    KirjeRuntime::local(cli.config.clone())
+    KirjeRuntime::local_with_index(cli.config.clone(), cli.index.clone())
 }
 
 fn require_interactive_secret_terminal() -> Result<(), MailError> {
@@ -510,21 +653,35 @@ fn build_account(
     Ok(account)
 }
 
-fn doctor_report(config: Option<PathBuf>) -> Result<DoctorReport, MailError> {
+fn doctor_report(
+    config: Option<PathBuf>,
+    index: Option<PathBuf>,
+) -> Result<DoctorReport, MailError> {
+    let custom_config = config.is_some();
     let path = match config {
         Some(path) => path,
         None => TomlAccountRepository::default_path()?,
     };
+    let index_path = resolve_index_path(custom_config.then_some(path.as_path()), index)?;
     let configured_accounts = TomlAccountRepository::new(path.clone()).list()?.len();
     Ok(DoctorReport {
         name: "kirje",
         version: env!("CARGO_PKG_VERSION"),
         interfaces: ["cli", "mcp_stdio"],
-        default_mode: "read_only",
-        exposed_write_tools: false,
-        config_exists: path.exists(),
-        config_path: path.display().to_string(),
+        default_mode: "remote_read_only_local_index",
+        safety: SafetyReport {
+            exposed_remote_write_tools: false,
+            local_index_write_tools: true,
+        },
+        config: FileStatus {
+            exists: path.exists(),
+            path: path.display().to_string(),
+        },
         configured_accounts,
+        index: FileStatus {
+            exists: index_path.exists(),
+            path: index_path.display().to_string(),
+        },
         credential_store: "os_native",
         credential_store_available: KeyringSecretStore::available(),
     })
@@ -557,6 +714,21 @@ fn schema_report() -> SchemaReport {
                 "message search|read",
                 "remote_read_only_bounded_untrusted",
                 "message metadata or sanitized content",
+            ),
+            command(
+                "message search-local",
+                "local_read_only_bounded_untrusted",
+                "indexed message metadata",
+            ),
+            command(
+                "sync run|status",
+                "remote_read_only_local_index_write",
+                "sync report or local coverage",
+            ),
+            command(
+                "attachment read",
+                "remote_read_only_bounded_untrusted",
+                "base64 attachment content",
             ),
             command("mcp serve", "read_only_tools_only", "MCP stdio transport"),
         ],

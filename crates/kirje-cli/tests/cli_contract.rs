@@ -92,3 +92,91 @@ fn malformed_commands_return_json_and_exit_two() {
     assert_eq!(json["ok"], false);
     assert_eq!(json["error"]["code"], "invalid_input");
 }
+
+#[test]
+fn empty_local_index_status_and_search_need_no_secret() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let config = directory.path().join("accounts.toml");
+    let index = directory.path().join("index.sqlite3");
+    Command::cargo_bin("kirje")
+        .expect("kirje binary")
+        .args([
+            "--config",
+            config.to_str().expect("config path"),
+            "--index",
+            index.to_str().expect("index path"),
+            "account",
+            "add",
+            "personal",
+            "agent@163.com",
+        ])
+        .assert()
+        .success();
+
+    let status = Command::cargo_bin("kirje")
+        .expect("kirje binary")
+        .args([
+            "--config",
+            config.to_str().expect("config path"),
+            "--index",
+            index.to_str().expect("index path"),
+            "sync",
+            "status",
+            "--account",
+            "personal",
+            "--mailbox",
+            "INBOX",
+        ])
+        .output()
+        .expect("sync status");
+    assert!(status.status.success());
+    let status_json: serde_json::Value =
+        serde_json::from_slice(&status.stdout).expect("status JSON");
+    assert!(status_json["data"].is_null());
+
+    let search = Command::cargo_bin("kirje")
+        .expect("kirje binary")
+        .args([
+            "--config",
+            config.to_str().expect("config path"),
+            "--index",
+            index.to_str().expect("index path"),
+            "message",
+            "search-local",
+            "--account",
+            "personal",
+            "--mailbox",
+            "INBOX",
+        ])
+        .output()
+        .expect("local search");
+    assert!(search.status.success());
+    let search_json: serde_json::Value =
+        serde_json::from_slice(&search.stdout).expect("search JSON");
+    assert_eq!(search_json["data"]["returned"], 0);
+    assert_eq!(search_json["data"]["untrusted"], true);
+}
+
+#[test]
+fn relative_config_and_index_paths_are_supported() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let output = Command::cargo_bin("kirje")
+        .expect("kirje binary")
+        .current_dir(directory.path())
+        .args([
+            "--config",
+            "accounts.toml",
+            "--index",
+            "index.sqlite3",
+            "account",
+            "add",
+            "personal",
+            "agent@163.com",
+        ])
+        .output()
+        .expect("relative account add");
+
+    assert!(output.status.success());
+    assert!(directory.path().join("accounts.toml").is_file());
+    assert!(directory.path().join("index.sqlite3").is_file());
+}

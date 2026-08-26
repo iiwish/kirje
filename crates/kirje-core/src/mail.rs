@@ -12,6 +12,10 @@ pub const DEFAULT_MESSAGE_LIMIT: u16 = 25;
 pub const MAX_MESSAGE_LIMIT: u16 = 100;
 pub const DEFAULT_BODY_CHARS: u32 = 32_768;
 pub const MAX_BODY_CHARS: u32 = 65_536;
+pub const DEFAULT_SYNC_LIMIT: u16 = 250;
+pub const MAX_SYNC_LIMIT: u16 = 500;
+pub const DEFAULT_ATTACHMENT_BYTES: u32 = 256 * 1024;
+pub const MAX_ATTACHMENT_BYTES: u32 = 1024 * 1024;
 const MAX_MAILBOX_CHARS: usize = 4_096;
 const MAX_SEARCH_VALUE_CHARS: usize = 1_024;
 
@@ -128,6 +132,7 @@ pub struct Mailbox {
 pub struct MailboxPage {
     pub mailboxes: Vec<Mailbox>,
     pub returned: u16,
+    pub untrusted: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -241,6 +246,146 @@ pub struct MessagePage {
     pub returned: u16,
     pub limit: u16,
     pub has_more: bool,
+    pub untrusted: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct SyncCursor {
+    #[schemars(range(min = 1))]
+    pub uid_validity: u32,
+    pub highest_uid: Option<u32>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct MailboxSyncRequest {
+    pub account_id: String,
+    pub mailbox: String,
+    pub cursor: Option<SyncCursor>,
+    #[serde(default = "default_sync_limit")]
+    #[schemars(range(min = 1, max = 500))]
+    pub limit: u16,
+}
+
+const fn default_sync_limit() -> u16 {
+    DEFAULT_SYNC_LIMIT
+}
+
+impl MailboxSyncRequest {
+    /// Validate a bounded, mailbox-scoped synchronization request.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MailErrorCode::InvalidInput`] for invalid scope or limits.
+    pub fn validate(&self) -> Result<(), MailError> {
+        validate_scope(&self.account_id, &self.mailbox)?;
+        if self.limit == 0 || self.limit > MAX_SYNC_LIMIT {
+            return Err(MailError::invalid_input(format!(
+                "sync limit must be between 1 and {MAX_SYNC_LIMIT}"
+            )));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct MailboxSyncBatch {
+    pub account_id: String,
+    pub mailbox: String,
+    #[schemars(range(min = 1))]
+    pub uid_validity: u32,
+    pub messages: Vec<MessageEnvelope>,
+    pub remote_total: Option<u64>,
+    pub has_more: bool,
+    pub reset_required: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct MailboxSyncState {
+    pub account_id: String,
+    pub mailbox: String,
+    #[schemars(range(min = 1))]
+    pub uid_validity: u32,
+    pub highest_uid: Option<u32>,
+    pub indexed_messages: u64,
+    pub initial_window_complete: bool,
+    pub remote_total: Option<u64>,
+    pub last_synced_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct MailboxSyncReport {
+    pub state: MailboxSyncState,
+    pub fetched: u16,
+    pub stored: u16,
+    pub reset: bool,
+    pub has_more: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct LocalMessageSearch {
+    pub account_id: String,
+    pub mailbox: String,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub subject: Option<String>,
+    pub unread: Option<bool>,
+    #[serde(default = "default_message_limit")]
+    #[schemars(range(min = 1, max = 100))]
+    pub limit: u16,
+}
+
+impl LocalMessageSearch {
+    /// Validate bounded metadata-only local search input.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MailErrorCode::InvalidInput`] for invalid scope, filters, or limit.
+    pub fn validate(&self) -> Result<(), MailError> {
+        validate_scope(&self.account_id, &self.mailbox)?;
+        if self.limit == 0 || self.limit > MAX_MESSAGE_LIMIT {
+            return Err(MailError::invalid_input(format!(
+                "limit must be between 1 and {MAX_MESSAGE_LIMIT}"
+            )));
+        }
+        if [&self.from, &self.to, &self.subject]
+            .into_iter()
+            .flatten()
+            .any(|value| value.chars().count() > MAX_SEARCH_VALUE_CHARS)
+        {
+            return Err(MailError::invalid_input(
+                "search filter values cannot exceed 1024 characters",
+            ));
+        }
+        Ok(())
+    }
+}
+
+pub trait MessageIndex: Send + Sync {
+    /// Return the stored cursor and coverage for one mailbox.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable validation or store-read errors.
+    fn state(&self, account_id: &str, mailbox: &str)
+    -> Result<Option<MailboxSyncState>, MailError>;
+
+    /// Transactionally apply one remote batch, replacing the mailbox scope when requested.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable validation, store-read, or store-write errors.
+    fn apply_sync(
+        &self,
+        batch: &MailboxSyncBatch,
+        replace: bool,
+    ) -> Result<MailboxSyncReport, MailError>;
+
+    /// Search bounded indexed envelope metadata without network or credentials.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable validation or store-read errors.
+    fn search(&self, search: &LocalMessageSearch) -> Result<MessagePage, MailError>;
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -249,6 +394,71 @@ pub struct AttachmentMetadata {
     pub filename: Option<String>,
     pub mime_type: String,
     pub size: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct AttachmentRead {
+    pub reference: MessageReference,
+    pub part_id: String,
+    #[serde(default = "default_attachment_bytes")]
+    #[schemars(range(min = 1, max = 1_048_576))]
+    pub max_bytes: u32,
+}
+
+const fn default_attachment_bytes() -> u32 {
+    DEFAULT_ATTACHMENT_BYTES
+}
+
+impl AttachmentRead {
+    /// Validate scoped and bounded attachment input.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MailErrorCode::InvalidInput`] for invalid references, part ids, or limits.
+    pub fn validate(&self) -> Result<(), MailError> {
+        self.reference.validate()?;
+        parse_attachment_index(&self.part_id)?;
+        if self.max_bytes == 0 || self.max_bytes > MAX_ATTACHMENT_BYTES {
+            return Err(MailError::invalid_input(format!(
+                "max_bytes must be between 1 and {MAX_ATTACHMENT_BYTES}"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Return the zero-based MIME attachment index encoded by `part_id`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MailErrorCode::InvalidInput`] when the id is not `attachment-N`.
+    pub fn attachment_index(&self) -> Result<usize, MailError> {
+        parse_attachment_index(&self.part_id)
+    }
+}
+
+fn parse_attachment_index(part_id: &str) -> Result<usize, MailError> {
+    let value = part_id
+        .strip_prefix("attachment-")
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| (1..=100).contains(value))
+        .ok_or_else(|| {
+            MailError::invalid_input(
+                "attachment part id must match attachment-1 through attachment-100",
+            )
+        })?;
+    Ok(value - 1)
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct AttachmentContent {
+    pub reference: MessageReference,
+    pub part_id: String,
+    pub filename: Option<String>,
+    pub mime_type: String,
+    pub size: u64,
+    pub content_base64: String,
+    pub untrusted: bool,
+    pub truncated: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -319,7 +529,11 @@ pub enum MailErrorCode {
     Authentication,
     Protocol,
     MessageNotFound,
+    AttachmentNotFound,
     ResourceLimit,
+    StoreRead,
+    StoreWrite,
+    StoreMigration,
     Internal,
 }
 
@@ -367,7 +581,11 @@ const fn serde_variant_name(code: MailErrorCode) -> &'static str {
         MailErrorCode::Authentication => "authentication",
         MailErrorCode::Protocol => "protocol",
         MailErrorCode::MessageNotFound => "message_not_found",
+        MailErrorCode::AttachmentNotFound => "attachment_not_found",
         MailErrorCode::ResourceLimit => "resource_limit",
+        MailErrorCode::StoreRead => "store_read",
+        MailErrorCode::StoreWrite => "store_write",
+        MailErrorCode::StoreMigration => "store_migration",
         MailErrorCode::Internal => "internal",
     }
 }
@@ -423,6 +641,43 @@ pub trait MailboxReader: Send + Sync {
         secret: &SecretString,
         read: &MessageRead,
     ) -> Result<MessageContent, MailError>;
+
+    /// Fetch one bounded mailbox metadata batch without changing remote state.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable validation, transport, authentication, or protocol error.
+    fn sync_mailbox(
+        &self,
+        account: &MailAccountConfig,
+        secret: &SecretString,
+        request: &MailboxSyncRequest,
+    ) -> Result<MailboxSyncBatch, MailError>;
+
+    /// Read one bounded attachment without changing the message seen state.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable validation, transport, parsing, lookup, or resource error.
+    fn read_attachment(
+        &self,
+        account: &MailAccountConfig,
+        secret: &SecretString,
+        read: &AttachmentRead,
+    ) -> Result<AttachmentContent, MailError>;
+}
+
+fn validate_scope(account_id: &str, mailbox: &str) -> Result<(), MailError> {
+    if account_id.trim().is_empty()
+        || account_id.len() > 64
+        || mailbox.trim().is_empty()
+        || mailbox.chars().count() > MAX_MAILBOX_CHARS
+    {
+        return Err(MailError::invalid_input(
+            "operation requires an account id and mailbox",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -495,5 +750,59 @@ mod tests {
             uid: 7,
         };
         assert!(reference.validate().is_ok());
+    }
+
+    #[test]
+    fn sync_and_local_search_limits_are_bounded() {
+        let request = MailboxSyncRequest {
+            account_id: "personal".to_owned(),
+            mailbox: "INBOX".to_owned(),
+            cursor: None,
+            limit: MAX_SYNC_LIMIT + 1,
+        };
+        assert_eq!(
+            request.validate().unwrap_err().code,
+            MailErrorCode::InvalidInput
+        );
+
+        let search = LocalMessageSearch {
+            account_id: "personal".to_owned(),
+            mailbox: "INBOX".to_owned(),
+            from: None,
+            to: None,
+            subject: None,
+            unread: None,
+            limit: 0,
+        };
+        assert_eq!(
+            search.validate().unwrap_err().code,
+            MailErrorCode::InvalidInput
+        );
+    }
+
+    #[test]
+    fn attachment_reads_require_server_returned_ids_and_strict_bounds() {
+        let reference = MessageReference {
+            account_id: "personal".to_owned(),
+            mailbox: "INBOX".to_owned(),
+            uid_validity: Some(7),
+            uid: 2,
+        };
+        let valid = AttachmentRead {
+            reference: reference.clone(),
+            part_id: "attachment-2".to_owned(),
+            max_bytes: DEFAULT_ATTACHMENT_BYTES,
+        };
+        assert_eq!(valid.attachment_index().expect("index"), 1);
+
+        let invalid = AttachmentRead {
+            reference,
+            part_id: "2".to_owned(),
+            max_bytes: MAX_ATTACHMENT_BYTES + 1,
+        };
+        assert_eq!(
+            invalid.validate().unwrap_err().code,
+            MailErrorCode::InvalidInput
+        );
     }
 }

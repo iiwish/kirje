@@ -41,7 +41,12 @@ a Kirje service.
 - Rust workspace and single `kirje` binary.
 - Versioned JSON envelope and schema discovery.
 - Provider discovery for an initial domestic and international preset set.
-- Typed stdio MCP server with read-only bootstrap tools.
+- Verified-TLS IMAP account diagnostics, mailbox listing, envelope search, and
+  bounded sanitized message reads without remote mutation.
+- Explicit bounded incremental sync into a private SQLite envelope index.
+- Credential-free local search and sync coverage inspection.
+- Explicit bounded attachment reads as untrusted base64.
+- Typed stdio MCP server with the same task-level services as the CLI.
 - Agent guide, reusable Skill, security model, architecture, and CI.
 
 ## Current Exclusions
@@ -49,13 +54,14 @@ a Kirje service.
 - Graphical UI or Tauri runtime.
 - Hosted mailboxes, relay, or control plane.
 - Embedded LLM inference.
-- Live mailbox authentication, synchronization, reading, or writing in the
-  bootstrap release.
+- Background sync, full historical backfill, body indexing, semantic search,
+  and attachment persistence or execution.
+- Remote flag, move, delete, draft, or send operations.
 
 ## Success Criteria
 
-- An agent can inspect the contract and discover a 163 or QQ account without
-  receiving credentials.
-- CLI and MCP return the same core discovery result.
-- MCP exposes no write tool.
+- An agent can inspect, configure, read, synchronize, and search a 163 or QQ
+  mailbox without receiving credentials in its process interface.
+- CLI and MCP use the same runtime and domain contracts.
+- MCP exposes no remote mailbox-write tool and declares local index writes.
 - Format, lint, tests, and build pass locally and in GitHub Actions.

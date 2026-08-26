@@ -1,0 +1,26 @@
+schema_version: 1
+packet_id: 003-T007-A001
+task_id: T007
+feature_id: 003-local-sync-index
+status: complete
+title: Runtime index services
+goal: Coordinate explicit sync, refresh, status, and credential-free local search.
+requirements: [FR-003, FR-004, FR-005, FR-006, FR-007, FR-008, FR-012]
+dependencies: [T006]
+governance_inputs: [.ai-platform/specs/003-local-sync-index/spec.md, .ai-platform/specs/003-local-sync-index/plan.md, .ai-platform/specs/003-local-sync-index/analysis.md]
+work_unit: {title: Runtime index services, goal: Coordinate sync cursors and credential-free local reads.}
+codebase_context: {patterns: [shared KirjeRuntime services, dependency-injected ports]}
+execution_constraints: {branch: codex/local-sync-index, adapter: direct_execute}
+allowed_files: [crates/kirje-runtime/**, crates/kirje-core/**, crates/kirje-store/**]
+tdd:
+  red: Add mock protocol/index tests for cursors, refresh, and offline search.
+  green: Compose protocol and store through runtime methods.
+  refactor: Keep credentials out of local index reads.
+tdd_plan: [mock cursor RED, runtime composition GREEN, credential boundary review]
+validation: [cargo test -p kirje-runtime --all-features]
+validation_loop: [targeted tests, workspace Clippy, full workspace tests]
+evidence: .ai-platform/evidence/T007/summary.md
+evidence_contract: [summary, real command results, residual risk]
+review_contract: [spec compliance, credential boundary, cursor correctness]
+handoff: {commit: conventional, pull_request: required}
+stop_conditions: [Local search requires a credential, refresh affects another mailbox]
