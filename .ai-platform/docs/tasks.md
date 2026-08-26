@@ -1,8 +1,9 @@
 # Product Work Graph
 
 Feature-scoped implementation work is canonical under `.ai-platform/specs`.
-Completed phases are `001-agent-first-bootstrap`, `002-read-only-mvp`, and
-`003-local-sync-index`. The active phase is `004-provider-registry`.
+Completed phases are `001-agent-first-bootstrap`, `002-read-only-mvp`,
+`003-local-sync-index`, `004-provider-registry`, and `005-governed-send`. The
+next feature phase has not been selected.
 
 ## T100: Govern The Next Product Phase
 

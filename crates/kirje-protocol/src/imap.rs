@@ -1006,6 +1006,7 @@ mod tests {
                 port: 993,
                 security: TransportSecurity::ImplicitTls,
             },
+            outgoing: None,
             credential_kind: CredentialKind::AppPassword,
         }
     }

@@ -48,6 +48,20 @@ newest bounded window; later runs fetch above a persisted UID high-water mark.
 UIDVALIDITY changes replace one mailbox scope atomically. Background `IDLE`,
 historical backfill, and reconciliation are separate future capabilities.
 
+### Transactional Send Outbox
+
+Kirje stores immutable bounded send requests in a separate private SQLite
+outbox. Immediate transactions enforce approval and one-time claim transitions.
+SMTP uncertainty is terminal and non-retryable rather than hidden behind an
+automatic retry.
+
+### Lettre SMTP Adapter
+
+Kirje uses Lettre 0.11 for typed MIME construction and SMTP transport with
+implicit TLS or mandatory STARTTLS. The adapter remains behind Kirje's
+provider-neutral `MailSender` port; the send state machine is independent of
+the SMTP library.
+
 ### No Desktop Compatibility Layer
 
 The archived desktop repository is a source of protocol knowledge and sanitized

@@ -1,0 +1,18 @@
+schema_version: 1
+packet_id: 005-T014-A001
+task_id: T014
+feature_id: 005-governed-send
+status: complete
+title: Send contract and account configuration
+goal: Define bounded send contracts and secure SMTP account configuration.
+requirements: [FR-001, FR-002, FR-003, FR-011]
+dependencies: [T013]
+execution_constraints: {branch: codex/governed-send, adapter: direct_execute}
+allowed_files: [Cargo.toml, Cargo.lock, crates/kirje-core/**, crates/kirje-cli/**]
+tdd:
+  red: Add request validation and SMTP configuration compatibility tests.
+  green: Implement the smallest provider-neutral types and CLI config mapping.
+  refactor: Keep protocol details out of command handlers.
+validation: [cargo test -p kirje-core -p kirje-cli --all-features]
+evidence: .ai-platform/evidence/T014/summary.md
+stop_conditions: [secret material enters config, insecure SMTP is accepted]

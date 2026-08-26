@@ -4,32 +4,38 @@
 
 - Status: Complete
 - Product: Kirje
-- Contract: `2026-08-26.3`
+- Contract: `2026-08-26.4`
 - Updated: 2026-08-26
 
 ## Product State
 
-Kirje is a local-first email CLI and MCP runtime for agents. Its remote mailbox
-surface is read-only. The current release supports provider discovery, secure
-account configuration, mailbox diagnostics, message search and sanitized read,
-explicit bounded SQLite synchronization, credential-free offline envelope
-search, bounded attachment reads, and a validated embedded provider registry
-with CLI inspection.
+Kirje is a local-first email CLI and MCP runtime for agents. It supports secure
+provider discovery, non-mutating IMAP reads, explicit SQLite metadata sync,
+offline envelope search, bounded attachment reads, and governed SMTP sending.
+An immutable private outbox separates agent planning, human TTY approval, and
+at-most-once apply. Unknown SMTP outcomes remain terminal `ambiguous` states.
 
 ## Verification
 
 - Workspace formatting and Clippy with warnings denied pass.
-- 57 automated tests and the complete workspace build pass.
+- 75 automated tests and the complete locked workspace build pass.
 - Cargo deny reports advisories, bans, licenses, and sources as acceptable.
-- MCP Inspector reports ten tools with accurate local-write and remote-read
-  annotations.
-- Manual CLI validation confirms contract `2026-08-26.3`, 13 provider profiles,
-  secure 163 defaults, the corrected iCloud SMTP submission endpoint, offline
-  empty-state behavior, and Unix index mode `0600`.
+- MCP stdio contract tests report thirteen protocol-clean tools, including
+  plan/status/apply and no approval operation.
+- Manual CLI validation confirms contract `2026-08-26.4`, secure provider SMTP
+  defaults, governed command metadata, bounded local planning, and TTY rejection
+  for redirected approval.
+- SQLite tests prove private files, immutable requests, expiry, concurrent claim
+  exclusion, successful receipts, and terminal ambiguous outcomes.
 
-Credentialed provider smoke remains opt-in because public CI contains no mailbox
-secrets. The available 163 check stopped before network access because the local
-macOS login keychain was unavailable. Kirje refused an unsafe credential
-fallback, and cleanup verified that neither a keychain entry nor temporary
-configuration/index files remained. Live NetEase authentication and mailbox
-compatibility therefore remain unverified.
+## Live Provider Result
+
+The isolated 163 check reached the normal interactive credential flow, but the
+macOS login keychain rejected the credential write with
+`secret_store_unavailable`. No keychain item was created and the isolated
+configuration, index, and outbox were removed. Authenticated IMAP and SMTP were
+therefore not invoked. Kirje did not use an argument, environment variable,
+pipe, or plaintext credential fallback.
+
+The keyring backend-detection field in `doctor` is explicitly advisory;
+`secret set` and `account status` are the authoritative operation checks.

@@ -1,0 +1,30 @@
+schema_version: 1
+packet_id: 005-T018-A001
+task_id: T018
+feature_id: 005-governed-send
+status: complete
+title: Documentation live verification and release
+goal: Make governed send operable by agents and produce release evidence.
+requirements: [FR-009, FR-010, FR-011, FR-012]
+dependencies: [T017]
+governance_inputs:
+  - .ai-platform/memory/constitution.md
+  - .ai-platform/specs/005-governed-send/spec.md
+  - .ai-platform/specs/005-governed-send/plan.md
+  - .ai-platform/specs/005-governed-send/analysis.md
+work_unit:
+  title: Documentation live verification and release
+  goal: Make governed send operable by agents and produce release evidence.
+codebase_context:
+  patterns: [versioned JSON envelopes, TTY-only approval, sanitized smoke evidence]
+execution_constraints: {branch: codex/governed-send, adapter: direct_execute}
+allowed_files: [README.md, docs/**, skills/**, scripts/**, .ai-platform/**]
+tdd: {red: behavioral tests already exist, green: document verified commands, refactor: remove stale read-only claims}
+tdd_plan: [documentation parity audit, fresh workspace gates, isolated live readiness check]
+validation: [cargo fmt --all --check, cargo clippy --workspace --all-targets --all-features -- -D warnings, cargo test --workspace --all-features --locked, cargo build --workspace --all-features --locked, cargo deny check]
+validation_loop: [documentation search, workspace gates, sanitized live check, Git review]
+evidence: .ai-platform/evidence/T018/summary.md
+evidence_contract: [summary, commands, test count, live result, residual risk]
+review_contract: [approval separation, secret absence, no automatic ambiguous retry, canonical docs]
+handoff: {commit: conventional, pull_request: required}
+stop_conditions: [live test targets a third party, credential boundary is bypassed]

@@ -1,0 +1,18 @@
+schema_version: 1
+packet_id: 005-T015-A001
+task_id: T015
+feature_id: 005-governed-send
+status: complete
+title: Transactional outbox
+goal: Persist immutable plans and enforce guarded transitions.
+requirements: [FR-003, FR-004, FR-005, FR-006, FR-007, FR-008, FR-010]
+dependencies: [T014]
+execution_constraints: {branch: codex/governed-send, adapter: direct_execute}
+allowed_files: [crates/kirje-core/**, crates/kirje-store/**]
+tdd:
+  red: Add lifecycle, expiry, duplicate claim, and concurrency tests.
+  green: Implement a private SQLite outbox and atomic transitions.
+  refactor: Keep SQL state mapping isolated from domain validation.
+validation: [cargo test -p kirje-core -p kirje-store --all-features]
+evidence: .ai-platform/evidence/T015/summary.md
+stop_conditions: [plan mutation after creation, applying plan can be claimed twice]
