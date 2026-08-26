@@ -2,11 +2,11 @@
 
 Feature-scoped implementation work is canonical under `.ai-platform/specs`.
 Completed phases are `001-agent-first-bootstrap`, `002-read-only-mvp`, and
-`003-local-sync-index`.
+`003-local-sync-index`. The active phase is `004-provider-registry`.
 
 ## T100: Govern The Next Product Phase
 
-- Status: Pending
+- Status: Complete
 - Priority: P1
 - Story / Requirement: Define the next approved vertical product slice.
 - Dependencies: T011
@@ -16,7 +16,8 @@ Completed phases are `001-agent-first-bootstrap`, `002-read-only-mvp`, and
 - Goal: keep product scope, security boundaries, and delivery evidence coherent.
 - Allowed files: `.ai-platform/**`
 - Test targets: requirement completeness and architecture consistency
-- Deliverables: confirmed feature spec, plan, work graph, and packets
+- Deliverables: confirmed feature spec, plan, work graph, and packets under
+  `.ai-platform/specs/004-provider-registry`
 - Acceptance criteria: the user explicitly approves the next product contract.
 - Definition of Done: the next feature is ready for test-first execution.
 - Validation commands: delivery artifact validator for the selected feature

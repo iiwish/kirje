@@ -19,8 +19,8 @@ Kirje cloud service.
 - Read-only remote access, with no mailbox write or send tools.
 - Explicit incremental sync into a private local SQLite metadata index.
 - Credential-free offline envelope search and sync coverage inspection.
-- Provider presets for NetEase 163/126, QQ/Foxmail, 139, 189, Sina, Aliyun,
-  Fastmail, and iCloud.
+- A source-backed JSON provider registry for NetEase 163/126/Yeah, QQ/Foxmail,
+  139, 189, Sina, Aliyun, Fastmail, and iCloud.
 - No credential arguments, shell bridges, telemetry, or hosted control plane.
 - Explicit treatment of email content as untrusted input.
 
@@ -29,6 +29,7 @@ Kirje cloud service.
 ```bash
 cargo build --release
 ./target/release/kirje doctor --pretty
+./target/release/kirje provider show 163.com --pretty
 ./target/release/kirje account discover agent@163.com --pretty
 ./target/release/kirje account add personal agent@163.com --pretty
 ./target/release/kirje secret set personal
@@ -105,6 +106,8 @@ The core product invariants are:
 See [docs/architecture.md](docs/architecture.md) and
 [docs/security.md](docs/security.md) for the full technical boundary. Provider
 testing is documented in [docs/conformance.md](docs/conformance.md).
+Registry ownership and source policy are documented in
+[docs/provider-presets.md](docs/provider-presets.md).
 
 ## Local Index
 

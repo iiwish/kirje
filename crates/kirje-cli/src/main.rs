@@ -9,7 +9,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use kirje_core::{
     AttachmentRead, CONTRACT_VERSION, CredentialKind, Endpoint, LocalMessageSearch,
     MailAccountConfig, MailError, MailErrorCode, MessageRead, MessageReference, MessageSearch,
-    Protocol, TransportSecurity, discover_account,
+    Protocol, TransportSecurity, discover_account, find_provider_preset, provider_registry,
 };
 use kirje_runtime::{
     AccountRepository, KeyringSecretStore, KirjeRuntime, TomlAccountRepository, resolve_index_path,
@@ -51,6 +51,11 @@ enum Command {
     Account {
         #[command(subcommand)]
         command: AccountCommand,
+    },
+    /// Inspect the built-in, source-backed provider preset registry.
+    Provider {
+        #[command(subcommand)]
+        command: ProviderCommand,
     },
     /// Manage credentials through the OS credential store.
     Secret {
@@ -109,6 +114,14 @@ enum AccountCommand {
     Status { account_id: String },
     /// Verify TLS, IMAP negotiation, and authentication.
     Check { account_id: String },
+}
+
+#[derive(Subcommand)]
+enum ProviderCommand {
+    /// List the bounded built-in provider profiles.
+    List,
+    /// Show one provider profile by profile id or mailbox domain.
+    Show { selector: String },
 }
 
 #[derive(Subcommand)]
@@ -396,12 +409,35 @@ fn execute_local(cli: &Cli) -> Result<Value, MailError> {
         Command::Schema => json_value(schema_report()),
         Command::Doctor => json_value(doctor_report(cli.config.clone(), cli.index.clone())?),
         Command::Account { command } => handle_account(cli, command),
+        Command::Provider { command } => handle_provider(command),
         Command::Secret { command } => handle_secret(cli, command),
         Command::Mailbox { command } => handle_mailbox(cli, command),
         Command::Message { command } => handle_message(cli, command),
         Command::Sync { command } => handle_sync(cli, command),
         Command::Attachment { command } => handle_attachment(cli, command),
         Command::Mcp { .. } => unreachable!("MCP command handled before local dispatch"),
+    }
+}
+
+fn handle_provider(command: &ProviderCommand) -> Result<Value, MailError> {
+    match command {
+        ProviderCommand::List => {
+            let registry = provider_registry();
+            json_value(serde_json::json!({
+                "schema_version": registry.schema_version,
+                "updated_at": registry.updated_at,
+                "returned": registry.providers.len(),
+                "providers": registry.providers.iter().map(|preset| serde_json::json!({
+                    "id": preset.id,
+                    "provider_id": preset.provider_id,
+                    "name": preset.name,
+                    "domains": preset.domains,
+                })).collect::<Vec<_>>()
+            }))
+        }
+        ProviderCommand::Show { selector } => find_provider_preset(selector)
+            .ok_or_else(|| MailError::invalid_input("provider preset was not found"))
+            .and_then(json_value),
     }
 }
 
@@ -700,6 +736,11 @@ fn schema_report() -> SchemaReport {
                 "provider discovery",
             ),
             command(
+                "provider list|show <id-or-domain>",
+                "local_read_only",
+                "source-backed provider presets",
+            ),
+            command(
                 "account add|list|status|check",
                 "local_config_or_remote_read_only",
                 "account state",
@@ -838,5 +879,14 @@ mod tests {
                 || entry.name.contains("message move")
                 || entry.safety.contains("remote_write")
         }));
+    }
+
+    #[test]
+    fn provider_registry_has_bounded_inspection_commands() {
+        let list = Cli::try_parse_from(["kirje", "provider", "list"]);
+        let show = Cli::try_parse_from(["kirje", "provider", "show", "163.com"]);
+
+        assert!(list.is_ok());
+        assert!(show.is_ok());
     }
 }
