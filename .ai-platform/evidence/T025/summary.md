@@ -25,3 +25,4 @@ Delivery references:
 - Final-head CI run: `https://github.com/iiwish/kirje/actions/runs/33024829162` (green)
 - Latest branch CI run: `https://github.com/iiwish/kirje/actions/runs/33024924816` (green)
 - Merge commit: `5799332` on `main` (PR #5 merged).
+- Post-merge main CI run: `https://github.com/iiwish/kirje/actions/runs/33025196060` (green, head `a0070b9`).

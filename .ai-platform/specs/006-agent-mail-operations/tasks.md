@@ -72,7 +72,7 @@
 
 ## T024 Documentation And Operational Scripts
 
-- Status: Draft
+- Status: Complete
 - Requirements: FR-022, FR-023
 - Dependencies: T022, T023
 - Blocks: T025

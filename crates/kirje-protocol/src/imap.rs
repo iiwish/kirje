@@ -91,7 +91,7 @@ impl MailboxReader for PimalayaImapReader {
         if rows.len() > MAX_MAILBOXES {
             return Err(MailError::new(
                 MailErrorCode::ResourceLimit,
-                "account exceeds the 1000-mailbox read-only MVP limit",
+                "account exceeds the 1000-mailbox limit",
                 false,
             ));
         }
