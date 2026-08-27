@@ -6,9 +6,10 @@ checks. Public CI never receives mailbox credentials.
 ## Automated Contract Coverage
 
 - IMAP sessions use platform-verified TLS and PLAIN SASL over encrypted transport.
-- NetEase Coremail uses encrypted IMAP `LOGIN` for app-password accounts and
-  disables the falsely advertised SASL initial response; this provider quirk
-  stays inside the IMAP adapter.
+- NetEase Coremail uses encrypted IMAP `LOGIN` for app-password accounts,
+  disables the falsely advertised SASL initial response, and sends RFC 2971
+  client identity immediately after authentication before mailbox access;
+  these provider quirks stay inside the IMAP adapter.
 - QQ Mail and Fastmail receive the RFC 2971 client ID exchange they require.
 - Mailboxes open with `EXAMINE`; message bodies use bounded `BODY.PEEK[]`.
 - Initial and incremental sync use bounded UID FETCH batches and persist scoped
@@ -71,7 +72,10 @@ same configured address:
 
 The script creates an isolated outbox and benign self-addressed plan, pauses for
 the human's exact interactive approval, applies it once, and searches INBOX for
-the unique subject. It emits only aggregate delivery state and match count.
+the unique subject. A positive SMTP acceptance receipt is the send success
+criterion; recipient-INBOX visibility is reported separately because SMTP
+acceptance does not guarantee final delivery. The script emits only aggregate
+delivery state, acceptance, visibility, and match count.
 
 For a governed IMAP mutation check, use a dedicated mailbox and a message whose
 initial state is known. The script toggles the star flag on one exact scoped
