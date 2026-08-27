@@ -26,7 +26,8 @@ application services and must not become a second implementation.
   `MailboxReader` / `MailboxMutator` / `MailSender` / `OperationLedger` ports,
   and the validated embedded provider registry.
 - `kirje-protocol`: Pimalaya `io-imap` reads and capability-aware mailbox
-  mutations plus Lettre MIME/SMTP submission.
+  mutations plus Lettre MIME/SMTP submission. Coremail app-password accounts
+  use encrypted IMAP `LOGIN` when its public endpoint does not advertise PLAIN.
 - `kirje-runtime`: atomic TOML account repository, OS keyring adapter, draft
   composition, plan/approve/apply orchestration, and the application services
   shared by CLI and MCP.

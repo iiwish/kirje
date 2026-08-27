@@ -10,7 +10,7 @@ use io_imap::{
         select::ImapMailboxSelectOptions, store::ImapMessageStoreOptions,
     },
     rfc6851::r#move::ImapMessageMoveOptions,
-    session::ImapSessionOpenOptions,
+    session::{ImapSessionOpenError, ImapSessionOpenOptions},
     types::{
         body::BodyStructure,
         core::{AString, IString, NString, Vec1},
@@ -24,7 +24,7 @@ use io_imap::{
         status::{StatusDataItem, StatusDataItemName},
     },
 };
-use io_sasl::{mechanism::Sasl, rfc4616::plain::SaslPlainCreds};
+use io_sasl::{login::SaslLoginCreds, mechanism::Sasl, rfc4616::plain::SaslPlainCreds};
 use kirje_core::{
     AttachmentContent, AttachmentMetadata, AttachmentRead, ConnectionReport, MailAccountConfig,
     MailAddress, MailError, MailErrorCode, MailOperationKind, Mailbox, MailboxMutator,
@@ -579,23 +579,40 @@ fn connect(
         },
         ..Default::default()
     };
-    let sasl = Sasl::Plain(SaslPlainCreds {
-        authzid: None,
-        authcid: account.username.clone(),
-        passwd: secret.clone(),
-    });
+    // Coremail advertises only XOAUTH2 on these public endpoints even though
+    // app-password accounts authenticate through the encrypted IMAP LOGIN
+    // command. Keep this provider quirk in the protocol adapter.
+    let sasl = authentication_for_account(account, secret);
     let options = session_options(account)?;
 
     ImapClientStd::connect(&url, &tls, Some(sasl), options).map_err(|error| classify_error(&error))
 }
 
-fn session_options(account: &MailAccountConfig) -> Result<ImapSessionOpenOptions, MailError> {
-    let host = account.incoming.host.to_ascii_lowercase();
-    let sasl_ir = matches!(
-        host.as_str(),
+fn authentication_for_account(account: &MailAccountConfig, secret: &SecretString) -> Sasl {
+    if is_coremail_host(&account.incoming.host) {
+        Sasl::Login(SaslLoginCreds {
+            username: account.username.clone(),
+            password: secret.clone(),
+        })
+    } else {
+        Sasl::Plain(SaslPlainCreds {
+            authzid: None,
+            authcid: account.username.clone(),
+            passwd: secret.clone(),
+        })
+    }
+}
+
+fn is_coremail_host(host: &str) -> bool {
+    matches!(
+        host.to_ascii_lowercase().as_str(),
         "imap.163.com" | "imap.126.com" | "imap.yeah.net"
     )
-    .then_some(false);
+}
+
+fn session_options(account: &MailAccountConfig) -> Result<ImapSessionOpenOptions, MailError> {
+    let host = account.incoming.host.to_ascii_lowercase();
+    let sasl_ir = is_coremail_host(&host).then_some(false);
     let auto_id = matches!(host.as_str(), "imap.qq.com" | "imap.fastmail.com")
         .then(build_client_id)
         .transpose()?;
@@ -632,7 +649,14 @@ fn classify_error(error: &ImapClientError) -> MailError {
         | ImapClientError::AuthAnonymous(_)
         | ImapClientError::AuthOAuthBearer(_)
         | ImapClientError::AuthXOAuth2(_)
-        | ImapClientError::InvalidLoginCredentials(_) => (
+        | ImapClientError::InvalidLoginCredentials(_)
+        | ImapClientError::Login(_)
+        | ImapClientError::SessionOpen(
+            ImapSessionOpenError::Login(_)
+            | ImapSessionOpenError::AuthLogin(_)
+            | ImapSessionOpenError::AuthPlain(_)
+            | ImapSessionOpenError::AuthXoauth2(_),
+        ) => (
             MailErrorCode::Authentication,
             "IMAP authentication failed",
             false,
@@ -1412,6 +1436,22 @@ mod tests {
         qq.incoming.host = "imap.qq.com".to_owned();
         let qq = session_options(&qq).expect("QQ options");
         assert!(qq.auto_id.is_some());
+    }
+
+    #[test]
+    fn coremail_app_passwords_use_encrypted_imap_login() {
+        let secret = SecretString::new("placeholder".to_owned().into());
+        assert!(matches!(
+            authentication_for_account(&account(), &secret),
+            Sasl::Login(_)
+        ));
+
+        let mut generic = account();
+        generic.incoming.host = "imap.example.org".to_owned();
+        assert!(matches!(
+            authentication_for_account(&generic, &secret),
+            Sasl::Plain(_)
+        ));
     }
 
     #[test]

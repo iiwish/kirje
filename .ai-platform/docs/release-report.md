@@ -21,7 +21,7 @@ claims, crash recovery, and terminal `ambiguous` states.
 
 - Workspace formatting, Clippy with warnings denied, locked tests, locked build,
   and Cargo deny pass.
-- 90 automated tests cover composition, IMAP mutation command generation,
+- 91 automated tests cover composition, IMAP mutation command generation,
   attachment bounds, ledger migration/recovery, draft and operation commands,
   MCP stdio, and redirected approval rejection.
 - MCP stdio contract tests report the task-level draft and operation tools with
@@ -45,4 +45,7 @@ environment blocker. No live script was allowed to fall back to an argument,
 environment variable, pipe, or plaintext credential.
 
 The keyring backend-detection field in `doctor` is explicitly advisory;
-`secret set` and `account status` are the authoritative operation checks.
+`secret set` and `account status` are the authoritative operation checks. The
+current dedicated 163 validation reached the endpoint over verified TLS but
+returned a sanitized authentication failure, so no mailbox content or remote
+mutation was accessed.

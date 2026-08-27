@@ -6,7 +6,9 @@ checks. Public CI never receives mailbox credentials.
 ## Automated Contract Coverage
 
 - IMAP sessions use platform-verified TLS and PLAIN SASL over encrypted transport.
-- NetEase Coremail disables the falsely advertised SASL initial response.
+- NetEase Coremail uses encrypted IMAP `LOGIN` for app-password accounts and
+  disables the falsely advertised SASL initial response; this provider quirk
+  stays inside the IMAP adapter.
 - QQ Mail and Fastmail receive the RFC 2971 client ID exchange they require.
 - Mailboxes open with `EXAMINE`; message bodies use bounded `BODY.PEEK[]`.
 - Initial and incremental sync use bounded UID FETCH batches and persist scoped

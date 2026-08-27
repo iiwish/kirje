@@ -4,16 +4,17 @@ Local gates pass on the v0.3 worktree:
 
 - `cargo fmt --all --check`
 - `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`
-- `cargo test --workspace --all-features --locked` (90 tests)
+- `cargo test --workspace --all-features --locked` (91 tests)
 - `cargo build --workspace --all-features --locked`
 - `cargo deny check`
 - `bash -n scripts/live-imap-smoke.sh scripts/live-send-smoke.sh scripts/live-operations-smoke.sh`
 
 Manual contract checks report `2026-08-27.5`, private empty-account behavior,
-bounded schema output, and MCP stdio with 24 tools and no approval tool. The
-controlled live mailbox check is blocked in this environment because no
-dedicated account or OS-stored credential is configured. No secret fallback or
-remote mutation was attempted.
+bounded schema output, and MCP stdio with 24 tools and no approval tool. A
+controlled live attempt reached the 163 IMAP endpoint over verified TLS and
+confirmed the OS credential boundary, but authentication returned a sanitized
+failure. No authenticated mailbox read, send, or remote mutation was attempted
+after that failure; no secret fallback or remote mutation was used.
 
 Delivery references:
 
