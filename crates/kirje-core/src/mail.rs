@@ -75,7 +75,7 @@ impl MailAccountConfig {
         }
         if self.incoming.protocol != Protocol::Imap {
             return Err(MailError::invalid_input(
-                "read-only MVP accounts require an IMAP incoming endpoint",
+                "accounts require an IMAP incoming endpoint",
             ));
         }
         if !valid_host(&self.incoming.host) || self.incoming.port == 0 {
