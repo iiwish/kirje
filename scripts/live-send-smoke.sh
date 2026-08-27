@@ -42,9 +42,11 @@ plan_id=$(jq -r '.data.id' "$work_dir/plan.json")
   >"$work_dir/applied.json"
 
 state=$(jq -r '.data.status' "$work_dir/applied.json")
-if [[ "$state" != sent ]]; then
+accepted=$(jq -r '.data.receipt.accepted // false' "$work_dir/applied.json")
+if [[ "$state" != sent || "$accepted" != true ]]; then
   jq -n --arg account_id "$account_id" --arg state "$state" \
-    '{ok: false, account_id: $account_id, delivery_state: $state}'
+    --argjson accepted "$accepted" \
+    '{ok: false, account_id: $account_id, delivery_state: $state, smtp_accepted: $accepted}'
   exit 1
 fi
 
@@ -57,5 +59,6 @@ for _ in 1 2 3 4 5; do
   sleep 3
 done
 
-jq -n --arg account_id "$account_id" --arg state "$state" --argjson matches "$matches" \
-  '{ok: ($state == "sent" and $matches > 0), account_id: $account_id, delivery_state: $state, inbox_matches: $matches}'
+jq -n --arg account_id "$account_id" --arg state "$state" \
+  --argjson accepted "$accepted" --argjson matches "$matches" \
+  '{ok: ($state == "sent" and $accepted), account_id: $account_id, delivery_state: $state, smtp_accepted: $accepted, inbox_visible: ($matches > 0), inbox_matches: $matches}'

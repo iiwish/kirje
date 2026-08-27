@@ -613,9 +613,9 @@ fn is_coremail_host(host: &str) -> bool {
 fn session_options(account: &MailAccountConfig) -> Result<ImapSessionOpenOptions, MailError> {
     let host = account.incoming.host.to_ascii_lowercase();
     let sasl_ir = is_coremail_host(&host).then_some(false);
-    let auto_id = matches!(host.as_str(), "imap.qq.com" | "imap.fastmail.com")
-        .then(build_client_id)
-        .transpose()?;
+    let needs_auto_id =
+        is_coremail_host(&host) || matches!(host.as_str(), "imap.qq.com" | "imap.fastmail.com");
+    let auto_id = needs_auto_id.then(build_client_id).transpose()?;
 
     Ok(ImapSessionOpenOptions {
         starttls: matches!(account.incoming.security, TransportSecurity::StartTls),
@@ -1431,6 +1431,7 @@ mod tests {
     fn provider_quirks_are_applied_by_the_adapter() {
         let netease = session_options(&account()).expect("NetEase options");
         assert_eq!(netease.sasl_ir, Some(false));
+        assert!(netease.auto_id.is_some());
 
         let mut qq = account();
         qq.incoming.host = "imap.qq.com".to_owned();

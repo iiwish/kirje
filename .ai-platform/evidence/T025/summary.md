@@ -10,11 +10,19 @@ Local gates pass on the v0.3 worktree:
 - `bash -n scripts/live-imap-smoke.sh scripts/live-send-smoke.sh scripts/live-operations-smoke.sh`
 
 Manual contract checks report `2026-08-27.5`, private empty-account behavior,
-bounded schema output, and MCP stdio with 24 tools and no approval tool. A
-controlled live attempt reached the 163 IMAP endpoint over verified TLS and
-confirmed the OS credential boundary, but authentication returned a sanitized
-failure. No authenticated mailbox read, send, or remote mutation was attempted
-after that failure; no secret fallback or remote mutation was used.
+bounded schema output, and MCP stdio with 24 tools and no approval tool.
+
+Controlled 163/Coremail verification on 2026-08-27 used the normal interactive
+OS-keyring workflow and verified TLS. The authenticated read-only smoke listed
+9 mailboxes, sampled 1 remote envelope, synchronized 10 bounded envelopes, found
+1 local result, and completed a bounded body read without recording mailbox
+content. The governed self-addressed SMTP plan received interactive approval,
+reached `sent`, and recorded a positive SMTP acceptance receipt; the unique
+message was not visible in INBOX during the bounded polling window, which is
+recorded separately from SMTP acceptance. A governed star operation reached
+`succeeded`, and its separately approved restoration also reached `succeeded`;
+the final flag state matched the starting state. No address, UID, subject,
+credential, or mailbox content is retained in this evidence.
 
 Delivery references:
 
