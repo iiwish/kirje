@@ -27,3 +27,8 @@ Delivery references:
 - Latest branch CI run: `https://github.com/iiwish/kirje/actions/runs/33024924816` (green)
 - Merge commit: `5799332` on `main` (PR #5 merged).
 - Post-merge main CI run: `https://github.com/iiwish/kirje/actions/runs/33025196060` (green, head `a0070b9`).
+- Coremail compatibility fix: `e527615`
+- Compatibility PR: `https://github.com/iiwish/kirje/pull/7` (merged)
+- Compatibility PR CI: `https://github.com/iiwish/kirje/actions/runs/33030916793` (green)
+- Compatibility merge commit: `d657950` on `main`
+- Latest post-merge main CI: `https://github.com/iiwish/kirje/actions/runs/33031001611` (green, head `d657950`).
