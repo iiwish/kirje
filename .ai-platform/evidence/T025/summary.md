@@ -39,4 +39,9 @@ Delivery references:
 - Compatibility PR: `https://github.com/iiwish/kirje/pull/7` (merged)
 - Compatibility PR CI: `https://github.com/iiwish/kirje/actions/runs/33030916793` (green)
 - Compatibility merge commit: `d657950` on `main`
-- Latest post-merge main CI: `https://github.com/iiwish/kirje/actions/runs/33031001611` (green, head `d657950`).
+- Coremail LOGIN post-merge main CI: `https://github.com/iiwish/kirje/actions/runs/33031001611` (green, head `d657950`).
+- Post-authentication ID and live-validation commit: `b5a1c2c`
+- Final compatibility PR: `https://github.com/iiwish/kirje/pull/9` (merged)
+- Final compatibility PR CI: `https://github.com/iiwish/kirje/actions/runs/33035158033` (green)
+- Final compatibility merge commit: `44c6f50` on `main`
+- Final post-merge main CI: `https://github.com/iiwish/kirje/actions/runs/33035252096` (green, head `44c6f50`).
