@@ -23,6 +23,7 @@ base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["alloc", "clock", "serde"] }
 clap = { version = "4.5", features = ["derive", "env"] }
 directories = "6.0"
+ed25519-dalek = { version = "=3.0.0", default-features = false, features = ["fast"] }
 io-imap = { version = "0.6", default-features = false, features = ["client", "rustls-ring"] }
 io-sasl = { version = "0.1", default-features = false }
 kirje-core = { path = "crates/kirje-core" }

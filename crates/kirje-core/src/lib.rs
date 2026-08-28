@@ -7,15 +7,23 @@ use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+mod account;
+mod authorization;
+mod bounded;
+mod input;
 mod mail;
 mod operation;
 mod send;
 
+pub use account::*;
+pub use authorization::*;
+pub use bounded::*;
+pub use input::*;
 pub use mail::*;
 pub use operation::*;
 pub use send::*;
 
-pub const CONTRACT_VERSION: &str = "2026-08-27.5";
+pub const CONTRACT_VERSION: &str = "2026-08-27.6";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]

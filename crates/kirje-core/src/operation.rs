@@ -28,6 +28,7 @@ pub enum DraftMode {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct DraftInput {
     pub account_id: String,
     pub mode: DraftMode,
@@ -174,6 +175,7 @@ pub enum MailOperationKind {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct MailboxOperationRequest {
     pub account_id: String,
     pub kind: MailOperationKind,

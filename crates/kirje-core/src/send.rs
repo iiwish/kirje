@@ -22,6 +22,7 @@ pub const DEFAULT_SEND_PLAN_LIMIT: u16 = 25;
 pub const MAX_SEND_PLAN_LIMIT: u16 = 100;
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SendRequest {
     pub account_id: String,
     pub to: Vec<MailAddress>,
@@ -37,6 +38,7 @@ pub struct SendRequest {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SendAttachment {
     pub filename: String,
     pub mime_type: String,
@@ -196,20 +198,26 @@ impl SendRequest {
                 false,
             ));
         }
-        let total_attachment_bytes = self
-            .attachments
-            .iter()
-            .map(SendAttachment::validate)
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .map(|bytes| bytes.len())
-            .sum::<usize>();
-        if total_attachment_bytes > MAX_TOTAL_ATTACHMENT_BYTES {
-            return Err(MailError::new(
-                MailErrorCode::ResourceLimit,
-                format!("attachments cannot exceed {MAX_TOTAL_ATTACHMENT_BYTES} bytes in total"),
-                false,
-            ));
+        let mut total_attachment_bytes = 0_usize;
+        for attachment in &self.attachments {
+            let bytes = attachment.validate()?;
+            total_attachment_bytes =
+                total_attachment_bytes
+                    .checked_add(bytes.len())
+                    .ok_or_else(|| {
+                        MailError::stable(
+                            MailErrorCode::ResourceLimit,
+                            "attachment byte total overflowed",
+                        )
+                    })?;
+            if total_attachment_bytes > MAX_TOTAL_ATTACHMENT_BYTES {
+                return Err(MailError::stable(
+                    MailErrorCode::ResourceLimit,
+                    format!(
+                        "attachments cannot exceed {MAX_TOTAL_ATTACHMENT_BYTES} bytes in total"
+                    ),
+                ));
+            }
         }
         Ok(())
     }

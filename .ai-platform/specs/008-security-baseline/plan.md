@@ -1,0 +1,545 @@
+# Plan: Security Baseline
+
+## Metadata
+
+- Feature ID: `008-security-baseline`
+- Status: Confirmed
+- Target release: `v0.3.1`
+- Source spec: `spec.md`
+- Updated: 2026-08-27
+- Review authority: delegated project owner
+
+## Decision Summary
+
+Kirje v0.3.1 establishes one fail-closed security path for account identity,
+mailbox credentials, owner authorization, local input, MCP framing, and remote
+response data. The fixed owner authority store is the only source of owner
+trust, config-store enrollment, authorization receipts, and global remote-effect
+claims. The caller-selected operation ledger remains the detailed workflow and
+audit projection, but it cannot grant or replay authority by itself.
+
+The release is a security and compatibility slice. It adds no new mailbox
+effect. Existing v0.3 accounts and ledgers migrate conservatively: metadata
+remains inspectable, legacy credentials are quarantined, legacy TTY approval is
+historical only, and every pending remote effect needs a new owner-signed grant.
+
+## Constitution Check
+
+- Local-first and no GUI: satisfied. Trust, receipts, account state, and audit
+  remain on the operator's machine.
+- Deterministic infrastructure: satisfied. Kirje verifies typed manifests and
+  detached signatures; it does not author mail or make policy judgments with a
+  model.
+- Read/write authorization separation: satisfied. Read-only inspection does not
+  create a grant, and a grant does not expose credentials.
+- Plan/authorize/apply: satisfied. Every remote effect and sensitive control
+  action uses one shared authorization service.
+- Secret exclusion: satisfied. Mailbox credentials remain in the OS credential
+  store; owner private keys remain outside Kirje.
+- Shared CLI/MCP services: satisfied. MCP uses shared read/status/apply services
+  but has no owner, proof, account, credential, policy, or reconciliation
+  mutation.
+- Protocol neutrality: satisfied. Account binding and capability contracts are
+  provider-neutral; IMAP/SMTP details remain in adapters.
+- Stable bounded machine output: satisfied. New states, errors, limits, and
+  schemas are versioned and covered by golden tests.
+- TDD and release evidence: satisfied. Every behavioral task starts with a
+  verified RED test and ends with full gates and sanitized evidence.
+
+No constitution exception is proposed.
+
+## Architecture
+
+### Core
+
+`kirje-core` owns stable identifiers, account-binding canonicalization,
+authorization action/manifest contracts, deterministic signing transcripts,
+bounded untrusted-value types, effect IDs, authorization-aware operation states,
+and stable error codes. It performs no filesystem, keyring, SQLite, network, or
+terminal work.
+
+### Store
+
+`kirje-store` owns two distinct SQLite roles:
+
+1. The platform-pinned authority database stores the owner realm, public trust
+   history, config-store registrations, challenges, receipts, and global effect
+   claims.
+2. The caller-selected operation ledger stores operation payloads, state
+   projections, receipts, and append-only application events.
+
+The authority database never accepts a normal `--outbox`, `--index`, `--config`,
+environment, or MCP path override. Production paths come only from the platform
+Kirje home. Tests inject a complete isolated authority home through a
+test-scoped constructor.
+
+### Runtime
+
+`kirje-runtime` owns bounded same-handle file access, config v2 migration and
+compare-and-swap writes, owner authorization orchestration, credential binding,
+shared action policy, and the crash-recovery protocol between authority claims
+and operation-ledger projections. One authenticated call carries one validated
+account snapshot from authorization recheck through keyring lookup and adapter
+invocation.
+
+`kirje-local-io` is a small platform boundary shared by runtime and CLI. It
+owns capability-relative no-follow regular-file open, limit-plus-one reads,
+private temporary files, and parent-directory sync. It contains no mail,
+authorization, parsing, or command behavior.
+
+### Adapters
+
+`kirje-protocol` converts IMAP and SMTP input into bounded typed values before
+returning core objects. Security decisions use complete typed capability sets,
+not display strings. Unsupported or over-budget capability input fails closed.
+
+`kirje-cli` owns human/operator command shape, hidden credential entry, bounded
+file/stdin ingestion, challenge export, and proof submission. `kirje-mcp` owns a
+reviewed tool allowlist plus a custom bounded stdio transport. Neither adapter
+implements approval rules independently.
+
+## Technical Decisions
+
+### D-001 Separate Stable Identities
+
+Configuration store, account, credential, authorization grant, operation, and
+remote effect use independent UUIDv4 identities. The owner realm is an
+independent 32-byte CSPRNG value; a challenge ID is SHA-256 of its exact signing
+payload. The existing account `id` becomes `display_id`; it remains immutable
+and human-facing. Operations use `account_id`, never `display_id`, as the
+durable reference.
+
+Account binding uses a `KIRJE-ACCOUNT-BINDING-V1` transcript with fixed field
+order and length-prefixed bytes. DNS hosts are lowercase ASCII, IP addresses
+use canonical `IpAddr` text, and email/authentication username bytes retain
+their exact validated case. Protocol, transport, port, authentication kind, and
+SMTP presence have explicit tags. SHA-256 of the transcript is the binding
+digest.
+
+### D-002 Config V2 Is Locked, Bounded, And Compare-And-Swap
+
+`accounts.toml` schema v2 contains `store_id`, `generation`, and typed stored
+accounts with immutable `account_id`, `credential_id`, `display_id`,
+`account_generation`, binding digest, and credential readiness. The whole file
+is limited to 1 MiB and 100 accounts. Duplicate or malformed identities and
+invalid state combinations fail closed.
+
+All load/migrate/write operations:
+
+1. Open one stable parent-directory capability.
+2. Open a sibling lock file without following the final component and acquire
+   an exclusive `fs4` lock.
+3. Open the config final component once with `FollowSymlinks::No` and nonblocking
+   semantics, verify the opened handle is regular, and read at most limit plus
+   one.
+4. Verify the expected generation and loaded content digest.
+5. Write a private random sibling temp file through the same opened directory,
+   flush file data, persist a replacement journal, and use Unix same-parent
+   overwrite rename or Windows locked two-rename recovery through that
+   directory. Sync every supported durability boundary.
+
+`cap-std` plus `cap-fs-ext` provides safe no-follow/reparse-point and
+directory-relative operations without adding project `unsafe` code. `fs4`
+coordinates Kirje processes; generation and content-digest CAS remains the
+correctness boundary.
+
+### D-003 Conservative V1 Migration
+
+A v1 TOML document migrates in one locked write. The migration assigns one
+store ID and one account and credential ID per unique display ID. Every account
+enters `legacy_quarantined`; no account-ID keyring entry is read, tested, copied,
+or deleted. Generated IDs become durable only when the v2 replacement commits.
+A restart reads the committed IDs rather than generating new values.
+
+Operation-ledger schema v3 preserves terminal v2 records. Pending `planned` and
+`approved` records become `authorization_required`; `applying` becomes
+`ambiguous`; existing `ambiguous`, `failed`, `succeeded`, and compatibility
+`sent` outcomes remain terminal with a bounded legacy provenance marker.
+
+### D-004 Fixed Owner Realm And Authority Home
+
+The production anchor, authority database, and apply lock resolve only from
+`ProjectDirs("kirje")`:
+
+- configuration anchor: `config_dir/owner-trust.toml`
+- authority journal: `data_local_dir/authority.sqlite3`
+- authority apply lock: `data_local_dir/authority.apply.lock`
+
+The anchor stores an immutable 256-bit realm ID, journal ID, current owner and
+offline-recovery Ed25519 public keys, trust epoch, and trust-bundle digest. It
+stores no private key. Bootstrap is create-once, uses only bounded no-link key
+documents, and runs under the documented owner/OS-administrator boundary rather
+than an agent-facing MCP session. Normal path flags and environment variables
+cannot influence either production path.
+
+The owner-authorized config-store enrollment binds `store_id` to a tagged
+location digest over the opened parent directory's filesystem identity and the
+final component's native bytes. Unix uses device/inode and native bytes;
+Windows uses volume serial, file index, and UTF-16LE units. Missing stable
+identity support fails closed. A bounded display form is diagnostic only.
+Copying the same store ID elsewhere returns `config_store_identity_conflict`.
+
+### D-005 Ed25519 Strict Detached Authorization
+
+Kirje verifies Ed25519 signatures with `ed25519-dalek` 3.0 and
+`VerifyingKey::verify_strict`. The dependency uses `fast` and `zeroize`; batch,
+hazmat, legacy compatibility, private-key generation, PEM, and serde key
+features remain disabled in production.
+
+Every manifest and signing payload is a deterministic binary transcript:
+
+```text
+domain || field-count || repeated(tag-u16 || value-length-u32 || value)
+```
+
+Lengths and tags are unsigned big-endian integers; integer values use
+fixed-width big-endian bytes; UUIDs use 16 network-order bytes; timestamps use
+signed Unix milliseconds; optional fields and lists have explicit
+presence/count tags. Tags are strictly increasing. Duplicate, unrecognized, missing,
+out-of-order, or non-minimal fields are rejected.
+The signed `KIRJE-AUTHORIZATION-V1` transcript binds realm, trust bundle, key and
+epoch, grant, action, object, store/account context, manifest digest, binding,
+policy, nonce, issuance, expiry, and effect IDs. Challenge expiry is at most 15
+minutes and nonce material is 256 random bits.
+
+The CLI exports Base64url-no-padding transcript bytes, SHA-256 digest, and the
+exact bounded manifest. A proof document contains only format, challenge ID,
+key ID, payload digest, and detached 64-byte signature. It is limited to 4 KiB.
+Private signing keys and signing operations are not part of Kirje.
+
+### D-006 Authority Receipts And Global Effect Claims
+
+Proof verification, nonce consumption, and immutable receipt insertion happen
+in one `BEGIN IMMEDIATE` authority transaction. Exact proof replay returns the
+same receipt; any changed replay fails. The receipt keeps the canonical payload,
+manifest, signature, and historical public trust metadata privately while
+normal output is digest-only.
+
+Each remote effect has a globally unique random effect ID bound into its
+manifest and registered with its receipt. Apply performs one authority
+transaction that revalidates
+expiry, trust epoch/key, trust-bundle digest, store registration, account
+generation/binding, policy digest, manifest digest, and effect state, then moves
+the effect from `unclaimed` to `claimed`. This happens before credential lookup
+or network access.
+
+The operation ledger records authority receipt and effect-claim projection in a
+separate durable transaction. The process then holds the fixed apply lock and
+inserts one unique authority `effect_invocation`; only the transaction winner
+receives an in-memory invocation permit. Credential lookup and network access
+require that permit. Authority records the bounded outcome before mirroring it
+to the ledger.
+
+Crash recovery compares immutable IDs in both stores. A claim without a ledger
+projection is restored as a claimed projection. An invocation without an
+observation becomes `ambiguous` after the crashed process releases the fixed
+lock and is never invoked again. A ledger claim without matching authority
+state fails closed as `authority_projection_conflict`. An outbox copy or
+rollback cannot acquire the same effect or invocation twice. A known
+pre-network failure still consumes the grant/effect and records
+`known_no_effect`; it cannot become retry authority.
+
+### D-007 One Authorization Policy Map
+
+A closed `SensitiveAction` enum and exhaustive policy function cover send,
+mailbox mutation, account create/update/remove, credential set/delete and
+retired cleanup, config-store enrollment, policy/assurance changes, owner and
+recovery rotation, and ambiguous closure. New enum variants cause an exhaustive
+compile failure and require a golden action-matrix update. Unrecognized serialized
+actions fail closed.
+
+Existing `approve` commands become compatibility diagnostics that return
+`owner_authorization_required`; they cannot change ledger state. CLI challenge
+and proof commands call shared runtime services. MCP has no challenge/proof or
+sensitive control-plane mutation and its request schemas accept no inline
+authorization material.
+
+### D-008 Credential Locator And Crash Ordering
+
+The keyring service is `dev.kirje.mail.credentials.v2`, and its username becomes
+`v2:` plus a lowercase SHA-256 digest over owner realm, store ID, account ID,
+credential ID, and account-binding digest. Active lookup has no display-ID or
+legacy fallback. The pinned authority registration and one config snapshot
+must agree before any keyring operation.
+
+Credential set writes the new locator first and commits `bound` with expected
+generation second; a crash leaves an unreachable orphan. Active delete removes
+the locator first and commits `missing` second; either crash point fails closed.
+A binding-changing update commits the new credential identity plus an immutable
+delete-only tombstone for the old locator. Cleanup can only call delete on the
+exact tombstoned locator and cannot read, test, list, export, copy, or rebind it.
+
+### D-009 Unified Same-Handle Bounded Input
+
+One `kirje-local-io` service backs attachment, send, draft, operation,
+authorization, and config file reads. It opens the final component exactly once
+relative to an opened parent using no-follow and nonblocking options, validates
+the returned handle as regular, applies metadata as an early rejection only,
+and consumes at most limit plus one from that handle. Streams use the same
+limit-plus-one rule and require EOF at the exact limit.
+
+Constants are:
+
+- account config: 1 MiB
+- general operation JSON: 1 MiB
+- send/draft JSON: 24 MiB
+- authorization proof: 4 KiB
+- authorization manifest/transcript: 4 MiB
+- one imported attachment: existing 1 MiB decoded limit
+- all imported send attachments: existing 8 MiB decoded limit
+
+Typed serde visitors enforce collection, string, Base64, and nesting limits
+during deserialization. Allocation failure and every over-limit condition map
+to a stable non-secret `resource_limit` result before persistence.
+
+Windows performs lexical namespace/reserved-device rejection before opening
+the parent. Config replacement is Unix same-parent atomic rename or Windows
+locked journaled two-rename recovery; no delete-then-rename or path-based
+fallback weakens the opened-parent boundary.
+
+### D-010 Bounded MCP Stdio
+
+`kirje-mcp` supplies a custom `rmcp::Transport<RoleServer>` rather than the
+unbounded async-read adapter. The transport reads newline-delimited frames into
+a pre-sized buffer and never retains more than 24 MiB plus 4 KiB plus one byte. A
+limit-plus-one frame emits one bounded ID-null invalid-request response, writes
+one redacted stderr diagnostic, closes, and exits nonzero without draining the
+remaining stream.
+
+The 24 MiB service-document budget covers the largest valid shared send
+request. A distinct 4 KiB transport allowance covers the 128-byte request ID,
+method name, and JSON-RPC syntax before the newline. Generated tests recompute both
+inequalities from core constants. A 16 MiB shared result likewise uses a
+separate 4 KiB output-envelope allowance before its one-byte line feed.
+
+The transport permits four request handlers plus one control task. Request
+admission reserves a handler slot, active ID, and maximum output allowance.
+Handler completion releases only the handler slot; the active ID and output
+reservation survive until the matching response is actually sent, cancellation
+reaches the worker-aware `TerminalNoResponse` state, or disconnect cleanup
+runs. Cancellation after response claim completes the send path. The control lane accepts one
+`notifications/initialized` and cancellation for a known active request. A
+normal fifth request receives a bounded busy result. Other notifications fail
+closed. Writer work and transport queues are bounded by item, actual byte, and
+outstanding reservation budgets. Before rmcp builds `serde_json::Value`, a
+method-aware lexical preflight enforces the same shared field/count/depth and
+decoded-byte limits. Backpressure stops stdin reads before another frame.
+Raw request/result tracing is disabled; logs contain method, bounded ID digest,
+size, duration, and result category only.
+
+### D-011 Bounded Remote Values And Complete Capabilities
+
+Core exposes byte-first bounded untrusted types with `complete`, `truncated`,
+`omitted`, or `rejected` disposition. Presentation character truncation is a
+second step. Security-relevant IMAP/SMTP capabilities use a closed typed set and
+a completeness flag; an incomplete set cannot authorize extension-dependent
+behavior.
+
+Initial contract budgets are:
+
+- one complete IMAP response fragment: 12 MiB, including initial connection,
+  greeting, capability, and authentication responses
+- capability set: 128 items, 256 bytes per item, 16 KiB total
+- one remote identifier/header/attribute: 4 KiB wire bytes
+- SMTP transport: lettre's 1,000-byte line and 100,000-byte aggregate response
+  bounds, with a 256-byte Kirje receipt display after control stripping
+- one adapter diagnostic: 1 KiB
+- one structured machine result: 16 MiB serialized
+- untrusted values within one result: 8 MiB total
+- existing list counts remain at or below 100, except the existing mailbox
+  inventory ceiling of 1,000 with the same total-result budget
+
+The IMAP adapter supplies a Kirje-owned bounded connection pump around public
+session-open and stream primitives so io-imap's 100 MiB initial default is
+never the effective boundary. Replacing only the post-connect fragmentizer is
+insufficient. Invalid UTF-8 uses deterministic lossy display only after
+security parsing of raw bytes. NUL and non-tab controls become visible replacement categories;
+discarded data is never echoed. If an upstream protocol library cannot enforce
+the wire boundary before allocation, the affected feature is reported
+unsupported until its adapter is replaced or constrained; display truncation is
+not accepted as a substitute.
+
+### D-012 Stable Errors And Output Privacy
+
+Core adds stable error codes for account/store identity conflicts, quarantined
+or invalid credential binding, owner trust absence/recovery, authorization
+required/expired/stale/replayed, effect already claimed, authority projection
+conflict, unsupported secure file semantics, MCP overload, and bounded remote
+response rejection. Errors remain versioned and carry retryability without
+including paths beyond bounded operator diagnostics, mailbox content, raw
+provider strings, secrets, signatures, locators, or complete manifests.
+
+### D-013 Portability And Dependency Policy
+
+New production dependencies are narrowly scoped:
+
+- `ed25519-dalek = 3.0` for strict public-key verification
+- `getrandom = 0.4` for realm, nonce, and identity entropy
+- `cap-std = 4.0` and `cap-fs-ext = 4.0` for safe capability-relative file I/O
+- `fs4 = 1.1` for cross-platform advisory coordination
+- Tokio `io-util`, `sync`, and `time` features for the bounded MCP transport
+
+All are pinned through `Cargo.lock`, pass `cargo deny`, and receive license,
+MSRV, feature, and advisory review. The project keeps `unsafe_code = "forbid"`;
+platform unsafe remains encapsulated in reviewed dependencies. macOS, Linux,
+and Windows run equivalent no-link, migration, authorization, and framing tests.
+
+### D-014 Release And Live Verification
+
+The slice updates canonical product, architecture, security, operations,
+provider, conformance, release, and Agent Skill documentation. Claims state only
+IMAP/SMTP password or app-password support. OAuth2, provider APIs, Graph, and
+JMAP runtime are unsupported.
+
+Controlled real-account verification is read-only by default and receives the
+credential through the OS keyring or hidden local prompt only. A separately
+owner-authorized packet is required for any remote effect. Evidence records
+aggregate pass/fail categories and capability counts only; it contains no
+address, endpoint, UID, subject, body, attachment, credential, signature, or raw
+provider response.
+
+## State Models
+
+### Account Readiness
+
+```text
+store: unregistered | registered | identity_conflict | recovery_required
+owner: absent | ready | recovery_required
+binding: quarantined | proposed | authorized | invalidated | mismatch
+credential: legacy_quarantined | reentry_required | missing | ready | invalidated | store_unavailable
+```
+
+Remote authentication is ready only for
+`registered + ready + authorized + ready` from one matching generation.
+
+### Authorization
+
+```text
+challenge: pending -> authorized | expired | invalidated
+grant:      unclaimed -> claimed | expired | invalidated
+effect:     unclaimed -> claimed -> resolved
+```
+
+All transitions are monotonic in supported application paths. Exact proof
+replay is idempotent; no transition returns to `pending` or `unclaimed`.
+
+### Operation Projection
+
+```text
+planned -> authorization_required -> authorized -> applying
+applying -> succeeded | failed | ambiguous
+authorization_required|authorized -> expired
+```
+
+`authorized` is a projection of a valid authority receipt, not a ledger-local
+approval. Terminal states remain immutable. `applying` recovery without a
+matching resolved authority claim becomes `ambiguous`.
+
+## Implementation Sequence
+
+1. Core security contracts, byte transcripts, limits, and error catalog.
+2. Pinned authority store, receipt verification, trust history, and effect
+   claims.
+3. Same-handle bounded local I/O and cross-platform recoverable replacement.
+4. Config v2, conservative migration, account identity, and bound keyring
+   lifecycle.
+5. Operation-ledger v3 migration and authorization/effect integration.
+6. Shared authorization and crash-recovery runtime.
+7. CLI owner, store, account, credential, and operation workflow.
+8. Bounded MCP transport and lifecycle budgets.
+9. Bounded protocol responses and complete capability model.
+10. Canonical documentation, cross-platform QA, controlled live verification,
+   release commit, PR, CI, merge, tag, and post-merge evidence.
+
+Each numbered implementation task has its own packet and RED/GREEN evidence.
+Only independent read-only review may run in parallel; production tasks that
+share core, runtime, store, or adapter files remain serial.
+
+## Validation Strategy
+
+Task-scoped tests are followed by:
+
+```bash
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo test --workspace --all-features --locked
+cargo build --workspace --all-features --locked
+cargo deny check
+cargo run -p kirje-cli -- schema --pretty
+cargo run -p kirje-cli -- doctor --pretty
+```
+
+Additional security gates include:
+
+- config v1/v2 migration and every invalid-state fixture
+- deterministic transcript and Ed25519 positive/negative vectors
+- nonce, expiry, epoch, rotation, replay, concurrent proof, and effect-claim
+  fault tests
+- copied and rolled-back ledger replay tests
+- keyring locator and credential crash-window tests with a fake secret store
+- link, reparse point, special file, growth, replacement, exact-limit, and
+  limit-plus-one input tests
+- oversized, duplicate-ID, blocked-handler, blocked-writer, cancellation, EOF,
+  and stdout-purity MCP tests
+- protocol capability/response count, item, total, UTF-8, control, and
+  completeness tests
+- golden CLI JSON, MCP tool/schema, action policy, error catalog, config, and
+  SQLite migration snapshots
+- supported-target CI and a repository/evidence secret scan
+
+## Migration And Rollback
+
+- Migration never probes legacy keyring entries and never invokes the network.
+- Config migration writes one complete v2 generation using platform atomic
+  overwrite or the documented locked journaled recovery protocol. Interrupted
+  temp/backup/journal files are resolved by the fixed recovery matrix.
+- Authority schema creation and ledger v3 migration use SQLite transactions and
+  reject newer versions.
+- A binary rollback may inspect exported sanitized data but must not apply
+  v0.3.1-governed work with a v0.3 binary. The release runbook requires backup
+  before migration and documents that owner receipts/effect claims must remain
+  paired with their authority journal.
+- Restoring only a caller-selected ledger cannot restore authority. Restoring
+  the owner anchor and authority journal out of band is governed by the stated
+  OS/local-tampering boundary and recovery runbook.
+
+## Risks And Mitigations
+
+- Cross-store crash windows could imply a replay. Mitigation: authority owns the
+  irreversible effect claim; ledger state is only a recoverable projection.
+- An owner could sign an agent summary without reviewing the exact action.
+  Mitigation: signer contract parses the exact typed manifest and recomputes its
+  digest; summaries are explicitly non-authoritative.
+- Config locking could be mistaken for a hostile-writer boundary. Mitigation:
+  advisory lock coordinates Kirje processes, while CAS and the documented OS
+  trust boundary define the guarantee.
+- A no-follow implementation could differ across platforms. Mitigation:
+  capability-relative APIs, platform fixtures, and fail-closed unsupported
+  results rather than fallback.
+- rmcp may spawn one task per delivered message. Mitigation: transport-level
+  request/control permits bound delivered tasks, while active-ID and output
+  reservations remain registered through the actual transport send.
+- Upstream protocol codecs may allocate before Kirje sees a line. Mitigation:
+  verify/configure upstream limits or declare the affected capability
+  unsupported; never claim that post-parse truncation is a wire bound.
+- Stronger migration may temporarily make existing accounts unusable.
+  Mitigation: deterministic quarantine/status output and a documented signed
+  enrollment plus credential re-entry workflow.
+
+## Supporting Artifacts
+
+- Requirement contract: `spec.md`
+- Requirement quality gate: `checklists/requirements.md`
+- Research and dependency decisions: `research.md`
+- Persistent model and invariants: `data-model.md`
+- Authorization contract: `contracts/authorization.md`
+- Account/config contract: `contracts/account-config-v2.md`
+- Input and transport contract: `contracts/bounded-input.md`
+- Work graph: `tasks.md`
+- Consistency analysis: `analysis.md`
+
+## User Review Gate
+
+Confirmed on 2026-08-27 under the user's delegated project-owner authority.
+Execution still requires a complete task graph, consistency analysis, one
+self-contained packet per ready task, verified RED evidence, and review.

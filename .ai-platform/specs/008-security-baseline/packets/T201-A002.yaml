@@ -1,0 +1,292 @@
+schema_version: 1
+packet_id: 008-T201-A002
+task_id: T201
+feature_id: 008-security-baseline
+mode: execute_one_task
+adapter: codex_worker
+status: ready
+
+governance_inputs:
+  constitution: .ai-platform/memory/constitution.md
+  product_contract: .ai-platform/docs/product-design.md
+  feature_spec: .ai-platform/specs/008-security-baseline/spec.md
+  requirements_checklist: .ai-platform/specs/008-security-baseline/checklists/requirements.md
+  program_plan: .ai-platform/specs/007-stable-v1-program/plan.md
+  feature_plan: .ai-platform/specs/008-security-baseline/plan.md
+  research: .ai-platform/specs/008-security-baseline/research.md
+  data_model: .ai-platform/specs/008-security-baseline/data-model.md
+  contracts:
+    - .ai-platform/specs/008-security-baseline/contracts/authorization.md
+    - .ai-platform/specs/008-security-baseline/contracts/account-config-v2.md
+    - .ai-platform/specs/008-security-baseline/contracts/bounded-input.md
+  work_graph: .ai-platform/specs/008-security-baseline/tasks.md
+  analysis: .ai-platform/specs/008-security-baseline/analysis.md
+  approval_gates:
+    constitution: confirmed project contract
+    program_spec_plan_work_graph: confirmed under delegated project-owner authority
+    feature_spec: confirmed after three independent security reviews
+    requirements_checklist: completed requirement-quality review; executable findings are governed by analysis status
+    technical_plan_and_work_graph: confirmed under delegated project-owner authority
+    analysis: APPROVED_FOR_T201_A002_PACKET after three independent executable-boundary reviews reported no unresolved Critical or High findings
+
+work_unit:
+  title: Core security contracts
+  goal: >-
+    Define and test provider-neutral stable identities, account-binding bytes,
+    exhaustive sensitive actions, deterministic action and authorization
+    transcripts, strict Ed25519 proof verification, bounded untrusted values,
+    bounded typed request deserialization, authorization-aware operation
+    projections, and stable security errors.
+  epic: T101
+  story:
+    - US-001
+    - US-003
+    - US-005
+  requirements:
+    - FR-001
+    - FR-002
+    - FR-013
+    - FR-014
+    - FR-015
+    - FR-017
+    - FR-022
+    - FR-024
+    - FR-027
+    - FR-028
+    - FR-029
+    - FR-030
+    - NFR-001
+    - NFR-002
+    - NFR-004
+    - NFR-006
+    - NFR-007
+  priority: P0
+  depends_on:
+    - accepted v0.3 baseline at commit 30bd322
+    - confirmed 008 governance artifacts
+  blocks:
+    - T202
+    - T203
+    - T204
+    - T205
+    - T206
+    - T207
+    - T208
+    - T209
+    - T210
+    - T211
+    - T212
+  parallel: false
+  conflicts_with:
+    - any concurrent change to core public models, error codes, limits, transcript bytes, or cryptographic dependencies
+
+codebase_context:
+  local_instructions:
+    - AGENTS.md
+  relevant_files:
+    - Cargo.toml
+    - crates/kirje-core/Cargo.toml
+    - crates/kirje-core/src/lib.rs
+    - crates/kirje-core/src/mail.rs
+    - crates/kirje-core/src/operation.rs
+    - crates/kirje-core/src/send.rs
+    - crates/kirje-core/tests/send_contract.rs
+  existing_patterns:
+    - core types derive serde and schemars contracts and return MailError with stable retryability
+    - digest_json exists for legacy payload digests but must not encode the authorization transcript
+    - account validation currently lives on MailAccountConfig and display ID is currently its id field
+    - send and operation contracts already define bounded content/count constants and immutable operation records
+    - the workspace forbids unsafe code and uses Rust 1.88 with edition 2024
+    - T201-A001 stopped after valid RED and left known partial core/dependency files plus stale RED tests; A002 owns rewriting those tests and completing or replacing those partials within this packet only
+  interfaces_or_contracts:
+    - .ai-platform/specs/008-security-baseline/contracts/authorization.md
+    - .ai-platform/specs/008-security-baseline/contracts/account-config-v2.md
+    - .ai-platform/specs/008-security-baseline/contracts/bounded-input.md
+  required_design:
+    - owner realm is a distinct 32-byte value; store/account/credential/grant/effect use independent UUIDv4 identities
+    - persistent identity types have no Default and reject non-canonical UUID text rather than normalizing it
+    - core exposes no generator for new store/account/credential/grant/effect security identities; their OS-random generation belongs to later runtime/store tasks
+    - account binding is SHA-256 of KIRJE-ACCOUNT-BINDING-V1 tagged bytes, never JSON or TOML
+    - core purely encodes bounded PlatformLocationMaterial into KIRJE-CONFIG-LOCATION-V1; filesystem acquisition remains T203
+    - authorization is KIRJE-AUTHORIZATION-V1 with strict ascending u16 tags and u32 lengths
+    - challenge ID is SHA-256 of exact signing payload
+    - action manifest is KIRJE-MANIFEST-V1; every sensitive action has an explicit policy entry, every supported action has one sealed encoder, and policy/assurance actions are explicit fail-closed unsupported entries
+    - manifest payloads are sealed typed structs using the confirmed common/action/nested tag tables; arbitrary public ManifestField construction is forbidden
+    - action policies expose closed ManifestSupport; unsupported policy/assurance actions have no payload variant or encoder and return unsupported_capability
+    - Ed25519 verification calls VerifyingKey::verify_strict on exact persisted payload bytes
+    - production code has no signing-key generation, private-key parsing, hazmat, legacy compatibility, batch, serde-key, or PEM path
+    - public status/receipt projections contain digests and bounded metadata only
+    - stored and public credential states are separate enums; StoreUnavailable is public-only and cannot enter signed/config snapshots
+    - untrusted display disposition is separate from complete typed capability decisions
+    - shared mail and authorization request types use bounded newtypes/manual deserialization; T208 preflights raw MCP bytes before rmcp DOM allocation
+    - core exposes parse_bounded_json generic over the sealed BoundedJsonInput trait; callers cannot select a looser InputShape than the type owns
+    - T201 inputs are SendRequest, DraftInput including MessageContent, MailboxOperationRequest, MessageSearch, MailboxSyncRequest, LocalMessageSearch, AttachmentRead, MessageRead, and AuthorizationProof plus their nested address/attachment/reference types
+    - T201 owns only typed parser/shape contracts; T203 owns bounded byte acquisition, T204 strict config TOML, T207 CLI adaptation, and T208 raw MCP preflight
+  forbidden_changes:
+    - filesystem, SQLite, keyring, CLI, MCP, terminal, or network behavior
+    - new remote mailbox effects or authentication protocols
+    - owner private-key storage or production signing
+    - JSON/TOML serializer bytes as signature authority
+    - permissive signature verification
+    - credentials, real addresses, endpoints, UIDs, mailbox content, signatures, or raw provider strings in fixtures/output
+    - editing governance artifacts or task status
+
+execution_constraints:
+  branch_or_worktree: codex/v1-roadmap-governance in the current workspace
+  allowed_files:
+    - Cargo.toml
+    - Cargo.lock
+    - crates/kirje-core/Cargo.toml
+    - crates/kirje-core/src/lib.rs
+    - crates/kirje-core/src/account.rs
+    - crates/kirje-core/src/authorization.rs
+    - crates/kirje-core/src/bounded.rs
+    - crates/kirje-core/src/input.rs
+    - crates/kirje-core/src/mail.rs
+    - crates/kirje-core/src/operation.rs
+    - crates/kirje-core/src/send.rs
+    - crates/kirje-core/tests/account_security_contract.rs
+    - crates/kirje-core/tests/authorization_contract.rs
+    - crates/kirje-core/tests/bounded_security_contract.rs
+    - crates/kirje-core/tests/error_contract.rs
+    - crates/kirje-core/tests/input_security_contract.rs
+    - crates/kirje-core/tests/fixtures/authorization/**
+  test_targets:
+    - crates/kirje-core/tests/account_security_contract.rs
+    - crates/kirje-core/tests/authorization_contract.rs
+    - crates/kirje-core/tests/bounded_security_contract.rs
+    - crates/kirje-core/tests/error_contract.rs
+    - crates/kirje-core/tests/input_security_contract.rs
+  ownership_notes:
+    - current untracked 007 and 008 governance files are orchestrator-owned and must not be modified
+    - Cargo.toml, Cargo.lock, crates/kirje-core/Cargo.toml, crates/kirje-core/src/lib.rs, crates/kirje-core/src/account.rs, and the four existing security contract tests contain known T201-A001 partial work and are explicitly inherited by T201-A002
+    - first rewrite stale A001 authorization sequential-code/arbitrary-field assumptions, noncanonical identity expectations, account-binding omissions, and obsolete bounded constants before claiming fresh RED
+    - stop if any allowed production file has a concurrent change not attributable to T201-A001 or T201-A002
+    - do not revert user or prior accepted changes
+  dependency_constraints:
+    - ed25519-dalek must be exactly compatible with 3.0.0 and Rust 1.88
+    - disable unneeded private-key and permissive verification features
+    - getrandom may be declared only if the core implementation actually needs OS entropy in this task
+    - retain Cargo.lock and pass cargo deny later; do not add a canonical JSON dependency
+
+tdd_plan:
+  required: true
+  exception: null
+  red:
+    steps:
+      - add account binding golden and mutation tests
+      - add Unix/Windows config-location transcript goldens without filesystem I/O
+      - add action/transcript parser and strict signature tests
+      - replace stale arbitrary ManifestField/sequential-code goldens with the complete explicit action policy table and sealed typed payload goldens
+      - add exhaustive action/error/bounded projection snapshot tests
+      - add direct typed depth/string/list/Base64/decoded-total N/N+1 tests
+      - run the targeted tests before production implementation
+    command: >-
+      cargo test -p kirje-core --test account_security_contract
+      --test authorization_contract --test bounded_security_contract
+      --test error_contract --test input_security_contract --all-features --locked
+    expected_failure: >-
+      Tests fail for missing stable account/authorization/bounded contracts or
+      an assertion specific to the v0.3 representation; unrelated compile or
+      environment failures are not valid RED evidence.
+  green:
+    command: >-
+      cargo test -p kirje-core --test account_security_contract
+      --test authorization_contract --test bounded_security_contract
+      --test error_contract --test input_security_contract --all-features --locked
+    expected_signal: all new security contract tests pass
+  refactor:
+    command: cargo test -p kirje-core --all-features --locked
+    expected_signal: all existing and new core tests remain green
+
+validation_loop:
+  commands:
+    - cargo fmt --all --check
+    - cargo test -p kirje-core --all-features --locked
+    - cargo clippy -p kirje-core --all-targets --all-features --locked -- -D warnings
+    - cargo +1.88 check -p kirje-core --all-features --locked
+  retry_budget: 2
+  failure_policy:
+    first_failure: fix only a T201 contract or implementation defect within allowed files and rerun the narrowest failing command
+    second_failure: classify scope, spec, dependency, MSRV, or environment blocker and stop if the packet must change
+    beyond_budget: return blocked attempt evidence without weakening tests, constants, transcript bytes, or strict verification
+  no_downgrade:
+    - do not delete or relax a failing security assertion
+    - do not switch from byte golden to serializer-dependent equality
+    - do not replace verify_strict with permissive verification
+    - do not skip Rust 1.88 validation because the host default compiler is newer
+
+definition_of_done:
+  - core compiles without filesystem, SQLite, keyring, terminal, CLI, MCP, or network dependencies
+  - account binding bytes and digest have golden fixtures plus every covered field mutation
+  - manifest and authorization transcripts are deterministic, strict, bounded, and independently parsable
+  - strict Ed25519 vectors and tamper/replay-shape negatives pass
+  - every SensitiveAction variant has one explicit authorization/manifest policy; supported actions have sealed encoders, unsupported policy/assurance and unrecognized actions fail closed
+  - operation authorization projection and stable errors are versioned without creating store/runtime behavior
+  - public bounded/untrusted/receipt types cannot expose proof, signature, nonce, locator, private key, credential, or raw provider content
+  - shared request parsing enforces document/depth/string/list/Base64 and decoded-total bounds before large structures are built
+  - existing core tests and Clippy/Rust 1.88 checks pass
+
+evidence_contract:
+  owner: delivery_orchestrator
+  worker_output_only: true
+  summary: .ai-platform/evidence/T201/summary.md
+  diff: .ai-platform/evidence/T201/diff.patch
+  test_results: .ai-platform/evidence/T201/test-results.md
+  attempt: .ai-platform/evidence/T201/attempts/T201-A002.md
+  required:
+    - changed files and scope check
+    - exact RED command, exit signal, and matched failure reason
+    - GREEN and refactor command results
+    - all validation command results
+    - dependency version/features/MSRV and strict-verifier review
+    - transcript/action/error public contract summary
+    - secret/private-material fixture and output scan
+    - residual risks and follow-up ownership
+
+review_contract:
+  required_passes:
+    - spec_compliance against FR-001, FR-002, FR-013-FR-015, FR-017, FR-022, FR-024, FR-027-FR-030 and mapped NFRs
+    - cryptographic and canonical-byte review
+    - bug and code-quality review
+    - QA acceptance of golden, mutation, malformed, and public-output cases
+  blocking_findings:
+    - permissive signature acceptance
+    - serializer-dependent signing bytes
+    - incomplete sensitive action map
+    - unstable or redirectable identity fields
+    - unbounded parser or public private-material exposure
+    - scope drift beyond allowed files
+  acceptance_rule: >-
+    The orchestrator may mark T201 Accepted only after evidence and all review
+    passes are complete under the user's explicit delegated project-owner
+    authority. The worker cannot mark acceptance.
+
+handoff:
+  external_issue: null
+  pull_request: deferred to T212
+  next_task_after_acceptance: T202
+  finish_options:
+    - integrate reviewed evidence and queue T202 packet
+    - create a scoped T201 fix attempt
+    - report a genuine spec/dependency/environment blocker
+
+stop_conditions:
+  - governance input or packet conflicts with repository instructions
+  - missing dependency or stale packet
+  - allowed production file has unexplained concurrent changes
+  - RED failure is unrelated to the intended missing contract
+  - implementation requires filesystem, store, runtime, CLI, MCP, or protocol behavior
+  - implementation requires private-key handling or a weaker verification mode
+  - transcript/action coverage is ambiguous and cannot be resolved from the confirmed contract
+  - a validation downgrade or allowed-file expansion would be required
+  - credentials, owner private material, real mailbox identifiers, content, signatures, or raw provider values appear
+
+worker_rules:
+  - execute T201-A002 only
+  - read the packet and repository instructions before edits
+  - do not delegate further
+  - do not modify task status, packet, analysis, evidence files, or other governance artifacts
+  - do not revert user or orchestrator changes
+  - use apply_patch for manual edits
+  - return the complete evidence contract to the orchestrator

@@ -190,6 +190,7 @@ pub struct MailboxPage {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct MessageReference {
     pub account_id: String,
     pub mailbox: String,
@@ -220,6 +221,7 @@ impl MessageReference {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct MailAddress {
     pub name: Option<String>,
     pub email: String,
@@ -242,6 +244,7 @@ pub struct MessageEnvelope {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct MessageSearch {
     pub account_id: String,
     pub mailbox: String,
@@ -304,6 +307,7 @@ pub struct MessagePage {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SyncCursor {
     #[schemars(range(min = 1))]
     pub uid_validity: u32,
@@ -311,6 +315,7 @@ pub struct SyncCursor {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct MailboxSyncRequest {
     pub account_id: String,
     pub mailbox: String,
@@ -376,6 +381,7 @@ pub struct MailboxSyncReport {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct LocalMessageSearch {
     pub account_id: String,
     pub mailbox: String,
@@ -443,6 +449,7 @@ pub trait MessageIndex: Send + Sync {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AttachmentMetadata {
     pub part_id: String,
     pub filename: Option<String>,
@@ -451,6 +458,7 @@ pub struct AttachmentMetadata {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AttachmentRead {
     pub reference: MessageReference,
     pub part_id: String,
@@ -516,6 +524,7 @@ pub struct AttachmentContent {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct MessageContent {
     pub reference: MessageReference,
     #[serde(default)]
@@ -535,6 +544,7 @@ pub struct MessageContent {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct MessageRead {
     pub reference: MessageReference,
     #[serde(default = "default_body_chars")]
@@ -578,10 +588,52 @@ pub struct ConnectionReport {
 pub enum MailErrorCode {
     InvalidInput,
     AccountNotFound,
+    AccountAlreadyExists,
+    AccountIdentityConflict,
+    AccountUpdateConflict,
     ConfigRead,
     ConfigWrite,
+    ConfigStoreIdentityConflict,
+    ConfigMigrationFailed,
+    ConfigVersionUnsupported,
+    ConfigConcurrentUpdate,
     SecretMissing,
     SecretStoreUnavailable,
+    CredentialLegacyQuarantined,
+    CredentialReentryRequired,
+    CredentialBindingInvalid,
+    CredentialCleanupInvalid,
+    SecureFileSemanticsUnsupported,
+    OwnerAuthorizationRequired,
+    OwnerTrustNotConfigured,
+    OwnerRecoveryRequired,
+    OwnerKeyInactive,
+    TrustEpochStale,
+    TrustBundleMismatch,
+    ClockRollbackDetected,
+    AuthorizationRequired,
+    AuthorizationExpired,
+    AuthorizationInvalidated,
+    AuthorizationMalformed,
+    AuthorizationSignatureInvalid,
+    AuthorizationReplayed,
+    AuthorizationContextStale,
+    GrantAlreadyUsed,
+    EffectAlreadyClaimed,
+    EffectAlreadyInvoked,
+    AuthorityProjectionConflict,
+    UnsupportedCapability,
+    InputNotRegularFile,
+    InputLinkRejected,
+    InputDocumentIncomplete,
+    InputNestingLimit,
+    McpFrameTooLarge,
+    McpRequestIdInvalid,
+    McpDuplicateRequestId,
+    McpSessionBusy,
+    McpOutputTooLarge,
+    RemoteResponseTooLarge,
+    RemoteCapabilityIncomplete,
     Network,
     Tls,
     Authentication,
@@ -611,13 +663,78 @@ impl MailError {
         Self {
             code,
             message: message.into(),
-            retryable,
+            retryable: retryable && code.retryable_by_default(),
         }
+    }
+
+    #[must_use]
+    pub fn stable(code: MailErrorCode, message: impl Into<String>) -> Self {
+        Self::new(code, message, code.retryable_by_default())
     }
 
     #[must_use]
     pub fn invalid_input(message: impl Into<String>) -> Self {
         Self::new(MailErrorCode::InvalidInput, message, false)
+    }
+}
+
+impl MailErrorCode {
+    pub const SECURITY_CONTRACT_CODES: &'static [Self] = &[
+        Self::AccountAlreadyExists,
+        Self::AccountIdentityConflict,
+        Self::AccountUpdateConflict,
+        Self::ConfigStoreIdentityConflict,
+        Self::ConfigMigrationFailed,
+        Self::ConfigVersionUnsupported,
+        Self::ConfigConcurrentUpdate,
+        Self::CredentialLegacyQuarantined,
+        Self::CredentialReentryRequired,
+        Self::CredentialBindingInvalid,
+        Self::CredentialCleanupInvalid,
+        Self::SecureFileSemanticsUnsupported,
+        Self::OwnerAuthorizationRequired,
+        Self::OwnerTrustNotConfigured,
+        Self::OwnerRecoveryRequired,
+        Self::OwnerKeyInactive,
+        Self::TrustEpochStale,
+        Self::TrustBundleMismatch,
+        Self::ClockRollbackDetected,
+        Self::AuthorizationRequired,
+        Self::AuthorizationExpired,
+        Self::AuthorizationInvalidated,
+        Self::AuthorizationMalformed,
+        Self::AuthorizationSignatureInvalid,
+        Self::AuthorizationReplayed,
+        Self::AuthorizationContextStale,
+        Self::GrantAlreadyUsed,
+        Self::EffectAlreadyClaimed,
+        Self::EffectAlreadyInvoked,
+        Self::AuthorityProjectionConflict,
+        Self::UnsupportedCapability,
+        Self::InputNotRegularFile,
+        Self::InputLinkRejected,
+        Self::InputDocumentIncomplete,
+        Self::InputNestingLimit,
+        Self::McpFrameTooLarge,
+        Self::McpRequestIdInvalid,
+        Self::McpDuplicateRequestId,
+        Self::McpSessionBusy,
+        Self::McpOutputTooLarge,
+        Self::RemoteResponseTooLarge,
+        Self::RemoteCapabilityIncomplete,
+    ];
+
+    #[must_use]
+    pub const fn retryable_by_default(self) -> bool {
+        matches!(
+            self,
+            Self::Network
+                | Self::Tls
+                | Self::Protocol
+                | Self::StoreRead
+                | Self::StoreWrite
+                | Self::SecretStoreUnavailable
+        )
     }
 }
 
@@ -632,10 +749,52 @@ const fn serde_variant_name(code: MailErrorCode) -> &'static str {
     match code {
         MailErrorCode::InvalidInput => "invalid_input",
         MailErrorCode::AccountNotFound => "account_not_found",
+        MailErrorCode::AccountAlreadyExists => "account_already_exists",
+        MailErrorCode::AccountIdentityConflict => "account_identity_conflict",
+        MailErrorCode::AccountUpdateConflict => "account_update_conflict",
         MailErrorCode::ConfigRead => "config_read",
         MailErrorCode::ConfigWrite => "config_write",
+        MailErrorCode::ConfigStoreIdentityConflict => "config_store_identity_conflict",
+        MailErrorCode::ConfigMigrationFailed => "config_migration_failed",
+        MailErrorCode::ConfigVersionUnsupported => "config_version_unsupported",
+        MailErrorCode::ConfigConcurrentUpdate => "config_concurrent_update",
         MailErrorCode::SecretMissing => "secret_missing",
         MailErrorCode::SecretStoreUnavailable => "secret_store_unavailable",
+        MailErrorCode::CredentialLegacyQuarantined => "credential_legacy_quarantined",
+        MailErrorCode::CredentialReentryRequired => "credential_reentry_required",
+        MailErrorCode::CredentialBindingInvalid => "credential_binding_invalid",
+        MailErrorCode::CredentialCleanupInvalid => "credential_cleanup_invalid",
+        MailErrorCode::SecureFileSemanticsUnsupported => "secure_file_semantics_unsupported",
+        MailErrorCode::OwnerAuthorizationRequired => "owner_authorization_required",
+        MailErrorCode::OwnerTrustNotConfigured => "owner_trust_not_configured",
+        MailErrorCode::OwnerRecoveryRequired => "owner_recovery_required",
+        MailErrorCode::OwnerKeyInactive => "owner_key_inactive",
+        MailErrorCode::TrustEpochStale => "trust_epoch_stale",
+        MailErrorCode::TrustBundleMismatch => "trust_bundle_mismatch",
+        MailErrorCode::ClockRollbackDetected => "clock_rollback_detected",
+        MailErrorCode::AuthorizationRequired => "authorization_required",
+        MailErrorCode::AuthorizationExpired => "authorization_expired",
+        MailErrorCode::AuthorizationInvalidated => "authorization_invalidated",
+        MailErrorCode::AuthorizationMalformed => "authorization_malformed",
+        MailErrorCode::AuthorizationSignatureInvalid => "authorization_signature_invalid",
+        MailErrorCode::AuthorizationReplayed => "authorization_replayed",
+        MailErrorCode::AuthorizationContextStale => "authorization_context_stale",
+        MailErrorCode::GrantAlreadyUsed => "grant_already_used",
+        MailErrorCode::EffectAlreadyClaimed => "effect_already_claimed",
+        MailErrorCode::EffectAlreadyInvoked => "effect_already_invoked",
+        MailErrorCode::AuthorityProjectionConflict => "authority_projection_conflict",
+        MailErrorCode::UnsupportedCapability => "unsupported_capability",
+        MailErrorCode::InputNotRegularFile => "input_not_regular_file",
+        MailErrorCode::InputLinkRejected => "input_link_rejected",
+        MailErrorCode::InputDocumentIncomplete => "input_document_incomplete",
+        MailErrorCode::InputNestingLimit => "input_nesting_limit",
+        MailErrorCode::McpFrameTooLarge => "mcp_frame_too_large",
+        MailErrorCode::McpRequestIdInvalid => "mcp_request_id_invalid",
+        MailErrorCode::McpDuplicateRequestId => "mcp_duplicate_request_id",
+        MailErrorCode::McpSessionBusy => "mcp_session_busy",
+        MailErrorCode::McpOutputTooLarge => "mcp_output_too_large",
+        MailErrorCode::RemoteResponseTooLarge => "remote_response_too_large",
+        MailErrorCode::RemoteCapabilityIncomplete => "remote_capability_incomplete",
         MailErrorCode::Network => "network",
         MailErrorCode::Tls => "tls",
         MailErrorCode::Authentication => "authentication",
