@@ -325,8 +325,11 @@ Goal:
 Add the read-only typed core authorization projection, then implement challenge
 creation, pending-context uniqueness, strict proof verification, canonical proof
 and receipt transcripts, nonce consumption, exact replay, clock/expiry behavior,
-and bounded private/public receipt projections without a store-local transcript
-parser.
+and bounded private/public projections without a store-local parser. In B,
+challenge issuance is limited to store enrollment and the three trust actions;
+T202C expands registry-backed account, credential, cleanup, send, and mailbox
+issuance, T202D adds `ambiguous_close` issuance, and T202E owns replay after
+finalized rotation/invalidation.
 
 Allowed files:
 - `crates/kirje-core/src/authorization.rs`
@@ -338,31 +341,43 @@ Allowed files:
 
 Test targets:
 - `AuthorizationPayloadSnapshot`, optional `AuthorizationEffectSnapshot`, target
-  kind/canonical bytes/closed display, borrowed private bytes, no second parser
+  kind/canonical bytes/closed display, sealed manifest payload access, borrowed
+  private bytes, core proof codec, no second parser
+- Stage support matrix: store enrollment and three trust actions succeed only
+  against exact current/absence state; registry/effect actions fail context-stale
+  with zero entropy/write; policy/assurance remain unsupported
 - Challenge context transcript/digest and partial pending uniqueness under NULL-
-  shaped optional context, exact action/effect/ordinal matrix
+  shaped optional context, exact action/effect/ordinal matrix, 48-byte entropy,
+  duplicate reuse, expiry-and-recreate, restart and concurrent winner
 - Proof/receipt byte goldens and every field mutation, malformed/wrong role/key/
   signature/manifest/payload/epoch/bundle/anchor/time case
-- First proof, exact replay after restart/expiry/rotation, changed replay,
-  nonce/challenge corruption, concurrent proof winner
-- Inclusive expiry, 30s/N+1 rollback/issuance skew, monotonic high-water, no TTL
-  extension
-- Receipt target/state projection and private proof/signature/nonce/manifest/
-  realm/location omission
+- First proof, exact replay after restart/expiry, changed replay, clock-only
+  replay high-water, nonce/challenge corruption, concurrent proof winner
+- Effective-time inclusive expiry, 30s/N+1 rollback/issuance skew, monotonic
+  high-water pair, committed-expiry exact retry/response-loss recovery, no TTL
+  extension or revival
+- Exact ready-bootstrap prefix, B causal row graphs, fixed event numeric/detail
+  mapping, contiguous sequence/high-water, corruption and bounded BLOB loading
+- Explicit bounded owner challenge export, receipt target/state projection
+  (`Unclaimed`/`Expired` in B), and ordinary output omission of proof/signature/
+  nonce/manifest/realm/location material
 
 Deliverables:
 - Typed core read-only projection and challenge/proof/receipt/nonce store APIs
-- Canonical transcript, replay, concurrency, and projection fixtures
+- Canonical transcript, event, replay, fault, concurrency, and projection fixtures
 
 Acceptance criteria:
 - Store persistence consumes the core snapshot and cannot duplicate or reinterpret
   authorization tags/action policy.
 - One first proof creates exactly one immutable receipt/nonce use; historical
   exact replay returns it without fresh authority.
+- Restart-open validates every B row/event causally while retaining the exact
+  T202A DDL and initial trust-root constraints.
 
 TDD plan:
-- RED: Add accessor compile tests, transcript mutations, full replay/time matrix,
-  restart/concurrency, corruption, and output-privacy failures.
+- RED: Add accessor/sealing compile tests, transcript mutations, stage-support,
+  full replay/effective-time matrix, restart/concurrency/fault, causal corruption,
+  bounded-load, event, and output-privacy failures.
 - GREEN: Expose the minimum read-only core projection and implement one proof
   transaction against the fixed A schema.
 - REFACTOR: Consolidate transcript builders only after independent byte goldens
@@ -373,13 +388,17 @@ Validation commands:
 cargo test -p kirje-core --test authorization_contract --all-features --locked
 cargo test -p kirje-store --test authority_authorization --all-features --locked
 cargo test -p kirje-core -p kirje-store --all-features --locked
+cargo test -p kirje-store --no-default-features --locked
 cargo clippy -p kirje-core -p kirje-store --all-targets --all-features --locked -- -D warnings
+cargo +1.88 check -p kirje-core -p kirje-store --all-features --locked
 ```
 
 Definition of Done:
 - Projection ownership, proof/receipt bytes, exact replay truth table, nonce
-  uniqueness, clock bounds, and public omission are executable and reviewed.
+  uniqueness, stage support, effective clock bounds, event/causal validation,
+  crash recovery, and public omission are executable and reviewed.
 - T202A schema remains byte-for-byte unchanged.
+- Real post-rotation/invalidation replay remains explicitly assigned to T202E.
 
 Packet path:
 - `.ai-platform/specs/008-security-baseline/packets/T202B.yaml`
@@ -405,7 +424,9 @@ Goal:
 Implement exact owner-authorized store enrollment, account registry rows,
 account-transition prepare/config-committed/finalize/abort/recovery operations,
 removed-history semantics, and delete-only cleanup lifecycle against the fixed
-schema and immutable receipts.
+schema and immutable receipts. Expand challenge issuance for registry-backed
+account, credential, cleanup, send, and mailbox manifests; remote actions bind
+the planner-owned effect in one `challenge_effects` row.
 
 Allowed files:
 - `crates/kirje-store/src/lib.rs`
@@ -416,6 +437,9 @@ Allowed files:
 Test targets:
 - Exact store-enroll first/retry and changed retry; both-direction store/location
   uniqueness; config generation/digest and receipt/grant linkage
+- Registry-backed account/credential/cleanup and send/mail challenge issuance,
+  stale binding/config/policy/effect rejection, exact challenge-effect row, and
+  pending-context/restart/concurrency behavior
 - Account/credential global uniqueness, active display partial index, create/
   update/remove, removed display recreation only with new identities
 - Account-transition canonical digest, exact next generation, one active
@@ -428,6 +452,7 @@ Test targets:
 
 Deliverables:
 - Registry, transition, and cleanup transaction APIs and fixtures
+- Registry-backed control/remote challenge issuance and challenge-effect fixtures
 - Exact idempotency, recovery, removed-history, and privacy evidence
 
 Acceptance criteria:
@@ -452,7 +477,8 @@ cargo clippy -p kirje-store --all-targets --all-features --locked -- -D warnings
 
 Definition of Done:
 - Exact enrollment, account lifecycle, transition recovery, cleanup state, FK,
-  event, and projection tests pass without changing the A schema.
+  challenge issuance/effect, event, and projection tests pass without changing
+  the A schema.
 - No registry API returns location material, credential ID/binding digest, clear
   display/email/endpoint, locator bytes, or cross-account state normally.
 
@@ -480,6 +506,8 @@ Goal:
 Implement typed same-transaction current-context revalidation, canonical grant
 use/effect claim/invocation start/observation transcripts, global effect claim,
 single adapter-entry permit, exact recovery, and crash-to-ambiguous observation.
+Expand challenge issuance for `ambiguous_close` only after its referenced
+effect, claim, invocation, and observation history validates exactly.
 
 Allowed files:
 - `crates/kirje-core/src/account.rs`
@@ -504,11 +532,14 @@ Test targets:
   non-Serialize/no-byte-export `InvocationPermit`
 - Crash before invocation has zero adapter entry; invocation without observation
   becomes one ambiguous recovery observation and never reinvokes
+- `ambiguous_close` challenge issuance accepts only the exact durable effect and
+  observation history and rejects missing, changed, or cross-linked history
 - Authority-first observation and normal projection privacy
 
 Deliverables:
 - Typed request/projection APIs, durable transcript codecs, claim/invocation/
   observation transactions, and invocation permit
+- History-bound `ambiguous_close` challenge issuance and fixtures
 - Concurrency/restart/fault/privacy fixtures
 
 Acceptance criteria:
@@ -1520,8 +1551,9 @@ Evidence required:
 ## User Review Gate
 
 Confirmed on 2026-08-28 under the user's explicit standing project-owner
-delegation and instruction to continue without per-step approval. T202A is the
-only Ready production task. T202B-T202E and T203-T212 are Draft; the T202
+delegation and instruction to continue without per-step approval. T202A is
+Accepted and T202B is the only Ready production task. T202C-T202E and T203-T212
+are Draft; the T202
 umbrella is Draft and cannot become Accepted before T202E evidence and recorded
 delegated acceptance. Individual task acceptance remains evidence-based rather
 than inferred from this graph confirmation; a failed or missing gate still stops

@@ -1005,6 +1005,47 @@ retired, and epoch retired, in that exact order as codes 1..26. Sources 1..6
 are authority store, bootstrap, proof verifier, runtime, crash recovery, and
 owner reconciliation.
 
+The persistent numeric mappings are exact and never inferred from enum order:
+
+```text
+entity_kind
+  1 realm       2 key          3 trust_epoch  4 store
+  5 account     6 transition   7 cleanup      8 challenge
+  9 receipt    10 grant       11 effect      12 invocation
+ 13 observation
+
+event_code
+  1 bootstrap_prepared             2 bootstrap_confirmed
+  3 challenge_created              4 challenge_authorized
+  5 challenge_expired              6 challenge_invalidated
+  7 grant_used                     8 store_enrolled
+  9 store_state_changed           10 account_transition_prepared
+ 11 account_config_committed      12 account_transition_finalized
+ 13 account_transition_aborted    14 account_transition_recovery_required
+ 15 cleanup_ready                 16 cleanup_claimed
+ 17 cleanup_deleted               18 effect_claimed
+ 19 invocation_started            20 effect_observed
+ 21 rotation_staged               22 rotation_finalized
+ 23 recovery_staged               24 recovery_finalized
+ 25 key_retired                   26 epoch_retired
+
+source
+  1 authority_store  2 bootstrap  3 proof_verifier
+  4 runtime          5 crash_recovery  6 owner_reconciliation
+```
+
+T202B retains the exact ready-bootstrap events as sequence 1 and 2. Its
+challenge-created event uses entity kind 8, event code 3, source 1, the
+challenge ID, related kind 10 plus grant ID, pending state `0x0801`, and the
+challenge-context digest. Challenge-authorized uses entity kind 8, event code 4,
+source 3, related kind 9 plus receipt ID, pending-to-authorized states
+`0x0801 -> 0x0802`, receipt digest as context, and the same receipt ID in the
+receipt field. Challenge-expired uses entity kind 8, event code 5, source 1, no
+related entity or receipt, states `0x0801 -> 0x0803`, and challenge-context
+digest. Created time equals `issued_at`, authorized time equals `verified_at`,
+and expired time is greater than `expires_at` and no greater than authority
+clock high-water. Pending reuse and exact proof replay append no event.
+
 Polymorphic event entity IDs intentionally have no foreign key; their exact
 kind/length pair and typed detail must match a durable row or retained realm
 identity inside the inserting transaction. Challenge `store_id`/`account_id`

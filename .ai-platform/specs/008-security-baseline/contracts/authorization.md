@@ -191,7 +191,7 @@ Domain: `KIRJE-AUTHORIZATION-V1\0`.
 | `0x0008` | account binding SHA-256 | zero or BLOB32 |
 | `0x0009` | policy SHA-256 | zero or BLOB32 |
 | `0x000a` | trust-bundle SHA-256 | BLOB32 |
-| `0x000b` | owner key ID | BLOB32 |
+| `0x000b` | signer key ID | BLOB32 |
 | `0x000c` | trust epoch | u64, positive |
 | `0x000d` | grant ID | BLOB16 UUIDv4 |
 | `0x000e` | nonce | BLOB32 CSPRNG |
@@ -477,12 +477,13 @@ Challenge creation:
 
 1. Loads the immutable target and one account/config/policy snapshot.
 2. Builds and validates the complete manifest.
-3. Registers random effect IDs where needed.
+3. Registers the effect ID already covered by a sealed remote-action manifest;
+   the planner owns effect-ID generation before manifest construction.
 4. Loads current anchor/journal/key/epoch context.
 5. Generates a random grant ID and 32-byte nonce.
 6. Persists manifest and signing payload before returning review output.
 
-The public challenge projection is:
+The explicit owner-facing challenge export is:
 
 ```json
 {
@@ -506,6 +507,10 @@ The public challenge projection is:
 The external signer must parse `manifest_base64url`, validate its action-specific
 matrix, recompute both digests and challenge ID, and display every covered
 effect field independently. It must not sign only the `review` object.
+This export is an intentional authorization artifact: the encoded signing
+payload necessarily covers realm, grant, and nonce, and the exact manifest is
+present for independent review. Ordinary receipt/status/error/log output never
+re-emits those private bytes.
 
 ## Proof
 
@@ -524,7 +529,9 @@ Proof JSON uses `deny_unknown_fields` and has a 4 KiB input limit:
 No proof field can override action, target, realm, epoch, nonce, expiry,
 manifest, binding, policy, effect, or trust context.
 
-The parsed proof has one serializer-independent durable representation:
+Core seals proof fields behind validated construction and read-only accessors,
+does not expose signature-bearing `Debug`, and owns the one
+serializer-independent durable representation:
 `KIRJE-AUTHORIZATION-PROOF-V1\0` with challenge, key,
 signing-payload SHA-256, and signature at tags `0x0001`-`0x0004`.
 `proof_sha256` hashes that transcript, never the JSON document.
@@ -550,35 +557,63 @@ start, and observation transcript/digest rules are normative in
 One `BEGIN IMMEDIATE` transaction:
 
 1. Parses the proof under size/field/depth bounds.
-2. Loads challenge, current anchor match, active epoch/key, and persisted bytes.
+2. Loads the challenge and persisted bytes. An existing receipt branches to
+   exact historical replay before any current-key/epoch/bundle requirement.
 3. Rejects a wall clock more than 30 seconds behind the journal's last observed
    time; updates the monotonic high-water wall clock.
-4. Requires `now <= expires_at` exactly. Clock tolerance never extends expiry.
+4. Computes `effective_time = max(last_observed_at, observed_at)` and requires
+   `effective_time <= expires_at` exactly. Clock tolerance never extends expiry
+   or permits authority to become live again after high-water passed expiry.
 5. Allows at most 30 seconds of negative skew against `issued_at`; larger skew
    returns `clock_rollback_detected`.
 6. Compares challenge/key/payload digests and exact encoded lengths.
 7. Calls `verify_strict` on the exact persisted signing payload.
 8. Inserts immutable receipt and nonce use, then consumes the challenge.
 
-The transaction updates
-`last_observed_at = max(last_observed_at, now)` after allowing at most 30 seconds
-of negative skew. Expiry is inclusive (`now <= expires_at`); clock tolerance
-never extends expiry.
+The transaction updates `last_observed_at = effective_time` after allowing at
+most 30 seconds of negative skew. Raw observed time is used only for rollback
+and issued-at skew rejection; issuance, expiry, verified time, receipt state,
+and event time use `effective_time`. An expired pending proof commits the expired
+state, event, and clock before the API returns `authorization_expired` outside
+the transaction.
 
-Proof replay follows this exact table:
+The signer role comes only from `SensitiveAction::policy().required_role`.
+Owner and recovery rotation are signed by the active owner key; owner recovery
+is signed by the active recovery key. A request, manifest field, or proposed-key
+role cannot override the signer selected from the closed action policy.
+
+Proof replay follows this exact table. T202B admits only pending, authorized,
+and expired challenge rows; T202E activates the invalidated row below:
 
 | Durable state | Proof | Result |
 |---|---|---|
 | pending, current, unexpired, no receipt | valid first proof | one receipt and nonce use |
 | pending, expired, no receipt | any | mark expired and return `authorization_expired` |
-| invalidated, no receipt | any | `authorization_invalidated` |
+| already expired, no receipt | any bounded proof naming that challenge | same `authorization_expired`; no new event/state |
+| invalidated, no receipt | any | T202E: `authorization_invalidated` |
 | receipt exists, including after expiry/rotation | exact canonical proof | same immutable receipt projection with freshly derived state; no authority refresh |
 | receipt exists | changed canonical proof | `authorization_replayed` |
 | nonce/authorized state exists without its receipt | any | fail closed with `owner_recovery_required` |
 
 Historical exact replay never changes receipt ID, digest, verified time, expiry,
 grant identity, or trust context. It does not make a later use/claim boundary
-current.
+current. Its transaction may advance only the paired
+`authority_meta.last_observed_at`/`updated_at` high-water; this does not refresh
+the receipt or append an event, and ensures a receipt projected as expired can
+never regress to unclaimed under tolerated clock rollback.
+
+An already-expired no-receipt retry follows the same rollback gate and may
+advance only that meta clock pair. It returns the same
+`authorization_expired`, consumes no entropy, appends no event, and leaves the
+challenge row unchanged. This is the exact recovery path for restart,
+concurrent losers, and commit-before-error-response loss.
+
+T202B proves exact replay after restart and expiry while the initial trust root
+is active. T202E owns the finalized-rotation/invalidation integration fixture
+and proves that the same replay branch remains historical after trust changes,
+then activates invalidated-without-receipt handling. T202B treats an invalidated
+challenge row as corruption and does not implement or accept rotated trust
+history.
 
 ## Grant Use And Effect Apply
 

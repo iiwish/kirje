@@ -237,14 +237,21 @@ mismatched staged state remains `recovery_required`.
 Every authority transaction receiving `observed_at_unix_ms` reads
 `authority_meta.last_observed_at` under `BEGIN IMMEDIATE`. A value more than
 30,000 milliseconds below the high-water mark fails with
-`clock_rollback_detected`. An accepted transaction writes
-`last_observed_at = max(last_observed_at, observed_at)`; subtraction and expiry
-math are checked for overflow.
+`clock_rollback_detected`. An accepted transaction, including pending challenge
+reuse and exact proof replay, writes
+`last_observed_at = max(last_observed_at, observed_at)` and synchronizes
+`authority_meta.updated_at` to that same effective high-water; subtraction and
+expiry math are checked for overflow. These two meta columns are one clock pair.
+Idempotent recovery may therefore advance only that pair while leaving the
+recovered challenge/receipt timestamps and event history unchanged.
 
-Expiry is inclusive: authority remains time-valid when
-`observed_at <= expires_at`. At most 30,000 milliseconds of negative skew against
-`issued_at` is accepted. This tolerance only addresses rollback detection and
-never increases `expires_at`, `invoke_before`, or any TTL.
+After the rollback check, every authority freshness decision computes
+`effective_time = max(last_observed_at, observed_at)`. Expiry is inclusive only
+when `effective_time <= expires_at`. At most 30,000 milliseconds of raw negative
+skew against `issued_at` is accepted, but the effective time controls issuance,
+expiry, verified/occurred timestamps, receipt state, and persisted high-water.
+This tolerance never increases `expires_at`, `invoke_before`, or any TTL and
+never revives authority after high-water crossed expiry.
 
 ## Canonical Durable Transcripts
 
@@ -385,7 +392,7 @@ struct AuthorizationPayloadSnapshot<'a> {
     action: SensitiveAction,
     target_kind: TargetKind,
     target_bytes: &'a [u8],
-    target_display: TargetDisplay,
+    target_display: &'a TargetDisplay,
     store_id: Option<StoreId>,
     account_id: Option<AccountId>,
     manifest_sha256: Sha256Digest,
@@ -403,10 +410,24 @@ struct AuthorizationPayloadSnapshot<'a> {
 }
 ```
 
-`AuthorizationEffectSnapshot` exposes only effect ID, ordinal, and closed effect
-kind. The target projection exposes kind, canonical bytes, and read-only display.
-The store never duplicates `AuthorizationPayload::parse`, tag tables, action
-policy, or target formatting.
+All snapshot fields are private and available only through borrowed/copying
+accessors. `AuthorizationEffectSnapshot` exposes only effect ID, ordinal, and
+closed effect kind. `TargetDisplay` has no public constructor and exposes only
+its closed display string: canonical lowercase UUID, unsigned trust epoch with
+no leading zero, or the literals `policy`/`assurance`. `AuthorizationPayload`
+stores canonical target bytes/display once and exposes
+`snapshot() -> AuthorizationPayloadSnapshot<'_>`; canonical payload and nonce
+are borrowed, not cloned.
+
+`AuthorizationContext` names the selected field `signer_key_id`; the action
+policy, not the request, selects owner versus recovery. `TargetKind` and
+`EffectKind` expose stable numeric code accessors for store-owned durable
+transcripts. `ActionManifest` exposes a borrowed sealed payload accessor so the
+store validates the exact same action-specific object that produced its digest.
+Core also owns the validated proof constructor/accessors and canonical
+proof-transcript/digest codec. The store never duplicates
+`AuthorizationPayload::parse`, proof tags, action policy, manifest payload
+interpretation, or target formatting.
 
 ## SQLite Relationship Enforcement
 
@@ -423,25 +444,49 @@ different parents is rejected by SQLite. All of these foreign keys retain
 
 ## Transaction APIs
 
-Every API below starts `BEGIN IMMEDIATE`, validates SQL and Rust row invariants,
-performs all current-context comparisons, appends its event, and commits before
-returning a durable projection. Caller booleans such as `is_current` or
-`is_authorized` are not accepted.
+Every mutation API acquires the fixed apply lock, opens the existing database
+without CREATE, performs nonmutating identity/version preflight, enables and
+verifies WAL/FULL only for KIRJ v1, then starts a fresh `BEGIN IMMEDIATE` and
+repeats classification plus all SQL/Rust row validation. It performs every
+current-context comparison, appends the exact event when the contract defines a
+state transition, and commits before returning a durable projection. Clock-pair-
+only idempotent recovery is the explicit no-event case. Caller booleans such as
+`is_current` or `is_authorized` are not accepted.
 
 ### Challenges, Proofs, And Receipts
 
-`CreateChallengeRequest` carries a sealed `ActionManifest`, observed time, expiry,
-and the typed expected store/account/policy snapshot required by the action. The
-store reads active anchor/meta/key/epoch state, generates grant and nonce, builds
-the core `AuthorizationPayload`, persists its snapshot plus exact manifest and
-signing bytes, and registers its optional effect. It returns only the bounded
-challenge projection.
+`CreateChallengeRequest` carries exactly one sealed `ActionManifest`, observed
+time, and requested expiry. It contains no caller-duplicated store/account,
+policy, role, key, epoch, bundle, target, or effect override. The store reads the
+manifest's borrowed typed payload and current authority rows, generates only the
+grant UUID and nonce, builds the core `AuthorizationPayload`, persists its
+snapshot plus exact manifest/signing bytes, and returns the bounded challenge
+projection.
 
-Challenge creation first marks matching pending rows with `now > expires_at` as
-expired. When the same `context_sha256` remains pending, it returns that committed
+T202B challenge creation supports only `store_enroll`, `owner_rotate`,
+`recovery_rotate`, and `owner_recover`. Store enrollment requires the exact
+manifest's `unregistered` expectation and absence of that store ID. Trust
+challenges require exact current journal/epoch/bundle and affected old key data,
+checked successor arithmetic, distinct validated proposed keys, and the signer
+role selected from action policy; they do not stage a rotation. Constructible
+registry-backed account, credential, cleanup, send, and mailbox actions fail
+`authorization_context_stale` with zero entropy, rows, events, or clock change
+until T202C expands challenge issuance and inserts the covered challenge-effect
+row for remote actions. `ambiguous_close` fails the same way until T202D can
+validate the exact effect/observation history. Policy and assurance are rejected
+by the core manifest boundary as `unsupported_capability`; no such sealed
+manifest can reach the store. T202B persists no challenge-effect row, while its
+core projection still exposes the optional effect for T202C.
+
+Challenge creation uses effective authority time and first marks the matching
+pending row expired when `effective_time > expires_at`. When the same
+`context_sha256` remains pending, it returns that committed
 challenge unchanged; it does not replace grant, nonce, issuance, expiry, or
-effect identity. Once the old row is authorized, expired, or invalidated, a fresh
-request may commit a new challenge with new random values.
+effect identity, consumes no entropy, and may advance only the authority meta
+clock pair. Once the old row is authorized or expired, a fresh request may
+commit a new challenge with a new 16-byte UUIDv4 grant plus 32-byte nonce. T202E
+adds invalidated-state replacement. The planner, not this transaction, owns
+remote effect-ID generation.
 
 `VerifyProofRequest` carries a bounded `AuthorizationProof` and observed time.
 The transaction compares exact persisted bytes, active role/mask/key/epoch/bundle,
@@ -454,16 +499,62 @@ Proof replay is exact:
 |---|---|---|
 | no receipt, pending/current/unexpired | valid first proof | insert one immutable receipt and nonce use |
 | no receipt, pending but expired | any proof | mark expired; `authorization_expired` |
-| no receipt, invalidated | any proof | `authorization_invalidated` |
+| no receipt, already expired | any bounded proof naming that challenge | same `authorization_expired`; clock-pair-only recovery |
+| no receipt, invalidated | any proof | T202E: `authorization_invalidated` |
 | receipt exists | exact canonical proof | return the same receipt ID/digest with freshly derived state; no new authority |
 | receipt exists | changed canonical proof | `authorization_replayed` |
 | nonce/authorized marker exists without matching receipt | any | corruption -> `owner_recovery_required` |
 
-Exact historical proof replay returns the same immutable receipt after expiry or
-rotation. It can report `Expired` or `Invalidated`; it cannot create a new grant,
-refresh timestamps, or authorize a new boundary.
+The proof transaction checks for an existing receipt before current
+key/epoch/bundle and expiry. Exact historical replay returns the same immutable
+receipt after expiry and consumes no entropy; it cannot create a grant, refresh
+receipt timestamps, append an event, or authorize a new boundary. It may advance
+only the authority meta clock pair so receipt state cannot regress. A changed
+canonical proof returns `authorization_replayed`. T202E adds and tests replay
+after finalized rotation/invalidation and activates the invalidated-without-
+receipt branch.
+
+First valid proof consumes exactly 16 entropy bytes for one UUIDv4 receipt after
+all deterministic checks and signature verification. It inserts the immutable
+receipt and nonce use, changes pending to authorized, updates clock, appends the
+authorization event, and commits atomically. Expired pending proof commits the
+expired state, clock, and event, then returns `authorization_expired` after
+commit. A restart, concurrent loser, or response-loss retry that finds the same
+challenge already expired returns the same error after the rollback check,
+consumes no entropy, appends no event, changes no challenge row, and may advance
+only the authority meta clock pair. Invalid proof, changed replay, and every
+failed deterministic check consume no entropy and write nothing. T202B treats
+any persisted invalidated
+challenge as corruption and returns `owner_recovery_required`; T202E owns the
+first valid invalidation writer and the `authorization_invalidated` path.
+
+T202B validation keeps the exact two-key/one-epoch ready trust root; admits only
+`pending`, `authorized`, and `expired` challenge states; and keeps
+`registered_stores`, `registered_accounts`, `challenge_effects`, `grant_uses`,
+`account_transitions`, `credential_cleanup`, `remote_effects`, `effect_claims`,
+`effect_invocations`, and `effect_observations` empty. It replaces T202A's
+blanket later-row/event count with bounded length/type preflight, core
+reparse/recompute of every manifest and payload, per-challenge context/state/
+effect validation, exact receipt/nonce causal graphs, and streaming event
+validation. There is no historical-row cardinality cap: validation runs in one
+consistent read transaction, streams rows in deterministic order, never
+collects history into a proportional `Vec`/map, and uses O(1) additional memory
+beyond one schema-bounded row/transcript. Bootstrap events remain exact sequence
+1 and 2.
+Challenge events use the numeric map and detail shapes in `data-model.md`;
+sequences are contiguous, `sqlite_sequence = COUNT(*) = MAX(sequence)`, every
+created/authorized/expired state has its exact event pair, and pending reuse or
+exact replay and already-expired recovery have no event even when their
+transaction advances the authority meta clock pair.
 
 ### Registry And Account Transitions
+
+T202C expands `create_challenge` for registry-backed account, credential,
+cleanup, send, and mailbox manifests. It validates the exact registered store,
+account, binding, config and policy context and persists one `challenge_effects`
+row for every remote action before implementing the registry/apply transactions
+below. T202D expands issuance only for `ambiguous_close`, after effect and
+observation history exists to validate its sealed payload.
 
 `EnrollStoreRequest` contains one exact `GrantUseRequest`, store UUID, bounded
 private location material and digest, config generation/digest, and observed

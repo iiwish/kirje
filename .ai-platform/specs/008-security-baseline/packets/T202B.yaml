@@ -1,0 +1,502 @@
+schema_version: 1
+packet_id: 008-T202B-A001
+task_id: T202B
+feature_id: 008-security-baseline
+mode: execute_one_task
+adapter: codex_worker
+status: ready
+
+governance_inputs:
+  constitution: .ai-platform/memory/constitution.md
+  product_contract: .ai-platform/docs/product-design.md
+  program_spec: .ai-platform/specs/007-stable-v1-program/spec.md
+  program_plan: .ai-platform/specs/007-stable-v1-program/plan.md
+  feature_spec: .ai-platform/specs/008-security-baseline/spec.md
+  requirements_checklist: .ai-platform/specs/008-security-baseline/checklists/requirements.md
+  feature_plan: .ai-platform/specs/008-security-baseline/plan.md
+  research: .ai-platform/specs/008-security-baseline/research.md
+  data_model: .ai-platform/specs/008-security-baseline/data-model.md
+  contracts:
+    - .ai-platform/specs/008-security-baseline/contracts/authorization.md
+    - .ai-platform/specs/008-security-baseline/contracts/authority-store.md
+  work_graph: .ai-platform/specs/008-security-baseline/tasks.md
+  analysis: .ai-platform/specs/008-security-baseline/analysis.md
+  predecessor_packet: .ai-platform/specs/008-security-baseline/packets/T202A.yaml
+  predecessor_evidence: .ai-platform/evidence/T202A/summary.md
+  approval_gates:
+    constitution: confirmed project contract
+    program_spec_plan_work_graph: confirmed under delegated project-owner authority
+    feature_spec_and_plan: confirmed after independent security reviews
+    requirements_checklist: complete
+    predecessor: T202A Accepted at commit f292132
+    analysis: APPROVED_FOR_T202B_PACKETIZATION with no unresolved Critical, High, or Medium finding
+    execution_authority: explicit standing user instruction to continue without per-step approval; failed or missing gates still stop execution
+
+work_unit:
+  title: Challenges, proofs, and immutable receipts
+  goal: >-
+    Add the minimum read-only core authorization projection and proof codec, then
+    implement fail-closed authority challenge creation and detached-proof
+    verification over the unchanged Authority SQLite v1 schema. T202B supports
+    store_enroll, owner_rotate, recovery_rotate, and owner_recover challenge
+    issuance only. It persists pending challenges, immutable receipts, nonce
+    consumption, and exact causal events; provides bounded public projections;
+    and validates every B row and event on restart. It does not register remote
+    effects, mutate stores, stage/finalize trust, or accept any T202C-T202E row.
+  epic: T101
+  story:
+    - US-003
+  requirements:
+    - FR-013
+    - FR-014
+    - FR-015
+    - FR-018
+    - NFR-001
+    - NFR-002
+    - NFR-003
+    - NFR-006
+    - NFR-007
+  priority: P0
+  depends_on:
+    - T202A Accepted at commit f292132
+    - T201 Accepted at commit 89cc706
+    - canonical Authority SQLite V1 DDL SHA-256 3a59cf60ebe57affad3e440c3eb3f70e09d8e3c90974fc57318861560c4fb632
+    - confirmed 008 contracts including the T202B stage boundary and fixed event map
+  blocks:
+    - T202C
+    - T202 umbrella acceptance
+  parallel: false
+  conflicts_with:
+    - any concurrent core authorization projection, proof, challenge, receipt, nonce, authority validator, or event change
+    - T202C through T202E
+
+codebase_context:
+  local_instructions:
+    - AGENTS.md
+  relevant_files:
+    - crates/kirje-core/src/authorization.rs
+    - crates/kirje-core/tests/authorization_contract.rs
+    - crates/kirje-store/src/lib.rs
+    - crates/kirje-store/src/authority.rs
+    - crates/kirje-store/src/authority/schema_v1.sql
+    - crates/kirje-store/tests/authority_schema.rs
+    - crates/kirje-store/tests/fixtures/authority/schema/**
+  existing_patterns:
+    - core owns sealed ActionManifest and AuthorizationPayload construction, strict parsing, exact transcript tags, action policy, target semantics, and Ed25519 verify_strict
+    - T202A owns the fixed production home, apply lock, non-create open preflight, WAL/FULL configuration, deterministic test entropy, bootstrap state, immutable initial trust root, and authority clock high-water
+    - authority errors are stable MailError values with bounded static diagnostics and no SQL, path, row, key, proof, signature, nonce, manifest, or provider material
+    - authority_schema tests and schema_v1.sql are accepted predecessor artifacts and must remain byte-for-byte unchanged
+    - the workspace uses Rust 1.88, edition 2024, unsafe_code forbid, rusqlite bundled, getrandom for OS entropy, and locked dependencies
+  interfaces_or_contracts:
+    - .ai-platform/specs/008-security-baseline/contracts/authorization.md
+    - .ai-platform/specs/008-security-baseline/contracts/authority-store.md
+    - .ai-platform/specs/008-security-baseline/data-model.md#authority-sqlite-v1
+    - .ai-platform/specs/008-security-baseline/data-model.md#authority-events
+
+stage_boundary:
+  supported_challenge_actions:
+    - store_enroll
+    - owner_rotate
+    - recovery_rotate
+    - owner_recover
+  deferred_context_actions:
+    behavior: authorization_context_stale with retryable false and zero entropy, rows, events, and clock change
+    actions:
+      - send_submit
+      - mail_seen
+      - mail_starred
+      - mail_move
+      - mail_archive
+      - mail_safe_delete
+      - account_create
+      - account_update
+      - account_remove
+      - credential_set
+      - credential_delete
+      - credential_cleanup
+      - ambiguous_close
+    follow_up_ownership:
+      T202C:
+        - send_submit
+        - mail_seen
+        - mail_starred
+        - mail_move
+        - mail_archive
+        - mail_safe_delete
+        - account_create
+        - account_update
+        - account_remove
+        - credential_set
+        - credential_delete
+        - credential_cleanup
+      T202D:
+        - ambiguous_close
+  core_rejected_actions:
+    behavior: core manifest construction/parsing returns unsupported_capability; no sealed manifest reaches AuthorityStore
+    actions:
+      - policy_update
+      - assurance_update
+  forbidden_stage_operations:
+    - no challenge_effects row in T202B, including for rejected effect actions
+    - no registered_stores or registered_accounts mutation
+    - no trust key, epoch, anchor, or meta staging/finalization/invalidation
+    - no grant_use, effect, claim, invocation, observation, transition, cleanup, rotation, recovery, or audit API
+    - no post-rotation or post-invalidation fixture or state; T202E owns that integration proof and first valid invalidation writer
+
+required_core_contract:
+  authorization_context:
+    - rename owner_key_id to signer_key_id; canonical tag 0x000b bytes do not change
+    - signer is selected only by SensitiveAction::policy().required_role
+    - owner_rotate and recovery_rotate use the current owner; owner_recover uses the current recovery key
+  payload_projection:
+    - AuthorizationPayload stores canonical target bytes and closed TargetDisplay once
+    - snapshot returns AuthorizationPayloadSnapshot with private fields and borrowed accessors
+    - snapshot exposes owner realm, action, target kind, borrowed target bytes/display, store/account IDs, manifest/binding/policy/bundle digests, signer key, epoch, grant, borrowed nonce, issued/expires time, optional effect, and borrowed canonical bytes
+    - AuthorizationEffectSnapshot exposes effect ID, ordinal zero, and EffectKind through private fields and read-only accessors
+    - TargetDisplay has no public constructor and exposes only a borrowed closed string
+    - TargetKind and EffectKind expose public stable code accessors
+    - ActionManifest exposes a borrowed payload accessor; store code must inspect that exact sealed payload rather than parse or reconstruct it
+    - canonical payload bytes and nonce accessors borrow rather than clone
+  proof_codec:
+    - AuthorizationProof has validated construction/deserialization, private fields, read-only accessors, and no signature-bearing Debug
+    - proof JSON remains deny_unknown_fields, canonical Base64url without padding, and bounded by the existing 4 KiB caller boundary
+    - core owns KIRJE-AUTHORIZATION-PROOF-V1 transcript construction and proof_sha256
+    - transcript tags 1..4 are challenge BLOB32, key BLOB32, signing digest BLOB32, and signature BLOB64
+    - canonical proof bytes and decoded signature are available through non-logging read-only methods required by the store
+    - core can strictly parse its canonical proof transcript back into the sealed proof object for restart validation
+    - canonical proof bytes are serializer-independent and never hash JSON
+  public_projection:
+    - the explicit owner-facing challenge export exactly follows kirje.authorization.v1 fields in authorization.md and includes bounded Base64url manifest/signing bytes plus non-authoritative review
+    - receipt output reuses AuthorizationReceiptProjection and in B derives only Unclaimed or Expired
+    - challenge export is the sole intentional disclosure of signing bytes and manifest; its encoded transcript necessarily covers realm, grant, and nonce for an external owner signer
+    - ordinary receipt/status/error/log output omits realm, public key bytes, signature, proof, nonce, manifest/signing bytes, private event detail, private location, and raw SQL or path data
+
+required_store_api:
+  create_challenge:
+    request_fields:
+      - one sealed ActionManifest
+      - observed_at_unix_ms
+      - requested expires_at_unix_ms
+    forbidden_request_fields:
+      - expected store/account/policy snapshot duplicated outside the manifest
+      - caller-selected signer role, key, epoch, trust bundle, target, effect, grant, nonce, realm, or authority location
+    deterministic_checks_before_entropy:
+      - validate request bounds and raw rollback/issued-at skew arithmetic
+      - load and validate the exact ready initial realm, journal, active epoch, trust bundle, and both active role keys
+      - select signer from action policy
+      - parse/revalidate the sealed manifest through core and compare its borrowed canonical bytes/digest
+      - classify constructible deferred actions; policy/assurance are rejected before this API by core
+      - expire the matching pending context using effective authority time
+      - return an identical still-pending challenge for the same context
+      - validate supported action-specific current state
+    supported_action_checks:
+      store_enroll:
+        - payload is exactly ManifestPayload::StoreEnroll
+        - expected_store_state is Unregistered
+        - registered_stores contains no row for the manifest store ID
+        - no store is inserted or enrolled by challenge creation
+      owner_rotate:
+        - payload role and permission are owner
+        - old key ID/public key, old epoch, and old bundle agree exactly with current rows
+        - new epoch is checked old epoch plus one; new key ID is recomputed from role/public key
+        - new owner differs from both active keys and new bundle is recomputed from current realm/journal, successor epoch, proposed owner, and current recovery key
+      recovery_rotate:
+        - payload role and permission are recovery
+        - old key ID/public key, old epoch, and old bundle agree exactly with current rows
+        - new epoch is checked old epoch plus one; new key ID is recomputed from role/public key
+        - new recovery differs from both active keys and new bundle is recomputed from current realm/journal, successor epoch, current owner, and proposed recovery key
+      owner_recover:
+        - journal, old epoch, old bundle, checked successor, invalidation All, and both proposed key IDs/public keys/bundle agree exactly
+        - proposed owner and recovery keys are valid, distinct from each other, and distinct from active keys
+        - new bundle is recomputed from current realm/journal, successor epoch, and both proposed keys
+      all_trust_actions:
+        - no key, epoch, anchor, or transition row changes and no meta change beyond the shared authority clock pair
+    entropy_contract:
+      - a new committed challenge consumes exactly 48 bytes after all deterministic checks: UUIDv4 grant 16 then nonce 32
+      - pending reuse, deferred action, stale manifest, expiry classification before replacement, concurrent loser, and every failed deterministic check consume zero entropy
+      - remote effect IDs are planner-owned and never generated here
+    persistence:
+      - issue time is effective_time and requested expiry must satisfy the existing positive maximum 900000 ms lifetime from issue time
+      - AuthorizationPayload is built once from exact manifest/current state/random grant+nonce and persisted from the core snapshot
+      - context_sha256 is the exact KIRJE-AUTHORIZATION-CONTEXT-V1 digest defined by authority-store.md
+      - insert one pending authorization_challenges row, update high-water, and append one exact created event atomically
+      - pending-context unique race is reclassified under the transaction and the loser returns the winner unchanged
+      - no challenge_effects row is inserted in B
+      - still-pending exact reuse may commit only the paired authority_meta last_observed_at and updated_at high-water, then returns the original challenge without an event
+  verify_proof:
+    request_fields:
+      - one bounded AuthorizationProof
+      - observed_at_unix_ms
+    transaction_order:
+      - deterministic request bounds and raw rollback checks
+      - load challenge and size/type preflight before BLOB materialization
+      - if a receipt exists, branch to exact replay before current signer/epoch/bundle and expiry checks
+      - exact canonical proof replay returns the same immutable receipt with freshly derived state and no entropy or receipt/challenge/nonce/event timestamp change; it may update only the paired authority_meta last_observed_at and updated_at high-water
+      - changed canonical proof for an existing receipt returns authorization_replayed with zero entropy/write
+      - an already-expired no-receipt challenge returns the same authorization_expired after rollback validation, with no entropy, challenge/event change, or new event; it may update only the paired authority_meta clock high-water
+      - without a receipt, require pending state, exact current signer/epoch/bundle/anchor, exact persisted manifest/payload/digests, unused nonce, and effective_time validity
+      - verify_strict against exact persisted signing payload and current role public key
+      - only then consume exactly 16 entropy bytes for one UUIDv4 receipt
+    first_valid_proof:
+      - insert one immutable authorization_receipts row and one nonce_uses row
+      - update challenge pending to authorized and authority high-water
+      - append one exact authorized event and commit atomically
+      - receipt canonical bytes/digest use KIRJE-AUTHORIZATION-RECEIPT-V1 tags 1..11 exactly
+    expired_proof:
+      - when effective_time is greater than expires_at, update pending to expired, update high-water, append exact expired event, commit, then return authorization_expired outside the transaction
+      - expiration consumes zero entropy and never verifies or inserts a receipt/nonce use
+      - restart, concurrent loser, and commit-before-error-response recovery over an already-expired challenge return the same error, append no event, preserve the challenge, and may advance only the authority meta clock pair
+    invalid_or_corrupt:
+      - malformed input and every wrong challenge lookup write nothing and consume no entropy
+      - for a still-pending first proof, wrong key/digest/role/signature/manifest/payload/epoch/bundle/anchor/time writes nothing and consumes no entropy
+      - any invalidated challenge row is corruption in B and returns owner_recovery_required before proof handling; T202E activates authorization_invalidated
+      - authorized marker or nonce use without the exact matching receipt is owner_recovery_required
+      - any digest, transcript, relation, or state mismatch is owner_recovery_required on read/restart
+  transaction_protocol:
+    - acquire the fixed T202A apply lock before mutation
+    - open the existing database without CREATE and run nonmutating identity/version/inventory preflight
+    - enable and verify foreign_keys, trusted_schema OFF, WAL, synchronous FULL, and busy_timeout 5000 only after classifying KIRJ v1
+    - start a fresh BEGIN IMMEDIATE and repeat classification plus full row/event validation inside it
+    - perform all mutation, clock update, event append, and commit in that one transaction
+    - injected failure before commit leaves no partial challenge, receipt, nonce, state, clock, or event mutation
+    - deterministic fault hooks exist only under the non-default test-support feature and expose no production constructor or runtime switch
+
+effective_time_contract:
+  rollback:
+    - reject raw observed_at more than 30000 ms below last_observed_at
+    - raw observed time is used only for rollback and issued-at skew rejection
+  effective_time:
+    - compute max(last_observed_at, observed_at) after rollback acceptance
+    - use it for issue, expiry, verified_at, receipt state, event occurred_at, and persisted high-water
+    - every accepted clock write sets authority_meta.last_observed_at and authority_meta.updated_at to the same effective high-water
+    - inclusive validity is effective_time less than or equal to expires_at
+    - high-water past expiry can never be rolled back to revive authority
+  arithmetic:
+    - every subtraction, addition, successor, expiry, and timestamp conversion is checked
+
+event_contract:
+  fixed_numeric_map:
+    entity_kind: "1 realm, 2 key, 3 trust_epoch, 4 store, 5 account, 6 transition, 7 cleanup, 8 challenge, 9 receipt, 10 grant, 11 effect, 12 invocation, 13 observation"
+    event_code: "1 bootstrap_prepared, 2 bootstrap_confirmed, 3 challenge_created, 4 challenge_authorized, 5 challenge_expired, 6 challenge_invalidated, 7 grant_used, 8 store_enrolled, 9 store_state_changed, 10 account_transition_prepared, 11 account_config_committed, 12 account_transition_finalized, 13 account_transition_aborted, 14 account_transition_recovery_required, 15 cleanup_ready, 16 cleanup_claimed, 17 cleanup_deleted, 18 effect_claimed, 19 invocation_started, 20 effect_observed, 21 rotation_staged, 22 rotation_finalized, 23 recovery_staged, 24 recovery_finalized, 25 key_retired, 26 epoch_retired"
+    source: "1 authority_store, 2 bootstrap, 3 proof_verifier, 4 runtime, 5 crash_recovery, 6 owner_reconciliation"
+  bootstrap_prefix:
+    - sequence 1 and 2 retain the exact accepted T202A prepare/confirm rows and detail transcripts
+  challenge_created:
+    - entity kind 8, code 3, source 1, entity challenge ID
+    - related kind 10 and related grant ID
+    - prior state 0, next state 0x0801
+    - context is challenge context_sha256; receipt field absent; occurred_at equals issued_at
+  challenge_authorized:
+    - entity kind 8, code 4, source 3, entity challenge ID
+    - related kind 9 and related receipt ID; receipt field is the same receipt ID
+    - prior state 0x0801, next state 0x0802
+    - context is receipt_sha256; occurred_at equals verified_at
+  challenge_expired:
+    - entity kind 8, code 5, source 1, entity challenge ID
+    - no related entity and no receipt
+    - prior state 0x0801, next state 0x0803
+    - context is challenge context_sha256
+    - occurred_at is greater than expires_at and no greater than authority high-water
+  sequence_rules:
+    - sequence is globally contiguous with no gap
+    - sqlite_sequence for authority_events equals COUNT(*) and MAX(sequence)
+    - every challenge has exactly one created event and at most one exact terminal event matching durable state
+    - pending reuse, exact replay, and already-expired recovery append no event
+    - event detail uses the accepted canonical event transcript/digest and is reparsed/recomputed on open
+
+restart_validator_contract:
+  retained_t202a_invariants:
+    - exact ready bootstrap realm/journal/meta/anchor match
+    - exactly two active authority keys and one active epoch 1 with exact role masks and trust-bundle digest
+    - authority schema inventory, application ID, user version, and DDL bytes are unchanged
+  admitted_t202b_rows:
+    - bounded authorization_challenges
+    - bounded authorization_receipts
+    - bounded nonce_uses
+    - authority_events with exact bootstrap prefix and B causal suffix
+  rows_that_remain_zero:
+    - registered_stores
+    - registered_accounts
+    - challenge_effects
+    - grant_uses
+    - account_transitions
+    - credential_cleanup
+    - remote_effects
+    - effect_claims
+    - effect_invocations
+    - effect_observations
+  loading_rules:
+    - select typeof and length first; reject wrong class, negative, oversized, or impossible values before loading a BLOB/text value
+    - there is no historical-row cardinality cap; validate one consistent snapshot in deterministic row order with O(1) additional memory beyond one schema-bounded row/transcript
+    - never collect all challenges, receipts, nonces, or events into a history-proportional Vec/map; use streaming scans and indexed causal lookups
+    - reparse each manifest and authorization payload with core and compare canonical bytes, every snapshot field, and every digest
+    - reparse each canonical proof with core and recompute proof digest; recompute receipt transcript/digest
+    - strictly reverify every persisted receipt proof against its exact signer key and persisted signing payload
+    - validate challenge state, context, signer role, target/effect shape, receipt/nonce graph, and event graph bidirectionally
+    - do not add a store-local parser for manifest, authorization payload, proof, action policy, target display, or their tag tables
+
+execution_constraints:
+  branch_or_worktree: codex/v1-roadmap-governance in the current workspace
+  allowed_files:
+    - crates/kirje-core/src/authorization.rs
+    - crates/kirje-core/tests/authorization_contract.rs
+    - crates/kirje-store/src/lib.rs
+    - crates/kirje-store/src/authority.rs
+    - crates/kirje-store/tests/authority_authorization.rs
+    - crates/kirje-store/tests/fixtures/authority/authorization/**
+  test_targets:
+    - crates/kirje-core/tests/authorization_contract.rs
+    - crates/kirje-store/tests/authority_authorization.rs
+    - crates/kirje-store/tests/fixtures/authority/authorization/**
+  ownership_notes:
+    - governance, packet, evidence, schema, predecessor tests/fixtures, Cargo files, lockfile, runtime, CLI, MCP, protocol, skills, and docs are orchestrator-owned or outside scope
+    - worker must not edit governance/evidence, create a commit, accept the task, or delegate further
+    - first add narrow core tests and demonstrate a contract-relevant RED before core production edits
+    - then add authority_authorization tests and demonstrate a contract-relevant RED before store production edits
+    - preserve accepted T201/T202A and all user work
+    - stop if any allowed production file changes concurrently after RED begins
+  dependency_constraints:
+    - no Cargo.toml, Cargo.lock, feature, or dependency change
+    - use existing ed25519-dalek, base64, chrono, serde, schemars, rusqlite, uuid, getrandom, fs4, and test-support facilities only
+    - do not add an ORM, migration framework, canonical JSON package, async runtime, signer, keyring, network client, or unsafe platform binding
+    - schema_v1.sql and every schema fixture are read-only references in this task
+    - tests may commit clearly synthetic, deterministic, non-user public-key/signature/proof/nonce/transcript vectors; no private signing seed or real authority material is permitted
+  forbidden_changes:
+    - any file outside execution_constraints.allowed_files
+    - any DDL, migration, application ID, user version, table/index/trigger, or Cargo graph change
+    - any runtime, CLI, MCP, protocol adapter, Agent Skill, product documentation, release, CI, credential, mailbox, provider, or network change
+    - registration, apply/use/claim/invoke/observe, store/account transition, cleanup, rotation/recovery staging/finalization, invalidation, or audit APIs
+    - caller-controlled production path, entropy, key role, trust context, target, effect, or expected snapshot
+    - secrets or any real account address, endpoint, UID, mailbox content, authority key/signature/proof/nonce, credential, or provider value in fixtures, logs, output, or commits
+    - synthetic test vectors outside test/fixture scope, or proof/signature/nonce/private transcript material in ordinary receipt/status/error/log output; explicit owner challenge export is the declared exception
+    - serializer-dependent durable bytes, permissive UUID/Base64/time parsing, randomness fallback, silent repair, unbounded allocation, or unsafe Kirje code
+
+tdd_plan:
+  required: true
+  exception: null
+  red:
+    steps:
+      - add core accessor and compile-surface tests for borrowed payload/target/effect projection, stable codes, sealed manifest payload, renamed signer key, private proof fields, no proof Debug, proof transcript byte golden, and every field mutation
+      - run the core authorization_contract target before core production edits and preserve a contract-relevant compile or assertion failure
+      - add authority_authorization tests for the support matrix, exact context bytes, entropy counts, duplicate/restart/concurrent challenge behavior, and expiry/recreate behavior
+      - add strict proof, receipt golden/mutation, replay/restart/expiry, already-expired exact retry, changed replay, wrong role/key/signature/context, nonce corruption, and concurrent winner tests
+      - add effective-time 30000/30001 rollback and issued-at skew, paired-meta clock-only replay/reuse/expired recovery, no-revival, committed-expiry error/restart/concurrent-loser/response-loss recovery, event mapping/causality, bounded BLOB load, privacy, restart-open, and exact later-table zero-row tests
+      - add separate deterministic test-support fault points after old-context expiry state, old-context expiry event, challenge insert, clock update, created event, receipt insert, nonce insert, authorized/expired state update, authorization/expiry event, before commit, and after commit before response/error
+      - test every pre-commit fault rolls back the whole logical transaction, every post-commit response loss recovers exact state, and all fault paths preserve declared entropy counts
+      - use barriers rather than sleeps for two-writer challenge/proof winner and retry tests
+      - run authority_authorization before store production edits and preserve a contract-relevant compile or assertion failure
+    core_command: cargo test -p kirje-core --test authorization_contract --all-features --locked
+    store_command: cargo test -p kirje-store --test authority_authorization --all-features --locked
+    expected_failure: >-
+      Each new target fails only because the declared T202B API or behavior is not
+      yet implemented. Existing-test, syntax, dependency, toolchain, or
+      environment failures are not valid RED evidence.
+  green:
+    command: cargo test -p kirje-core --test authorization_contract --all-features --locked && cargo test -p kirje-store --test authority_authorization --all-features --locked
+    expected_signal: all projection, proof, challenge, receipt, replay, clock, event, crash, concurrency, validator, and privacy contract tests pass
+  refactor:
+    command: cargo test -p kirje-core -p kirje-store --all-features --locked
+    expected_signal: all accepted predecessor and T202B tests remain green without a second transcript parser or schema drift
+
+validation_loop:
+  commands:
+    - cargo fmt --all --check
+    - cargo test -p kirje-core --test authorization_contract --all-features --locked
+    - cargo test -p kirje-store --test authority_authorization --all-features --locked
+    - cargo test -p kirje-store --test authority_schema --all-features --locked
+    - cargo test -p kirje-core -p kirje-store --all-features --locked
+    - cargo test -p kirje-store --no-default-features --locked
+    - cargo clippy -p kirje-core -p kirje-store --all-targets --all-features --locked -- -D warnings
+    - cargo +1.88 check -p kirje-core -p kirje-store --all-features --locked
+    - sh -c 'test "$(shasum -a 256 crates/kirje-store/src/authority/schema_v1.sql | cut -d " " -f1)" = "3a59cf60ebe57affad3e440c3eb3f70e09d8e3c90974fc57318861560c4fb632"'
+  retry_budget: 2
+  failure_policy:
+    first_failure: fix only a T202B contract or implementation defect within allowed files and rerun the narrowest failing command
+    second_failure: classify scope, spec, dependency, MSRV, concurrency, or environment blocker and stop if the packet must change
+    beyond_budget: return blocked attempt output without weakening proof, replay, clock, event, validator, entropy, crash, privacy, or schema guarantees
+  no_downgrade:
+    - do not delete, ignore, serialize around, or relax a failing security assertion
+    - do not add caller overrides or store-local parsers to make persistence easier
+    - do not replace OS randomness with time, process ID, hashing, deterministic production state, or a fallback PRNG
+    - do not load oversized persisted values before checking SQL type and length
+    - do not silently repair malformed rows, event gaps, sequence state, or partial receipts
+    - do not skip Rust 1.88, no-default-features, predecessor authority_schema, or canonical DDL checks
+
+definition_of_done:
+  - core owns a sealed borrowed authorization snapshot and serializer-independent proof codec; store owns no duplicate manifest/payload/proof parser or action policy
+  - stage support is exactly store enrollment plus three trust actions; constructible deferred actions fail in store with zero entropy/write and policy/assurance fail at the core manifest boundary
+  - new challenge uses exactly 48 random bytes, exact pending-context uniqueness, effective-time expiry, restart-safe idempotency, and one exact created event
+  - first valid proof uses exactly 16 random bytes and atomically commits one immutable receipt, one nonce use, authorized state, clock, and one exact event
+  - exact replay after restart and expiry returns immutable historical identity, may advance only the paired authority meta clock high-water, never appends an event, and cannot regress receipt state; changed replay fails; T202E retains post-rotation/invalidation ownership
+  - expired pending proof durably commits expiry/event/clock before returning authorization_expired; already-expired restart/concurrent/response-loss retry returns the same error with no new event/state and cannot be revived by tolerated rollback
+  - restart-open streams and causally validates schema-bounded B rows/proofs/receipts/nonces/events with O(1) additional memory while retaining exact initial trust root and rejecting every later-table row and any invalidated state
+  - explicit owner challenge export contains only the declared bounded signing artifact; ordinary receipt/status/error/log projections omit private material and expose no SQL, path, key bytes, signature, proof, nonce, manifest, or event detail
+  - deterministic fault points and barrier-based concurrent challenge/proof tests prove all-or-nothing mutation, exact response-loss recovery, and one durable winner with deterministic entropy accounting
+  - schema_v1.sql remains byte-for-byte unchanged at SHA-256 3a59cf60ebe57affad3e440c3eb3f70e09d8e3c90974fc57318861560c4fb632 and accepted T202A tests remain green
+  - targeted, predecessor, package-wide, no-default-feature, Clippy, format, and Rust 1.88 gates pass
+
+evidence_contract:
+  owner: delivery_orchestrator
+  worker_output_only: true
+  summary: .ai-platform/evidence/T202B/summary.md
+  diff: .ai-platform/evidence/T202B/diff.patch
+  test_results: .ai-platform/evidence/T202B/test-results.md
+  attempt: .ai-platform/evidence/T202B/attempts/T202B-A001.md
+  required:
+    - exact changed-file scope and diff summary
+    - separate core and store RED commands, exit signals, and contract-relevant failures
+    - GREEN, refactor, and every validation command result
+    - canonical DDL digest and no-Cargo/schema-change proof
+    - core projection, proof sealing/byte-golden/mutation, and parser-ownership review
+    - stage-support, action-specific manifest/current-state, signer-role, and zero-write rejection matrix
+    - challenge context, pending uniqueness, entropy, expiry/recreate, restart, crash, and concurrency matrix
+    - proof/receipt/nonce, exact/changed replay, paired-meta clock-only high-water, effective-time, committed-expiry/retry/response-loss, corruption, restart, crash, and concurrency matrix
+    - event numeric/detail/sequence/causal graph and C-E zero-row validator matrix
+    - streaming O(1) validator, bounded-load/allocation, explicit challenge-export, ordinary-output, error/log, secret, path, and private-material scans
+    - residual risks and exact T202C/T202D/T202E follow-up ownership
+
+review_contract:
+  required_passes:
+    - spec compliance against FR-013 through FR-015, FR-018, and mapped NFRs
+    - cryptographic transcript, proof verification, signer-role, replay, nonce, and entropy review
+    - SQLite transaction, crash, concurrency, bounded-load, event, and restart-validator review
+    - API ownership, stable errors, privacy, and output review
+    - bug and code-quality review
+    - QA acceptance of the stage-support, proof/replay/time, event/causal, crash, concurrency, and schema-regression matrices
+  blocking_findings:
+    - duplicate store parser/policy/target/proof codec or mutable/public proof/signature fields
+    - caller-selected role/key/epoch/bundle/effect/target/expected context or duplicate context not sealed by the manifest
+    - any action outside the four-stage support matrix can persist a challenge, or any constructible deferred rejection consumes entropy/writes, or policy/assurance bypasses core rejection
+    - incorrect signer role, non-strict signature verification, JSON-hashed proof, transcript drift, weak key acceptance, or permissive Base64
+    - replay depends on current trust before exact receipt lookup, changed replay returns authority, or exact replay/already-expired recovery mutates anything except the paired monotonic authority_meta last_observed_at/updated_at high-water
+    - tolerated rollback revives expired authority, expired proof rolls back its durable expiry, unchecked time arithmetic, or entropy before deterministic validation
+    - partial receipt/nonce/challenge/event commit, more than one concurrency winner, or deterministic entropy accounting drift
+    - event numeric/detail/sequence/causal mismatch, unbounded persisted-value load, silent repair, or acceptance of any C-E row
+    - canonical DDL, schema inventory, Cargo graph, accepted predecessor behavior, production home, or test-support boundary drift
+    - private material in ordinary output, path, SQL, real mailbox/account/credential/authority/provider data exposure, or challenge-export material emitted outside its explicit owner-facing artifact
+    - scope drift beyond allowed files or missing valid RED evidence
+  acceptance_rule: >-
+    The worker never accepts the task. After independent spec, security,
+    engineering, and QA passes plus fresh required gates, the orchestrator may
+    record evidence-based acceptance under the user's explicit standing
+    project-owner delegation.
+
+handoff:
+  external_issue: null
+  pull_request: null
+  finish_options:
+    - accept T202B and packetize T202C
+    - create a bounded review-fix attempt within the same allowed files
+    - stop on a governance, dependency, environment, or security blocker
+
+stop_conditions:
+  - current HEAD is not f292132 plus orchestrator-only T202B governance/packet commits
+  - T202A is not Accepted or its schema digest, authority_schema tests, evidence, or production files have drifted
+  - packet, task, contracts, analysis, event map, or stage boundary is missing, stale, or internally inconsistent
+  - any Critical, High, or Medium packet review finding remains unresolved
+  - current uncommitted changes touch an allowed production file before worker RED begins
+  - core RED or store RED is not contract-relevant, or production code changed before its corresponding RED
+  - implementation requires a Cargo, schema, governance, evidence, runtime, CLI, MCP, protocol, skill, or documentation change
+  - worker cannot prove bounded persisted-value loading, fail-closed causal validation, exact entropy counts, crash atomicity, or concurrency winner behavior
+  - any secret, real account, credential, endpoint, UID, mailbox content, private signing seed, or real authority key/signature/proof/nonce enters source, fixture, log, output, or commit
+  - any synthetic proof/signature/nonce vector appears outside clearly marked test/fixture scope, or any proof/signature/nonce/manifest/signing bytes appear in ordinary output rather than the one explicit owner-facing challenge artifact

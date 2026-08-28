@@ -410,6 +410,17 @@ and `git diff --check` passes.
 - IMAP initial response: Kirje-owned 12 MiB pump from first server byte.
 - Capability security: complete bounded typed set; display metadata separate.
 
+T202B packetization fixes its stage boundary explicitly. B issues only store
+enrollment and trust-action challenges. T202C owns registry-backed account,
+credential, cleanup, send, and mailbox issuance plus challenge-effect rows;
+T202D owns `ambiguous_close` issuance after effect history exists; T202E owns
+post-rotation/invalidation replay. Core owns borrowed payload/target/effect
+projection and canonical proof bytes. Effective authority time closes rollback
+revival, including paired-meta clock-only pending reuse, exact replay, and
+already-expired response-loss recovery. The fixed event numeric/detail table
+plus causal B validator replaces T202A's initial-empty rule without weakening
+the bootstrap prefix or exact later-table zero-row boundary.
+
 No product-spec or executable-contract question blocks T202B packetization.
 T202C-T202E remain dependency-gated Draft tasks and T202 remains a Draft
 acceptance umbrella.
@@ -454,10 +465,13 @@ its digest.
 
 ## Execution Gate
 
-`T202A_ACCEPTED_T202B_READY`
+`APPROVED_FOR_T202B_PACKETIZATION`
 
 T202A is accepted from four test-first attempts, independent security and QA
 review, the exact canonical schema digest, and fresh packet/workspace gates.
-T202B may edit only its declared core snapshot and challenge/proof/receipt files
-and must begin with its declared RED evidence. The T202 umbrella remains
-non-Accepted.
+T202B's stage boundary, clock-pair recovery, proof/replay truth table, exact
+event map, streaming validator, deterministic fault matrix, later-task ownership,
+and privacy exceptions have two independent read-only packet reviews with no
+unresolved Critical, High, or Medium finding. T202B may edit only its declared
+core snapshot and challenge/proof/receipt files and must begin with its declared
+RED evidence. The T202 umbrella remains non-Accepted.
