@@ -5,7 +5,7 @@
 - Feature ID: `008-security-baseline`
 - Status: Confirmed
 - Contract name: `kirje.authorization.v1`
-- Updated: 2026-08-27
+- Updated: 2026-08-28
 
 ## Security Property
 
@@ -38,6 +38,21 @@ caller-selected outbox, and an MCP request are not owner identity proof.
 
 Kirje signs no authorization payload. Test-only signers use deterministic
 fixtures outside production APIs.
+
+### Owner Public-Key Boundary
+
+T202A introduces the minimal public `kirje_core::OwnerPublicKey` needed
+by bootstrap and typed anchor snapshots. It is constructible only from exactly
+32 bytes that `ed25519_dalek::VerifyingKey::from_bytes` accepts and
+`VerifyingKey::is_weak()` reports as non-weak. It exposes only borrowed public
+bytes and equality; it has no unchecked, `Default`, serde, private-key,
+key-generation, signature, or signing API. Bootstrap rejects malformed, weak,
+or equal owner/recovery keys with stable non-retryable
+`authorization_malformed` before entropy, file, or database work. The named
+`BootstrapInput` fields assign owner and recovery roles; there is no external
+role metadata to infer or second-guess. The swapped-role negative means an epoch
+cannot reference a stored recovery-role row as its owner key, or an owner-role
+row as its recovery key.
 
 ## Canonical Transcript
 
@@ -134,6 +149,14 @@ AmbiguousAssertion:u8
 AmbiguousTerminal:u8
 0x01 succeeded               0x02 failed_known_no_effect
 0x03 ambiguous_closed
+
+ObservationCertainty:u8
+0x01 succeeded               0x02 known_no_effect
+0x03 ambiguous
+
+ObservationSource:u8
+0x01 adapter_result          0x02 pre_network_failure
+0x03 invocation_recovery
 
 TrustPermissionMask:u32be
 0x00000001 authorize_action
@@ -501,6 +524,27 @@ Proof JSON uses `deny_unknown_fields` and has a 4 KiB input limit:
 No proof field can override action, target, realm, epoch, nonce, expiry,
 manifest, binding, policy, effect, or trust context.
 
+The parsed proof has one serializer-independent durable representation:
+`KIRJE-AUTHORIZATION-PROOF-V1\0` with challenge, key,
+signing-payload SHA-256, and signature at tags `0x0001`-`0x0004`.
+`proof_sha256` hashes that transcript, never the JSON document.
+
+The authority store uses the same container for these durable transcripts:
+
+| Domain | Strict tag-order fields |
+|---|---|
+| `KIRJE-AUTHORIZATION-RECEIPT-V1` | receipt, challenge, grant, proof digest, key, manifest digest, signing digest, trust epoch, bundle, verified-at, expires-at |
+| `KIRJE-GRANT-USE-V1` | grant, receipt, action, target kind, canonical target bytes, manifest digest, use-time |
+| `KIRJE-EFFECT-CLAIM-V1` | claim, effect, grant, operation, store, account, config generation, account generation, manifest, binding, policy, trust epoch, bundle, key, claimed-at, invoke-before |
+| `KIRJE-INVOCATION-START-V1` | invocation, effect, claim, authority session, started-at |
+| `KIRJE-EFFECT-OBSERVATION-V1` | effect, claim, invocation, certainty, result digest, source, observed-at |
+
+Tags start at `0x0001` and increase by one in the listed order. UUIDs are BLOB16,
+digests are BLOB32, signature is BLOB64, action/target are u16be, certainty/source
+are u8, generations/epoch are u64be, and times are i64be. Exact receipt, claim,
+start, and observation transcript/digest rules are normative in
+`contracts/authority-store.md`.
+
 ## Verification Transaction
 
 One `BEGIN IMMEDIATE` transaction:
@@ -516,14 +560,33 @@ One `BEGIN IMMEDIATE` transaction:
 7. Calls `verify_strict` on the exact persisted signing payload.
 8. Inserts immutable receipt and nonce use, then consumes the challenge.
 
-If the same canonical proof already produced a receipt, verification returns
-that receipt without changing expiry or creating another grant. A changed proof
-for the challenge, nonce, or grant returns `authorization_replayed`.
+The transaction updates
+`last_observed_at = max(last_observed_at, now)` after allowing at most 30 seconds
+of negative skew. Expiry is inclusive (`now <= expires_at`); clock tolerance
+never extends expiry.
+
+Proof replay follows this exact table:
+
+| Durable state | Proof | Result |
+|---|---|---|
+| pending, current, unexpired, no receipt | valid first proof | one receipt and nonce use |
+| pending, expired, no receipt | any | mark expired and return `authorization_expired` |
+| invalidated, no receipt | any | `authorization_invalidated` |
+| receipt exists, including after expiry/rotation | exact canonical proof | same immutable receipt projection with freshly derived state; no authority refresh |
+| receipt exists | changed canonical proof | `authorization_replayed` |
+| nonce/authorized state exists without its receipt | any | fail closed with `owner_recovery_required` |
+
+Historical exact replay never changes receipt ID, digest, verified time, expiry,
+grant identity, or trust context. It does not make a later use/claim boundary
+current.
 
 ## Grant Use And Effect Apply
 
 All actions insert or recover one `grant_use` before mutation. For remote
 actions, the same authority transaction also inserts/rechecks the effect claim.
+The store accepts typed `GrantUseRequest`, `EffectClaimRequest`,
+`BeginInvocationRequest`, and `RecordObservationRequest`; it accepts no caller
+boolean asserting current authorization.
 
 Apply rechecks:
 
@@ -541,9 +604,25 @@ Apply rechecks:
 No credential lookup, keyring presence probe, config mutation, or network access
 occurs before this transaction commits.
 
+Effect claim additionally compares operation UUID, config digest, config/account
+generations, credential ID, location digest, and exact registered row states in
+the same transaction. `invoke_before` equals the immutable receipt expiry.
+
+Exact committed grant-use and claim recovery returns the original record even
+after later expiry or invalidation, but grants no new authority. A first use,
+first claim, or first invocation is a new authority boundary and requires
+current context. An exact existing invocation returns its original projection
+without a permit. Observation is evidence for an already-entered adapter
+boundary and may be recorded after expiry; exact observation replay returns the
+same record, while any changed result/certainty/source/time is a projection
+conflict.
+
 For remote actions, `begin_invocation` uniquely inserts the invocation row and
-returns a non-serializable `InvocationPermit`. Adapter methods that can mutate
-remote state require that permit. An existing invocation returns no permit.
+returns a non-`Clone`, non-serializable, byte-inaccessible `InvocationPermit`
+only to the inserting process. Adapter methods that can mutate remote state
+consume that permit. An existing invocation returns no permit. After a crashed
+invocation releases the fixed apply lock, recovery writes one
+`ambiguous/invocation_recovery` observation and never invokes again.
 
 ## Receipt Projection
 
@@ -567,6 +646,21 @@ public-key bytes, realm bytes, nonce, locator material, mailbox credential, and
 private event details. Operator audit can re-verify the private stored evidence
 without returning it through normal JSON or MCP.
 
+Target display is closed: UUID targets use canonical lowercase UUID text, trust
+epochs use decimal without leading zero, and zero-length policy/assurance
+targets display `policy`/`assurance`. Receipt state derives in this priority:
+
+```text
+Used > Claimed > Invalidated > Expired > Unclaimed
+```
+
+`Used` is a grant use without a remote claim, or a remotely observed effect.
+`Claimed` is a remote claim/invocation without an observation. These predicates
+make claim-without-observation distinct while an observed claim resolves to
+`Used`. Historical committed use or claim remains visible but never acts as
+fresh authority. Audit uses ascending event-sequence keyset pagination with
+limit 1..100 and returns no private bytes through its normal projection.
+
 ## Rotation And Recovery
 
 Normal rotation requires:
@@ -577,15 +671,36 @@ Normal rotation requires:
 - proposed key differs from all active keys
 - next epoch equals current epoch plus one
 
-Rotation stages journal rows, atomically updates the anchor, finalizes the
-epoch, retires the old key, and invalidates all pending challenges and unclaimed
-grants from older epochs. Historical receipts retain old public keys.
+The proposed role key signs the exact `KIRJE-TRUST-KEY-POP-V1` transcript from
+the authority-store contract. Owner role/mask is exactly `owner/0x00000007` and
+recovery role/mask is exactly `recovery/0x00000008`. Recovery replaces both keys
+and therefore requires both replacement-key POPs plus a current pinned recovery
+receipt.
 
-Recovery requires the pinned offline recovery key or the documented independent
-OS-administrator recovery boundary. It replaces owner and recovery keys,
-increments epoch, invalidates all pending challenges/unclaimed grants, blocks
-all registered accounts, invalidates credential bindings, and requires
-re-enrollment plus credential re-entry.
+One active epoch and at most one staged successor exist. Stage requires exact
+`active + 1`; staged, active, and retired row shapes retain predecessor,
+transition receipt, rotation kind, POPs, and activation/retirement times as
+specified by `contracts/authority-store.md`.
+
+Rotation stages journal rows, updates the anchor through safe local I/O, and
+finalizes only when the anchor exactly matches that signed staged successor.
+T202A has no receipt/POP verifier and therefore classifies every staged row or
+staged anchor as `recovery_required`; it never returns
+`staged_finalize_required`. T202E introduces that classification only after
+using T202B's core authorization snapshot to reconstruct and strictly verify the
+exact transition receipt and every role-required POP. A crash before anchor
+replacement leaves the active epoch valid and the staged epoch non-authoritative.
+A fully verified matching staged anchor may finalize after restart. Missing
+anchor, lower epoch, an unsigned/second staged row, unknown key, wrong
+bundle/location, or every other mismatch is `recovery_required`.
+
+Finalization retires the previous epoch and replaced key(s), then invalidates
+pending and authorized-but-unclaimed old-epoch challenges. Historical receipts,
+keys, uses, claims, invocations, and observations remain. Recovery additionally
+moves nonremoved stores to `recovery_required`, blocks nonremoved accounts,
+invalidates active bindings, and requires signed re-enrollment plus credential
+re-entry. The independent OS-administrator recovery boundary restores or retires
+the complete anchor/journal pair out of band; it is not a store signature bypass.
 
 ## CLI Surface
 

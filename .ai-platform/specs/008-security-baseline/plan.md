@@ -6,7 +6,7 @@
 - Status: Confirmed
 - Target release: `v0.3.1`
 - Source spec: `spec.md`
-- Updated: 2026-08-27
+- Updated: 2026-08-28
 - Review authority: delegated project owner
 
 ## Decision Summary
@@ -69,9 +69,12 @@ terminal work.
    projections, receipts, and append-only application events.
 
 The authority database never accepts a normal `--outbox`, `--index`, `--config`,
-environment, or MCP path override. Production paths come only from the platform
-Kirje home. Tests inject a complete isolated authority home through a
-test-scoped constructor.
+environment, or MCP path override. Its application ID is fixed to
+`0x4B49524A` (`KIRJ`) and its v1 schema is created completely before later
+authority operations exist. Production paths come only from
+`ProjectDirs::from("", "", "kirje")`.
+Tests inject a complete isolated authority home and deterministic entropy only
+through the explicit non-default `test-support` feature.
 
 ### Runtime
 
@@ -158,19 +161,41 @@ Operation-ledger schema v3 preserves terminal v2 records. Pending `planned` and
 
 ### D-004 Fixed Owner Realm And Authority Home
 
-The production anchor, authority database, and apply lock resolve only from
-`ProjectDirs("kirje")`:
+The production anchor, authority database, and apply lock resolve only from the
+exact `ProjectDirs::from("", "", "kirje")` namespace:
 
 - configuration anchor: `config_dir/owner-trust.toml`
 - authority journal: `data_local_dir/authority.sqlite3`
 - authority apply lock: `data_local_dir/authority.apply.lock`
 
-The anchor stores an immutable 256-bit realm ID, journal ID, current owner and
-offline-recovery Ed25519 public keys, trust epoch, and trust-bundle digest. It
-stores no private key. Bootstrap is create-once, uses only bounded no-link key
-documents, and runs under the documented owner/OS-administrator boundary rather
-than an agent-facing MCP session. Normal path flags and environment variables
-cannot influence either production path.
+The strict anchor stores an immutable 256-bit realm ID, journal ID, journal
+location digest, current owner and offline-recovery Ed25519 public keys, minimum
+trust epoch, and trust-bundle digest. `normal` is its only v1 state; recovery is
+derived. `KIRJE-TRUST-BUNDLE-V1` binds realm, journal, epoch, both role-separated
+key IDs, and both public keys. The location digest remains a separate pin.
+
+T202A first adds the minimal core `OwnerPublicKey`: an exact 32-byte value only
+when `ed25519-dalek` parses it and reports it non-weak. It has no serde, default,
+private-key, key-generation, signature, or signing surface. Bootstrap and the
+typed anchor use it and require distinct owner/recovery values before any side
+effect. SQLite also requires unique public keys, exact owner/recovery role masks,
+an exact active initial epoch 1, and checked successor `predecessor + 1` rows.
+
+Bootstrap is create-once and database-first under the fixed apply lock.
+The checked-in DDL is a transaction body with no transaction-control or PRAGMA
+statement. `prepare_bootstrap` owns one `BEGIN IMMEDIATE`, executes that body,
+inserts initial keys/epoch/meta/event, sets application ID/version, and issues one
+`COMMIT`; rollback leaves zero user objects, rows, or version markers. Safe local
+I/O writes the create-only anchor; `confirm_anchor` marks the exact match ready.
+Missing-anchor pending state resumes from committed DB values.
+Anchor-present/database-missing and every third-state mismatch enter recovery
+and are never silently regenerated. Normal path flags and environment variables
+cannot influence any production authority location.
+
+T202A treats every staged epoch row or staged anchor as `recovery_required`; it
+cannot yet prove the receipt or POP chain. T202E may introduce
+`staged_finalize_required` only after T202B's core snapshot and exact transition
+receipt plus role-required POP verification succeed.
 
 The owner-authorized config-store enrollment binds `store_id` to a tagged
 location digest over the opened parent directory's filesystem identity and the
@@ -210,18 +235,27 @@ Private signing keys and signing operations are not part of Kirje.
 ### D-006 Authority Receipts And Global Effect Claims
 
 Proof verification, nonce consumption, and immutable receipt insertion happen
-in one `BEGIN IMMEDIATE` authority transaction. Exact proof replay returns the
-same receipt; any changed replay fails. The receipt keeps the canonical payload,
-manifest, signature, and historical public trust metadata privately while
-normal output is digest-only.
+in one `BEGIN IMMEDIATE` authority transaction. Proof, receipt, grant use, effect
+claim, invocation start, and effect observation each use a domain-separated,
+strict-tag binary transcript independent of JSON serialization. Exact proof
+replay always returns the same immutable receipt projection, including after
+expiry/rotation, but cannot refresh authority; any changed replay fails.
+
+The v1 schema duplicates only the context needed for local fail-closed checks and
+binds each copied set with exact parent composite `UNIQUE` keys and child
+composite foreign keys. Receipt, nonce, grant, challenge-effect/remote-effect,
+effect-claim, invocation, and observation chains cannot be assembled from
+individually valid rows belonging to different parents. Store and account copied
+context is bound as a whole. All relationships retain `ON DELETE RESTRICT`; an
+application comparison is defense in depth, not the sole integrity boundary.
 
 Each remote effect has a globally unique random effect ID bound into its
-manifest and registered with its receipt. Apply performs one authority
-transaction that revalidates
-expiry, trust epoch/key, trust-bundle digest, store registration, account
-generation/binding, policy digest, manifest digest, and effect state, then moves
-the effect from `unclaimed` to `claimed`. This happens before credential lookup
-or network access.
+manifest and registered with its receipt. Apply receives typed request snapshots
+and performs one authority transaction that revalidates expiry, anchor/meta,
+trust epoch/key/bundle, store location/config generation/digest, account
+generation/credential/binding/state, policy, manifest, operation, and effect,
+then inserts one global claim. Caller booleans cannot replace comparisons. This
+happens before credential lookup or network access.
 
 The operation ledger records authority receipt and effect-claim projection in a
 separate durable transaction. The process then holds the fixed apply lock and
@@ -416,8 +450,8 @@ Remote authentication is ready only for
 
 ```text
 challenge: pending -> authorized | expired | invalidated
-grant:      unclaimed -> claimed | expired | invalidated
-effect:     unclaimed -> claimed -> resolved
+receipt:   unclaimed -> claimed | used | expired | invalidated
+effect:    registered -> claimed -> invoked -> observed
 ```
 
 All transitions are monotonic in supported application paths. Exact proof
@@ -438,17 +472,24 @@ matching resolved authority claim becomes `ambiguous`.
 ## Implementation Sequence
 
 1. Core security contracts, byte transcripts, limits, and error catalog.
-2. Pinned authority store, receipt verification, trust history, and effect
-   claims.
-3. Same-handle bounded local I/O and cross-platform recoverable replacement.
-4. Config v2, conservative migration, account identity, and bound keyring
+2. Minimal core owner-public-key boundary, authority schema transaction body,
+   fixed home, bootstrap, fail-closed staged classification, anchor matching, and
+   CSPRNG boundary (T202A).
+3. Typed core payload projection, challenges, proofs, receipts, nonce use, and
+   replay (T202B).
+4. Store/account registry, transitions, and cleanup lifecycle (T202C).
+5. Grant use, remote-effect claim, invocation permit, and observation (T202D).
+6. Verified staged-finalize classification, rotation, recovery, audit, and T202
+   umbrella acceptance gates (T202E).
+7. Same-handle bounded local I/O and cross-platform recoverable replacement.
+8. Config v2, conservative migration, account identity, and bound keyring
    lifecycle.
-5. Operation-ledger v3 migration and authorization/effect integration.
-6. Shared authorization and crash-recovery runtime.
-7. CLI owner, store, account, credential, and operation workflow.
-8. Bounded MCP transport and lifecycle budgets.
-9. Bounded protocol responses and complete capability model.
-10. Canonical documentation, cross-platform QA, controlled live verification,
+9. Operation-ledger v3 migration and authorization/effect integration.
+10. Shared authorization and crash-recovery runtime.
+11. CLI owner, store, account, credential, and operation workflow.
+12. Bounded MCP transport and lifecycle budgets.
+13. Bounded protocol responses and complete capability model.
+14. Canonical documentation, cross-platform QA, controlled live verification,
    release commit, PR, CI, merge, tag, and post-merge evidence.
 
 Each numbered implementation task has its own packet and RED/GREEN evidence.
@@ -533,6 +574,7 @@ Additional security gates include:
 - Research and dependency decisions: `research.md`
 - Persistent model and invariants: `data-model.md`
 - Authorization contract: `contracts/authorization.md`
+- Pinned authority-store contract: `contracts/authority-store.md`
 - Account/config contract: `contracts/account-config-v2.md`
 - Input and transport contract: `contracts/bounded-input.md`
 - Work graph: `tasks.md`
@@ -540,6 +582,8 @@ Additional security gates include:
 
 ## User Review Gate
 
-Confirmed on 2026-08-27 under the user's delegated project-owner authority.
-Execution still requires a complete task graph, consistency analysis, one
+Confirmed on 2026-08-28 under the user's delegated project-owner authority.
+T202 is a serial umbrella. Only T202A is Ready; T202B-T202E remain Draft until
+their predecessor is Accepted. T204 and every later production task additionally
+require the T202 umbrella to be Accepted. Execution still requires one
 self-contained packet per ready task, verified RED evidence, and review.

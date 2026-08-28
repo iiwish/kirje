@@ -6,14 +6,14 @@
 - Status: Confirmed
 - Target release: `v0.3.1`
 - Source: `spec.md`, `plan.md`, `research.md`, `data-model.md`, `contracts/**`
-- Updated: 2026-08-27
+- Updated: 2026-08-28
 - Review authority: delegated project owner
 
 ## Scheduling Rules
 
-- Production tasks T201-T211 execute serially. Their shared Rust contracts and
-  migrations make parallel write scopes unsafe even where individual files
-  differ.
+- Production tasks T201, T202A-T202E, and T203-T211 execute serially. Their
+  shared Rust contracts and migrations make parallel write scopes unsafe even
+  where individual files differ.
 - Read-only research and independent review may run in parallel.
 - Every production task needs a self-contained packet and verified RED evidence
   before implementation.
@@ -24,6 +24,13 @@
 - No task may expose credentials, owner private keys, signatures, mailbox
   content, account addresses, endpoints, UIDs, or raw provider responses in
   committed fixtures/evidence.
+- T202 is an acceptance umbrella, not an implementation packet. T202A-T202E are
+  strict serial children; the umbrella becomes Accepted only after T202E review
+  and evidence-based acceptance by the delegated project owner. The user's
+  standing execution authorization removes conversational approval checkpoints,
+  but never waives a failed or missing gate.
+- T204-T212 each require the T202 umbrella to be Accepted, in addition to their
+  direct predecessor dependencies.
 - T212 begins only after T201-T211 have no blocking findings.
 
 ## T201: Core Security Contracts
@@ -74,7 +81,7 @@ Test targets:
 - Exhaustive action policy and future-unmapped fail-closed compile/contract test
 - Proof/status schema privacy and bounded untrusted-value semantics
 - Typed JSON depth/string/list/Base64/decoded-total N/N+1 and allocation tests
-- Sealed `parse_bounded_json<T: BoundedJsonInput>` coverage for SendRequest,
+- Sealed typed `parse_bounded_json` coverage for SendRequest,
   DraftInput/MessageContent, mailbox/search/sync/read requests, and
   AuthorizationProof; config/file/MCP adapters remain later tasks
 - Stable error-code/retryability snapshot
@@ -124,94 +131,516 @@ Evidence required:
 - RED/GREEN command results, changed-file list, dependency feature/MSRV review,
   spec and engineering reviews
 
-## T202: Pinned Authority Store
+## T202: Pinned Authority Store Umbrella
 
-Status: Ready
+Status: Draft
 Priority: P0
 Story / Requirement: US-003; FR-012-FR-019; NFR-001-NFR-003, NFR-006,
 NFR-007
-Depends on: T201 Accepted
+Depends on: T201 Accepted; T202A-T202E Accepted for umbrella acceptance
 Blocks: T204-T212
 Parallel: No
-Conflicts with: Any authority schema, trust, receipt, nonce, grant, claim,
-invocation, observation, or authority-event change
+Conflicts with: Every authority schema, bootstrap, trust, receipt, nonce,
+registry, transition, grant, claim, invocation, observation, rotation, recovery,
+or authority-event change
 
 Goal:
-Implement authority SQLite v1 with exact schema constraints, create-once realm
-bootstrap data, anchor/journal verification inputs, strict proof consumption,
-idempotent receipts, rotation/recovery state, config/account registry,
-single-use grant records, global effect claims, unique invocations, and bounded
-observations.
-Store enrollment and account registration use exact idempotent transactions;
-removed account history is retained behind a live-row partial display-ID index.
+Aggregate the strictly serial T202A-T202E implementation and evidence into one
+accepted pinned-authority-store boundary. The umbrella performs no direct code
+change and grants no dependency release until all child tasks pass review and
+receive evidence-based acceptance from the delegated project owner.
 
 Allowed files:
-- `Cargo.toml`
-- `Cargo.lock`
-- `crates/kirje-store/Cargo.toml`
-- `crates/kirje-store/src/lib.rs`
-- `crates/kirje-store/src/authority.rs`
-- `crates/kirje-store/tests/authority.rs`
-- `crates/kirje-store/tests/fixtures/authority/**`
-
-Forbidden changes:
-- Caller-selected authority path in production runtime/CLI/MCP
-- Owner private-key storage or signing
-- Outbox migration or remote adapter invocation
-- Returning full private proof/manifest through normal store projections
+- No direct implementation files; each child owns its exact allowed files.
+- Status/evidence integration uses this `tasks.md` block and the declared T202
+  evidence path only in the acceptance attempt.
 
 Test targets:
-- `application_id`, schema/user version, exact BLOB/enumeration/TTL checks,
-  newer-version rejection
-- Bootstrap/journal/realm/epoch/bundle match and mismatch states
-- Proof positive vector, malformed/wrong/stale/expired proof, exact idempotent
-  replay, changed replay, restart, and concurrent nonce use
-- Store/location and account/credential/binding uniqueness
-- Exact store-enroll retry, both-direction store/location conflicts, and
-  remove/recreate display ID with new stable identities
-- Account transition prepare/finalize/recovery states
-- Current-key rotation plus proposed-key proof, retirement, historical
-  re-verification, pending-grant invalidation, and recovery invalidation
-- Grant-use, effect-claim, and invocation global uniqueness under concurrency
-- Bounded append-only events and no secret/private-key fields
+- Combined schema/bootstrap, proof/replay, registry/transition, claim/invocation/
+  observation, rotation/recovery/audit, restart, concurrency, and privacy gates
+- Child evidence completeness and same-schema compatibility across T202A-T202E
 
 Deliverables:
-- Authority SQLite v1 implementation, migrations, fixtures, and store API
-- Trust/receipt/registry/claim/invocation transaction evidence
+- One reviewed authority SQLite v1 implementation and aggregate acceptance record
 
 Acceptance criteria:
-- Concurrent/restarted proof, grant, claim, and invocation tests prove one
-  durable winner with idempotent exact recovery.
-- Journal history can re-verify receipts without exposing private proof output.
+- T202A-T202E are Accepted with no unresolved Critical/High finding.
+- Fresh combined store/core validation uses the exact schema created by T202A.
 
 TDD plan:
-- RED: Add schema/transaction tests against the missing authority store.
-- GREEN: Implement one transaction at a time with SQL and Rust double bounds.
-- REFACTOR: Extract row codecs only after restart/concurrency/replay tests pass.
+- RED: Child tasks own behavior RED evidence; umbrella review fails while any
+  child evidence or combined gate is missing.
+- GREEN: Integrate only accepted child evidence and run the complete validation.
+- REFACTOR: None; fixes return to the owning child attempt.
 
 Validation commands:
 ```bash
-cargo test -p kirje-store --test authority --all-features --locked
-cargo test -p kirje-store --all-features --locked
-cargo clippy -p kirje-store --all-targets --all-features --locked -- -D warnings
+cargo test -p kirje-core -p kirje-store --all-features --locked
+cargo clippy -p kirje-core -p kirje-store --all-targets --all-features --locked -- -D warnings
 ```
 
 Definition of Done:
-- Authority schema is transactional, bounded, restart-safe, and pinned by
-  caller-supplied verified anchor identity rather than normal outbox paths.
-- One proof creates at most one receipt and one nonce use.
-- One grant/effect creates at most one use/claim/invocation globally.
-- Removed account rows remain immutable while the live partial index permits a
-  separately authorized recreate with new account/credential IDs.
-- Historical evidence remains privately re-verifiable after rotation.
+- T202E completes the aggregate review, the orchestrator records delegated
+  project-owner acceptance from passing evidence, and T204-T212 may observe
+  `T202 Accepted`.
+- The umbrella is not Accepted from child status inference alone.
 
 Packet path:
 - `.ai-platform/specs/008-security-baseline/packets/T202.yaml`
 
 Evidence required:
 - `.ai-platform/evidence/T202/summary.md`
-- SQL schema dump, RED/GREEN tests, concurrency/restart matrix, private-output
-  scan, review findings
+- Child evidence links, combined command results, schema identity, privacy scan,
+  spec/security/engineering/QA reviews, and residual risk
+
+### T202A: Schema And Bootstrap
+
+Status: Ready
+Priority: P0
+Story / Requirement: US-003; FR-012, FR-018; NFR-001-NFR-003, NFR-006,
+NFR-007
+Depends on: T201 Accepted
+Blocks: T202B; T202 umbrella acceptance
+Parallel: No
+Conflicts with: T202B-T202E and every authority schema/home/bootstrap/entropy
+change
+
+Goal:
+Add the minimal validated core `OwnerPublicKey`, create the complete executable
+authority SQLite v1 schema transaction body, and implement only the fixed
+production home, isolated `test-support` home, application/version preflight,
+CSPRNG boundary, typed anchor/location input, DB-first `prepare_bootstrap`, exact
+`confirm_anchor`, clock high-water, and T202A open match matrix. Any staged row or
+staged anchor is recovery-required in A. Later canonical tables exist but have no
+operational APIs.
+
+Allowed files:
+- `Cargo.toml`
+- `Cargo.lock`
+- `crates/kirje-core/src/authorization.rs`
+- `crates/kirje-core/tests/authorization_contract.rs`
+- `crates/kirje-store/Cargo.toml`
+- `crates/kirje-store/src/lib.rs`
+- `crates/kirje-store/src/authority.rs`
+- `crates/kirje-store/src/authority/schema_v1.sql`
+- `crates/kirje-store/tests/authority_schema.rs`
+- `crates/kirje-store/tests/fixtures/authority/schema/**`
+
+Test targets:
+- `OwnerPublicKey` exact-32-byte parse/non-weak construction, borrowed public
+  bytes/equality, malformed/weak rejection, and absence of default/serde/private-
+  key/signing APIs; malformed/weak/equal role keys return non-retryable
+  `authorization_malformed` before side effects
+- `application_id=0x4B49524A`, user version 1, pristine zero-ID initialization,
+  foreign/nonzero/zero-nonempty/newer rejection, all required pragmas
+- Executable full-schema body/digest and raw-SQL NULL/storage-class/length/range/
+  enum/FK/ordinal/field-relation/partial-index negatives for every table
+- One outer `BEGIN IMMEDIATE` owns schema, initial keys/epoch/meta/event,
+  application ID/version, and commit; injected rollback leaves zero user objects,
+  rows, application ID, and user version
+- Valid minimal relationship chains plus receipt, nonce use, grant use,
+  challenge-effect/remote-effect, effect-claim, invocation, and observation
+  cross-link negatives; foreign-key/integrity checks and declared-index inventory
+- Unique public keys, distinct owner/recovery identities, exact role/mask checks,
+  epoch-to-stored-role cross-reference rejection, exact active initial keys/epoch
+  1, initial-staged key or epoch rejection, and checked exact successor plus
+  epoch-gap rejection
+- Production home has no path/env/CLI-capable constructor; complete isolated
+  home and deterministic entropy require non-default `test-support`
+- OS CSPRNG identity generation, commit stability, restart and concurrent
+  bootstrap winner reuse
+- `prepare_bootstrap`/create-only-anchor/`confirm_anchor` crash points and every
+  absent/pending/ready/active/third-state matrix row; every staged row or staged
+  anchor maps to `recovery_required`, never `staged_finalize_required`
+- Trust-bundle and journal-location digest goldens, key role/hash, minimum epoch,
+  clock rollback 30s/N+1 and high-water max behavior
+
+Deliverables:
+- Minimal core `OwnerPublicKey`; complete authority v1 DDL transaction body;
+  schema/open validation, authority-home types, typed bootstrap/anchor snapshots,
+  entropy and clock boundaries
+- Schema/bootstrap fixtures with no later proof/registry/effect implementation
+
+Acceptance criteria:
+- A pristine DB can reach `pending_anchor` then `ready` only through the exact
+  two-phase protocol; crash recovery never regenerates committed identities.
+- Every invalid application/schema/anchor/location/epoch/type relationship fails
+  before credential or network access.
+- SQLite rejects cross-linked durable chains without relying on application-only
+  comparisons, and T202A fails closed on every staged state.
+
+TDD plan:
+- RED: Add core public-key contract tests, schema-body/digest/object tests,
+  raw-SQL invalid-row and cross-link tests, outer-transaction rollback,
+  constructor-surface, bootstrap crash, staged fail-closed, mismatch, entropy,
+  restart, concurrency, and clock tests against the missing authority store.
+- GREEN: Implement schema/preflight and one bootstrap transaction at a time; do
+  not add challenge, registry, claim, or rotation APIs.
+- REFACTOR: Extract checked row/pragma codecs only after schema and crash matrix
+  remain green.
+
+Validation commands:
+```bash
+cargo test -p kirje-core --test authorization_contract --all-features --locked
+cargo test -p kirje-store --test authority_schema --all-features --locked
+cargo test -p kirje-core -p kirje-store --all-features --locked
+cargo clippy -p kirje-core -p kirje-store --all-targets --all-features --locked -- -D warnings
+```
+
+Definition of Done:
+- The checked-in schema dump equals the canonical DDL and is complete for B-E.
+- The DDL contains no transaction control/PRAGMA, one outer bootstrap transaction
+  rolls back to zero objects/rows/version, and composite-FK cross-link negatives
+  plus valid chains, foreign-key check, integrity check, and index inventory pass.
+- `OwnerPublicKey` rejects malformed/weak values, bootstrap rejects equal keys,
+  all with `authorization_malformed`; SQL rejects equal public keys, wrong
+  epoch-to-stored-role references, initial staged keys/epoch, and epoch gaps
+  without a core Cargo change.
+- Production API accepts no ordinary path or entropy injection; test support is
+  explicit, non-default, and requires a complete isolated home.
+- RED/GREEN, restart/concurrency, bootstrap matrix, schema privacy, and review
+  evidence have no blocking finding.
+
+Packet path:
+- `.ai-platform/specs/008-security-baseline/packets/T202A.yaml`
+
+Evidence required:
+- `.ai-platform/evidence/T202A/summary.md`
+- RED/GREEN logs, schema dump/digest, raw-SQL constraint matrix, bootstrap fault
+  matrix, constructor/API review, privacy scan, and residual risk
+
+### T202B: Challenges, Proofs, And Receipts
+
+Status: Draft
+Priority: P0
+Story / Requirement: US-003; FR-013-FR-015, FR-018; NFR-001-NFR-003,
+NFR-006, NFR-007
+Depends on: T202A Accepted
+Blocks: T202C; T202 umbrella acceptance
+Parallel: No
+Conflicts with: T202A/T202C-T202E and core/store authorization payload,
+challenge, proof, receipt, nonce, or replay behavior
+
+Goal:
+Add the read-only typed core authorization projection, then implement challenge
+creation, pending-context uniqueness, strict proof verification, canonical proof
+and receipt transcripts, nonce consumption, exact replay, clock/expiry behavior,
+and bounded private/public receipt projections without a store-local transcript
+parser.
+
+Allowed files:
+- `crates/kirje-core/src/authorization.rs`
+- `crates/kirje-core/tests/authorization_contract.rs`
+- `crates/kirje-store/src/lib.rs`
+- `crates/kirje-store/src/authority.rs`
+- `crates/kirje-store/tests/authority_authorization.rs`
+- `crates/kirje-store/tests/fixtures/authority/authorization/**`
+
+Test targets:
+- `AuthorizationPayloadSnapshot`, optional `AuthorizationEffectSnapshot`, target
+  kind/canonical bytes/closed display, borrowed private bytes, no second parser
+- Challenge context transcript/digest and partial pending uniqueness under NULL-
+  shaped optional context, exact action/effect/ordinal matrix
+- Proof/receipt byte goldens and every field mutation, malformed/wrong role/key/
+  signature/manifest/payload/epoch/bundle/anchor/time case
+- First proof, exact replay after restart/expiry/rotation, changed replay,
+  nonce/challenge corruption, concurrent proof winner
+- Inclusive expiry, 30s/N+1 rollback/issuance skew, monotonic high-water, no TTL
+  extension
+- Receipt target/state projection and private proof/signature/nonce/manifest/
+  realm/location omission
+
+Deliverables:
+- Typed core read-only projection and challenge/proof/receipt/nonce store APIs
+- Canonical transcript, replay, concurrency, and projection fixtures
+
+Acceptance criteria:
+- Store persistence consumes the core snapshot and cannot duplicate or reinterpret
+  authorization tags/action policy.
+- One first proof creates exactly one immutable receipt/nonce use; historical
+  exact replay returns it without fresh authority.
+
+TDD plan:
+- RED: Add accessor compile tests, transcript mutations, full replay/time matrix,
+  restart/concurrency, corruption, and output-privacy failures.
+- GREEN: Expose the minimum read-only core projection and implement one proof
+  transaction against the fixed A schema.
+- REFACTOR: Consolidate transcript builders only after independent byte goldens
+  and parser-nonduplication review pass.
+
+Validation commands:
+```bash
+cargo test -p kirje-core --test authorization_contract --all-features --locked
+cargo test -p kirje-store --test authority_authorization --all-features --locked
+cargo test -p kirje-core -p kirje-store --all-features --locked
+cargo clippy -p kirje-core -p kirje-store --all-targets --all-features --locked -- -D warnings
+```
+
+Definition of Done:
+- Projection ownership, proof/receipt bytes, exact replay truth table, nonce
+  uniqueness, clock bounds, and public omission are executable and reviewed.
+- T202A schema remains byte-for-byte unchanged.
+
+Packet path:
+- `.ai-platform/specs/008-security-baseline/packets/T202B.yaml`
+
+Evidence required:
+- `.ai-platform/evidence/T202B/summary.md`
+- RED/GREEN logs, byte goldens, replay/concurrency matrix, core API review,
+  private-output scan, and residual risk
+
+### T202C: Store/Account Registry And Transitions
+
+Status: Draft
+Priority: P0
+Story / Requirement: US-001, US-003; FR-003-FR-009, FR-016; NFR-001-NFR-003,
+NFR-006, NFR-007
+Depends on: T202B Accepted
+Blocks: T202D; T202 umbrella acceptance
+Parallel: No
+Conflicts with: T202A-T202B/T202D-T202E and every registry, transition, cleanup,
+location, generation, credential, or display-identity rule
+
+Goal:
+Implement exact owner-authorized store enrollment, account registry rows,
+account-transition prepare/config-committed/finalize/abort/recovery operations,
+removed-history semantics, and delete-only cleanup lifecycle against the fixed
+schema and immutable receipts.
+
+Allowed files:
+- `crates/kirje-store/src/lib.rs`
+- `crates/kirje-store/src/authority.rs`
+- `crates/kirje-store/tests/authority_registry.rs`
+- `crates/kirje-store/tests/fixtures/authority/registry/**`
+
+Test targets:
+- Exact store-enroll first/retry and changed retry; both-direction store/location
+  uniqueness; config generation/digest and receipt/grant linkage
+- Account/credential global uniqueness, active display partial index, create/
+  update/remove, removed display recreation only with new identities
+- Account-transition canonical digest, exact next generation, one active
+  transition, every state/row shape and concurrent prepare winner
+- Before/after/third config digest restart matrix and no credential/network calls
+  while blocked/recovery-required
+- Provisional/ready/claimed/deleted cleanup, active-v2/legacy-v1 enum, delete-only
+  projection and no get/contains/list/copy/export/test/set capability
+- Registry/event projection privacy and FK/corruption fail-closed behavior
+
+Deliverables:
+- Registry, transition, and cleanup transaction APIs and fixtures
+- Exact idempotency, recovery, removed-history, and privacy evidence
+
+Acceptance criteria:
+- Store/location/account/credential/display mappings cannot alias or be replaced
+  by changed retry/concurrency.
+- Every transition resolves only before/after or enters recovery; removed history
+  and cleanup evidence remain immutable.
+
+TDD plan:
+- RED: Reproduce aliasing, NULL uniqueness, stale generation, changed retry,
+  transition crash, removed-ID reuse, and cleanup capability escalation.
+- GREEN: Implement one registry/transition transaction at a time with exact row
+  comparisons and existing grant/receipt checks.
+- REFACTOR: Share registry codecs only after crash/concurrency/privacy tests pass.
+
+Validation commands:
+```bash
+cargo test -p kirje-store --test authority_registry --all-features --locked
+cargo test -p kirje-store --all-features --locked
+cargo clippy -p kirje-store --all-targets --all-features --locked -- -D warnings
+```
+
+Definition of Done:
+- Exact enrollment, account lifecycle, transition recovery, cleanup state, FK,
+  event, and projection tests pass without changing the A schema.
+- No registry API returns location material, credential ID/binding digest, clear
+  display/email/endpoint, locator bytes, or cross-account state normally.
+
+Packet path:
+- `.ai-platform/specs/008-security-baseline/packets/T202C.yaml`
+
+Evidence required:
+- `.ai-platform/evidence/T202C/summary.md`
+- RED/GREEN logs, uniqueness/concurrency and transition fault matrices,
+  delete-only API review, privacy scan, and residual risk
+
+### T202D: Grant/Effect Claim/Invocation/Observation
+
+Status: Draft
+Priority: P0
+Story / Requirement: US-002, US-003; FR-016-FR-018; NFR-001-NFR-003,
+NFR-006, NFR-007
+Depends on: T202C Accepted
+Blocks: T202E; T202 umbrella acceptance
+Parallel: No
+Conflicts with: T202A-T202C/T202E and grant-use, remote-effect, claim,
+invocation-permit, observation, or apply-boundary behavior
+
+Goal:
+Implement typed same-transaction current-context revalidation, canonical grant
+use/effect claim/invocation start/observation transcripts, global effect claim,
+single adapter-entry permit, exact recovery, and crash-to-ambiguous observation.
+
+Allowed files:
+- `crates/kirje-core/src/account.rs`
+- `crates/kirje-core/src/lib.rs`
+- `crates/kirje-core/tests/account_security_contract.rs`
+- `crates/kirje-store/src/lib.rs`
+- `crates/kirje-store/src/authority.rs`
+- `crates/kirje-store/tests/authority_effects.rs`
+- `crates/kirje-store/tests/fixtures/authority/effects/**`
+
+Test targets:
+- `EffectClaimId`/`AuthoritySessionId` UUIDv4 BLOB16 and `OperationId` BLOB16
+  storage/text boundary; production CSPRNG/test entropy rules
+- Byte goldens and every-field mutations for grant use, claim, invocation, and
+  observation; result 1/16MiB/N+1 and hash match
+- Typed request recheck of receipt/grant/expiry/anchor/meta/key/epoch/bundle,
+  store location/config generation+digest, account generation/credential/
+  binding/state, policy, manifest, effect/ordinal/operation
+- Exact committed use/claim/invocation/observation recovery after later context
+  expiry; changed retry failures; first-boundary current-context failures
+- Concurrent global claim/invocation winners; only inserter receives non-Clone/
+  non-Serialize/no-byte-export `InvocationPermit`
+- Crash before invocation has zero adapter entry; invocation without observation
+  becomes one ambiguous recovery observation and never reinvokes
+- Authority-first observation and normal projection privacy
+
+Deliverables:
+- Typed request/projection APIs, durable transcript codecs, claim/invocation/
+  observation transactions, and invocation permit
+- Concurrency/restart/fault/privacy fixtures
+
+Acceptance criteria:
+- One effect has at most one claim, invocation, and first observation globally,
+  including copied/rolled-back caller ledgers.
+- No credential lookup/network entry can occur without the inserting-process
+  permit; recovery never manufactures a second permit.
+
+TDD plan:
+- RED: Add transcript mutation, stale-context, changed-retry, concurrency,
+  permit trait/ownership, crash-window, and result-bound tests.
+- GREEN: Implement grant use, claim, invocation, and observation in boundary
+  order, returning a permit only from the insert winner.
+- REFACTOR: Extract shared current-context comparisons only after fault and
+  concurrency tests remain deterministic.
+
+Validation commands:
+```bash
+cargo test -p kirje-core --test account_security_contract --all-features --locked
+cargo test -p kirje-store --test authority_effects --all-features --locked
+cargo test -p kirje-core -p kirje-store --all-features --locked
+cargo clippy -p kirje-core -p kirje-store --all-targets --all-features --locked -- -D warnings
+```
+
+Definition of Done:
+- All six durable transcript domains, typed rechecks, exact recovery, global
+  uniqueness, permit ownership, result bounds, crash ambiguity, and projection
+  privacy are executable and reviewed.
+- T202A schema remains unchanged and no adapter implementation enters store.
+
+Packet path:
+- `.ai-platform/specs/008-security-baseline/packets/T202D.yaml`
+
+Evidence required:
+- `.ai-platform/evidence/T202D/summary.md`
+- RED/GREEN logs, byte goldens, recheck matrix, concurrency/fault traces,
+  permit/API review, privacy scan, and residual risk
+
+### T202E: Rotation/Recovery/Audit And Umbrella Acceptance
+
+Status: Draft
+Priority: P0
+Story / Requirement: US-003; FR-018, FR-019; NFR-001-NFR-003, NFR-006,
+NFR-007
+Depends on: T202D Accepted
+Blocks: T202 umbrella acceptance; T204-T212 through the umbrella
+Parallel: No
+Conflicts with: T202A-T202D and trust key/epoch, anchor matching, invalidation,
+recovery blocking, event/audit, or aggregate authority acceptance behavior
+
+Goal:
+Implement staged rotation/recovery/finalization and the verified
+`staged_finalize_required` classifier using T202B's core snapshot plus exact
+transition-receipt and role-required POP verification; enforce strict
+key/role/mask/epoch row shapes, anchor crash matching, old-context invalidation,
+recovery blocking/re-enrollment requirements, private event integrity, bounded
+public audit, historical re-verification, and the complete T202 umbrella
+acceptance gate.
+
+Allowed files:
+- `crates/kirje-store/src/lib.rs`
+- `crates/kirje-store/src/authority.rs`
+- `crates/kirje-store/tests/authority_rotation.rs`
+- `crates/kirje-store/tests/authority_audit.rs`
+- `crates/kirje-store/tests/authority_acceptance.rs`
+- `crates/kirje-store/tests/fixtures/authority/rotation/**`
+- `crates/kirje-store/tests/fixtures/authority/audit/**`
+
+Test targets:
+- Initial/staged/active/retired exact row shapes, one active/one staged successor,
+  exact +1 epoch, owner/recovery role+mask+key ID, POP byte goldens/mutations
+- Owner rotation, recovery-key rotation, owner recovery, concurrent stage/finalize,
+  and active/staged/anchor crash matrix
+- T202A staged inputs remain recovery-required; T202E returns
+  `staged_finalize_required` only after the exact T202B core snapshot,
+  transition receipt, role/mask, key, epoch/bundle, and required POPs all verify
+- Matching fully verified signed staged anchor finalizes after restart; every
+  lower/unrecognized/second/unsigned/location/bundle/key/receipt/POP mismatch is
+  recovery-required
+- Finalize retirement and invalidation of pending plus authorized-unclaimed old
+  challenges; used/claimed history and old keys/receipts remain re-verifiable
+- Recovery blocks all nonremoved stores/accounts and requires re-enrollment,
+  binding authorization, and credential re-entry
+- Event/detail digest and closed enum/cross-row corruption, append-only behavior,
+  keyset sequence page limit 0/1/100/101, no private bytes in normal projection
+- Full T202A-T202E restart/concurrency/privacy/schema compatibility suite
+
+Deliverables:
+- Rotation/recovery/finalization and audit APIs/fixtures
+- Historical verification, invalidation/blocking, crash matrix, and aggregate
+  T202 acceptance evidence
+
+Acceptance criteria:
+- Only the active anchor or its one fully signed and receipt/POP-verified staged
+  successor can reach ready, `staged_finalize_required`, or finalize; all other
+  staged/mismatch states fail before authority use.
+- Recovery leaves no store/account ready and loses no historical evidence.
+- Aggregate T202 review has no unresolved Critical/High finding.
+
+TDD plan:
+- RED: Add T202A-to-T202E staged-classification transition, core-snapshot,
+  receipt/POP verification, row-shape/index, POP mutation, crash/mismatch,
+  invalidation, recovery blocking, historical reverify, audit-bound/privacy, and
+  aggregate gate failures.
+- GREEN: Implement stage/finalize/recover and keyset audit one transaction at a
+  time; preserve all historical rows.
+- REFACTOR: Consolidate trust/event codecs only after crash and historical
+  verification matrices remain green.
+
+Validation commands:
+```bash
+cargo test -p kirje-store --test authority_rotation --all-features --locked
+cargo test -p kirje-store --test authority_audit --all-features --locked
+cargo test -p kirje-store --test authority_acceptance --all-features --locked
+cargo test -p kirje-core -p kirje-store --all-features --locked
+cargo clippy -p kirje-core -p kirje-store --all-targets --all-features --locked -- -D warnings
+```
+
+Definition of Done:
+- Rotation/recovery/audit behavior and the combined authority suite pass against
+  the unchanged T202A schema with private history retained.
+- Independent spec/security/engineering/QA reviews find no blocking issue.
+- T202 remains non-Accepted until its aggregate evidence receives recorded
+  acceptance from the delegated project owner.
+
+Packet path:
+- `.ai-platform/specs/008-security-baseline/packets/T202E.yaml`
+
+Evidence required:
+- `.ai-platform/evidence/T202E/summary.md`
+- RED/GREEN logs, POP/epoch goldens, crash/invalidation/recovery matrices,
+  historical reverify, audit/privacy results, aggregate gate and review reports
 
 ## T203: Cross-Platform Safe Local I/O
 
@@ -403,7 +832,7 @@ Status: Draft
 Priority: P0
 Story / Requirement: US-002, US-003; FR-010, FR-011, FR-013-FR-018;
 NFR-001-NFR-003, NFR-006, NFR-007
-Depends on: T204 Accepted
+Depends on: T202 Accepted, T204 Accepted
 Blocks: T206-T212
 Parallel: No
 Conflicts with: Core operation/send state, outbox schema/migrations, ledger
@@ -485,7 +914,7 @@ Status: Draft
 Priority: P0
 Story / Requirement: US-001-US-003; FR-003, FR-005, FR-006, FR-012-FR-020;
 NFR-001-NFR-003, NFR-006, NFR-007
-Depends on: T205 Accepted
+Depends on: T202 Accepted, T205 Accepted
 Blocks: T207-T212
 Parallel: No
 Conflicts with: Runtime account snapshot, authorization, approve/apply, keyring,
@@ -566,7 +995,7 @@ Status: Draft
 Priority: P0
 Story / Requirement: US-001-US-005; FR-004-FR-006, FR-009, FR-012-FR-024,
 FR-030, FR-031; NFR-001, NFR-002, NFR-006, NFR-007
-Depends on: T206 Accepted
+Depends on: T202 Accepted, T206 Accepted
 Blocks: T208, T210-T212
 Parallel: No
 Conflicts with: CLI command/schema/error envelopes, TTY handling, file input,
@@ -649,7 +1078,7 @@ Status: Draft
 Priority: P0
 Story / Requirement: US-003-US-005; FR-020, FR-024-FR-026, FR-030;
 NFR-001, NFR-002, NFR-004, NFR-006, NFR-007
-Depends on: T207 Accepted
+Depends on: T202 Accepted, T207 Accepted
 Blocks: T209-T212
 Parallel: No
 Conflicts with: MCP tools/schemas/stdio transport, Tokio features, CLI MCP exit
@@ -716,7 +1145,7 @@ Acceptance criteria:
 TDD plan:
 - RED: Reproduce unbounded line, task/ID growth, raw schema gap, and stdout
   contamination on v0.3.
-- GREEN: Implement custom `Transport<RoleServer>` and exact contract tests.
+- GREEN: Implement the custom role-server transport and exact contract tests.
 - REFACTOR: Isolate frame/session/writer state only after blocked-stream tests are
   deterministic.
 
@@ -749,7 +1178,7 @@ Status: Draft
 Priority: P0
 Story / Requirement: US-005; FR-027-FR-031; NFR-001, NFR-002, NFR-004-
 NFR-007
-Depends on: T208 Accepted
+Depends on: T202 Accepted, T208 Accepted
 Blocks: T210-T212
 Parallel: No
 Conflicts with: IMAP connection/session/capability behavior, SMTP receipt,
@@ -846,7 +1275,7 @@ Evidence required:
 Status: Draft
 Priority: P0
 Story / Requirement: US-005; FR-031-FR-034; NFR-002, NFR-005-NFR-008
-Depends on: T209 Accepted
+Depends on: T202 Accepted, T209 Accepted
 Blocks: T211, T212
 Parallel: No
 Conflicts with: Product/security/provider/operation claims, Agent Skill, release
@@ -925,7 +1354,7 @@ Evidence required:
 Status: Draft
 Priority: P0
 Story / Requirement: All FR/NFR and SC-001-SC-008
-Depends on: T210 Accepted
+Depends on: T202 Accepted, T210 Accepted
 Blocks: T212
 Parallel: No
 Conflicts with: Any concurrent production, migration, workflow, or release
@@ -1010,7 +1439,7 @@ Evidence required:
 Status: Draft
 Priority: P0
 Story / Requirement: NFR-008, SC-008, release acceptance
-Depends on: T211 Accepted
+Depends on: T202 Accepted, T211 Accepted
 Blocks: 007 T102 and every v0.4 production change
 Parallel: No
 Conflicts with: Any concurrent branch/release/PR/version change
@@ -1080,7 +1509,7 @@ Evidence required:
 ## Requirement Coverage Summary
 
 - FR-001-FR-011: T201-T205, T207
-- FR-012-FR-020: T201, T202, T205-T208
+- FR-012-FR-020: T201, T202A-T202E, T205-T208
 - FR-021-FR-024: T201, T203, T204, T207, T208
 - FR-025-FR-026: T208
 - FR-027-FR-030: T201, T208, T209
@@ -1090,7 +1519,10 @@ Evidence required:
 
 ## User Review Gate
 
-Confirmed on 2026-08-27 under the user's delegated project-owner authority.
-Individual tasks become Ready only after their packet and dependency gates are
-complete; task acceptance remains evidence-based rather than inferred from this
-graph confirmation.
+Confirmed on 2026-08-28 under the user's explicit standing project-owner
+delegation and instruction to continue without per-step approval. T202A is the
+only Ready production task. T202B-T202E and T203-T212 are Draft; the T202
+umbrella is Draft and cannot become Accepted before T202E evidence and recorded
+delegated acceptance. Individual task acceptance remains evidence-based rather
+than inferred from this graph confirmation; a failed or missing gate still stops
+execution.

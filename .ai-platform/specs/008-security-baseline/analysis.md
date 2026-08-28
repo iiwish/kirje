@@ -3,33 +3,37 @@
 ## Metadata
 
 - Feature ID: `008-security-baseline`
-- Status: T201_Accepted_T202_Ready
+- Status: T201_Accepted_T202A_Ready
 - Updated: 2026-08-28
 - Inputs: `spec.md`, `checklists/requirements.md`, `plan.md`, `research.md`,
   `data-model.md`, `contracts/**`, `tasks.md`, project constitution and AGENTS
-- Review basis: local code/dependency inspection plus three independent
+- Review basis: local code/dependency inspection plus five independent
   scope-specific read-only audits
 
 ## Gate Result
 
 - Critical findings: 0 unresolved
-- High findings: 0 unresolved; all nine executable-boundary findings were
-  remediated and independently re-reviewed
-- Medium findings: 0 unresolved; the replacement-attempt packetization finding
-  is satisfied by T201-A002
-- Low findings: 1 accepted watch item for future policy/assurance snapshot
-  schemas; those actions remain executable fail-closed unsupported
-- Execution decision: T201-A001 remains stopped after valid RED evidence and
-  T201-A002 remains review-failed. T201-A003 passed fresh RED/GREEN, all core
-  gates, cargo-deny, privacy/dependency review, and independent spec,
-  cryptographic, engineering, and QA review. T201 is Accepted and T202 is the
-  only Ready production task.
+- High findings: 0 unresolved. The nine T202 authority-store packetization
+  findings and four focused T202A artifact-review findings are resolved by the
+  canonical authority-store contract, transaction-body DDL, composite SQLite
+  relationships, minimal validated core public-key prerequisite, fail-closed
+  staged ownership, exact durable transcripts/replay tables, closed transaction
+  requests, and rotation/recovery state machine.
+- Medium findings: 0 unresolved. Public target/receipt projection, audit bounds,
+  state derivation, and event privacy are closed in the same contract.
+- Low findings: 2 accepted watch items: future policy/assurance snapshot schemas
+  remain executable fail-closed unsupported, and the generic artifact validator
+  cannot select letter-suffixed child IDs independently.
+- Execution decision: T201 remains Accepted. T202 is a Draft acceptance umbrella
+  split into strict serial T202A-T202E. T202A is the only Ready production task;
+  T202B-T202E and T203-T212 remain Draft. T204 and every later task directly
+  require the T202 umbrella to be Accepted. T202A remains Ready only with the
+  remediated packet hash and contract boundaries recorded below.
 
 The product requirements remain confirmed and do not add a remote mailbox
-effect or broaden authentication/protocol scope. A003 repaired direct
-violations of existing executable contracts without changing the signed byte
-goldens. T202 may proceed; T203-T212 remain governed by their declared
-dependencies.
+effect or broaden authentication/protocol scope. This revision changes only
+governance artifacts. T202A owns complete schema/bootstrap behavior; later
+authority operations cannot change or invent its schema.
 
 ## Artifact Consistency
 
@@ -64,8 +68,22 @@ The spec, plan, data model, and contracts all state the same guarantee:
 ### Authority And Ledger
 
 - Fixed authority path is independent of normal config/index/outbox flags.
+- SQLite application ID is `0x4B49524A` (`KIRJ`), schema version is exactly 1,
+  and every table has executable storage-class/length/range/enum/FK/index checks.
+- Production home comes only from `ProjectDirs::from("", "", "kirje")`; isolated home and
+  deterministic entropy exist only under non-default `test-support`.
+- Bootstrap is database-first `pending_anchor -> ready`; anchor I/O is external
+  to the store and every third-state mismatch is recovery-required.
+- T202A maps every staged row or staged anchor to recovery-required. T202E alone
+  may classify a staged finalize after T202B snapshot plus receipt/POP verification.
+- The schema is a transaction body under one bootstrap-owned `BEGIN IMMEDIATE`;
+  rollback before the sole commit leaves no user object, row, or version marker.
+- Composite SQLite keys bind copied receipt/use/effect/claim/invocation/
+  observation context and reject cross-linked durable chains.
 - Authority owns nonce use, immutable receipt, grant use, global effect claim,
   unique invocation, and first outcome observation.
+- Operation, effect-claim, invocation, and authority-session UUIDs are BLOB16;
+  observation identity is the exact transcript SHA-256/BLOB32.
 - Caller-selected ledger stores a recoverable projection and append-only
   workflow history.
 - Apply lock plus unique invocation distinguishes a crashed process from a live
@@ -104,23 +122,23 @@ The spec, plan, data model, and contracts all state the same guarantee:
 |---|---|---|---|
 | FR-001 | D-001/D-002, config v2 identities | T201, T204 | binding/config/index migration tests |
 | FR-002 | account-binding V1 transcript | T201 | byte golden and field mutation matrix |
-| FR-003 | pinned registry + locator V2 | T202, T204, T206 | copied-config and zero-keyring-call tests |
+| FR-003 | pinned registry + locator V2 | T202C, T204, T206 | copied-config and zero-keyring-call tests |
 | FR-004 | create-only, immutable display ID | T204, T207 | sequential/concurrent conflict tests |
 | FR-005 | explicit update/new credential snapshot | T204, T206 | update/CAS/snapshot tests |
-| FR-006 | governed account/credential lifecycle | T202, T204, T206, T207 | control manifest and crash-order tests |
+| FR-006 | governed account/credential lifecycle | T202C, T204, T206, T207 | control manifest and crash-order tests |
 | FR-007 | locked restart-safe v1 migration | T203, T204 | interruption/idempotency/permission matrix |
 | FR-008 | legacy quarantine/delete-only cleanup | T204 | fake keyring call log and janitor tests |
 | FR-009 | orthogonal private status | T204, T207 | status golden/privacy scan |
 | FR-010 | legacy ledger state migration | T205 | all-state v1/v2/v3 fixtures |
 | FR-011 | strict config/ledger migration bounds | T203-T205 | newer/duplicate/malformed/N+1 tests |
-| FR-012 | create-once fixed owner realm | T202, T206, T207 | bootstrap/path/mismatch/recovery tests |
-| FR-013 | complete persisted challenge | T201, T202, T206 | transcript/schema/context tests |
+| FR-012 | create-once fixed owner realm | T202A, T206, T207 | bootstrap/path/mismatch/recovery tests |
+| FR-013 | complete persisted challenge | T201, T202B, T206 | transcript/schema/context tests |
 | FR-014 | exact independent signer manifest | T201, T207 | golden export and tamper tests |
-| FR-015 | strict detached proof/replay | T201, T202, T206 | RFC8032, expiry, replay, concurrency tests |
-| FR-016 | receipts/global claims/recovery | T202, T205, T206 | copy/rollback/crash/invocation matrix |
+| FR-015 | strict detached proof/replay | T201, T202B, T206 | RFC8032, expiry, replay, concurrency tests |
+| FR-016 | receipts/global claims/recovery | T202B-T202D, T205, T206 | copy/rollback/crash/invocation matrix |
 | FR-017 | exhaustive action map/apply recheck | T201, T206 | action golden and stale-context tests |
-| FR-018 | private re-verifiable evidence | T202, T207 | rotation reverify and output privacy tests |
-| FR-019 | rotation/recovery/epoch invalidation | T202, T206, T207 | dual-proof, staged crash, recovery tests |
+| FR-018 | private re-verifiable evidence | T202B, T202E, T207 | rotation reverify and output privacy tests |
+| FR-019 | rotation/recovery/epoch invalidation | T202E, T206, T207 | dual-proof, staged crash, recovery tests |
 | FR-020 | CLI workflow and MCP deny surface | T207, T208 | CLI golden + exact MCP allowlist/schema |
 | FR-021 | same-handle no-link regular file | T203, T204, T207 | Linux/macOS/Windows object tests |
 | FR-022 | N+1/read/parser/allocation bounds | T201, T203, T207, T208 | exact-limit and visitor tests |
@@ -136,9 +154,9 @@ The spec, plan, data model, and contracts all state the same guarantee:
 | FR-032 | honest local storage/audit boundary | T210 | security/operations review |
 | FR-033 | location/backup/retention/erasure | T210 | operator runbook review |
 | FR-034 | receipt/finality distinctions | T210 | terminology/claim matrix |
-| NFR-001 | fail closed before keyring/network | T202, T204, T206, T209 | call-count and TLS/protocol tests |
+| NFR-001 | fail closed before keyring/network | T202A-T202E, T204, T206, T209 | call-count and TLS/protocol tests |
 | NFR-002 | secret/private/untrusted exclusion | T201-T212 | source/output/evidence scans |
-| NFR-003 | atomic restart-safe transitions | T202, T204-T206 | fault/restart/copy/rollback matrix |
+| NFR-003 | atomic restart-safe transitions | T202A-T202E, T204-T206 | fault/restart/copy/rollback matrix |
 | NFR-004 | first-boundary boundedness | T201, T203, T208, T209 | memory/count/item/total tests |
 | NFR-005 | Linux/macOS/Windows equivalence | T203, T209, T211 | target CI matrix |
 | NFR-006 | shared services/versioned migration | T201, T204-T209 | golden CLI/MCP/schema fixtures |
@@ -152,7 +170,7 @@ The spec, plan, data model, and contracts all state the same guarantee:
 | SC-001 credential redirection/canonical binding | T201, T204, T206 | field/copy/update call-count matrix |
 | SC-002 unconditional legacy quarantine | T204 | migration + zero legacy probe evidence |
 | SC-003 PTY cannot authorize | T206, T207, T208 | PTY and MCP negative contracts |
-| SC-004 signature/replay/copy/rollback protection | T201, T202, T205, T206 | proof/fault/multiprocess matrix |
+| SC-004 signature/replay/copy/rollback protection | T201, T202A-T202E, T205, T206 | proof/fault/multiprocess matrix |
 | SC-005 cross-platform file/MCP bounds | T203, T208, T211 | target tests + blocked-stream memory gates |
 | SC-006 bounded remote/results/evidence | T201, T209-T211 | protocol/output/evidence size gates |
 | SC-007 honest runtime/docs boundary | T207, T209, T210 | capability claim parity |
@@ -170,14 +188,23 @@ The spec, plan, data model, and contracts all state the same guarantee:
 
 ### Authority
 
-- Exact-length SQL constraints mirror typed Rust validation.
-- Receipt, nonce, grant use, effect claim, and invocation each have a durable
-  unique boundary.
-- Last observed wall-clock high-water detects significant rollback; 30-second
-  issuance tolerance never extends expiry.
-- Rotation stages journal, updates anchor, and finalizes one epoch with a
-  recoverable matching transition.
-- Historical key/receipt data remains; private key never appears.
+- Full v1 DDL is executable and checks required/nullable storage classes,
+  lengths, ranges, closed enums, action/target shapes, foreign keys, ordinal
+  bounds, composite cross-chain relationships, and partial uniqueness.
+  `context_sha256` closes pending NULL semantics.
+- Bootstrap meta has exact `pending_anchor`/`ready` shapes and a complete
+  database/anchor matrix; every staged state is recovery-required in T202A.
+- Proof, receipt, grant use, effect claim, invocation start, observation,
+  transition, trust POP, and event details use serializer-independent transcripts.
+- Exact committed replay returns immutable history; every first use/claim/
+  invocation boundary requires current context in the same `BEGIN IMMEDIATE`.
+- Last observed wall-clock high-water detects significant rollback; inclusive
+  expiry and 30-second issuance tolerance never extend authority.
+- Rotation/recovery has exact staged/active/retired shapes, one staged successor,
+  and T202E-owned receipt/POP-verified anchor finalize, invalidation, and registry
+  blocking behavior.
+- Historical key/receipt/use/claim/invocation/observation data remains; private
+  key and normal-output private bytes never appear.
 
 ### Operation
 
@@ -268,12 +295,105 @@ The final independent reviews report:
 Structural artifact validation and `git diff --check` also pass. No review
 authorized production shortcuts, broader file ownership, or weakened tests.
 
+### T202 Authority-Store Packetization Audit
+
+The post-T201 authority audit found no Critical issue and nine High plus one
+Medium packetization gaps:
+
+- private core payload fields forced a second transcript parser in store
+- symbolic application ID and TEXT operation IDs left DB/identity semantics open
+- authority-home, bootstrap, anchor, bundle, and location input ownership was not
+  executable
+- SQL admitted NULL/wrong storage classes and open enum values
+- nullable pending-context uniqueness, foreign keys, ordinals, and partial
+  indexes were incomplete
+- proof/receipt/use/claim/start/observation exact transcripts were undefined
+- rotation/recovery row shapes, transitions, invalidation, and crash matching
+  were incomplete
+- grant/claim/invocation APIs could not prove same-transaction current-context
+  comparison
+- expiry, rollback, exact historical replay, and first-boundary recovery were
+  ambiguous
+- public target/state/audit projection was underdefined
+
+`contracts/authority-store.md`, the complete Authority SQLite V1 DDL, the
+authorization replay/rotation additions, and T202A-T202E serial graph resolve
+those artifact gaps without modifying production code. T202A owns only its
+minimal public `kirje_core::OwnerPublicKey` prerequisite plus schema/bootstrap;
+it does not invent later operations. T202B has the full core projection
+prerequisite; T202C-T202E each have closed API, validation, packet, and evidence
+ownership.
+
+### T202A Focused Artifact Remediation
+
+The independent post-packet DDL/open review found four High governance defects:
+
+- the canonical DDL contained its own transaction, so an outer bootstrap
+  transaction failed with `cannot start a transaction within a transaction` and
+  schema objects could commit outside the intended crash boundary
+- individually valid receipt, nonce, grant, effect, claim, invocation, and
+  observation identifiers could be cross-linked because SQL did not bind copied
+  parent context as a composite relationship
+- T202A classified a staged anchor as `staged_finalize_required` before it owned
+  receipt/POP verification
+- bootstrap accepted raw 32-byte keys and SQL admitted equal public keys,
+  swapped roles, an initial staged epoch, and epoch gaps
+
+The canonical remediation makes the SQL fence a pure transaction body, gives
+`prepare_bootstrap` one outer `BEGIN IMMEDIATE` and sole commit, adds exact parent
+composite uniqueness and child composite foreign keys with `ON DELETE RESTRICT`,
+defers staged-finalize classification to T202E after T202B snapshot and exact
+receipt/POP verification, and adds T202A's minimal core `OwnerPublicKey` plus
+SQLite key/role/epoch constraints. T202A does not acquire the full T202B payload
+snapshot or any staged mutation API.
+
+Executable SQLite validation of the remediated fence reports SHA-256
+`3a59cf60ebe57affad3e440c3eb3f70e09d8e3c90974fc57318861560c4fb632`, 17 user
+tables, 14 declared indexes, and 3 triggers. The body parses with foreign keys
+enabled; valid receipt/nonce/grant and two complete remote-effect through
+observation chains insert successfully; `PRAGMA foreign_key_check` returns zero
+rows and `PRAGMA integrity_check` returns `ok`. Cross-linked receipt, nonce use,
+grant use, challenge-effect/remote-effect, effect claim, invocation, and
+observation inserts each fail with `FOREIGN KEY constraint failed` and leave zero
+invalid child rows. Equal public keys fail the unique constraint, swapped roles
+fail the role trigger, and initial-staged plus epoch-gap rows fail checks.
+
+The outer-transaction rollback probe observed 34 user objects and five initial
+rows with application ID `1263096394` and user version `1` before rollback; after
+rollback it observed zero user objects, application ID `0`, and user version `0`.
+This closes the reproduced nested-transaction/crash counterexample.
+
+Ruby safely parses the remediated T202A packet with 18 root keys and seven
+validation commands. Feature-wide artifact validation reports zero errors and
+258 legacy warnings outside this T202A contract; the prior T202A missing-root-
+`validation_loop` warning is absent. `cargo test -p kirje-core --all-features
+--locked` passes all 60 baseline tests without a production-code or Cargo change,
+and `git diff --check` passes.
+
 ## Resolved Technical Questions
 
 - Signing algorithm: Ed25519 strict verification, direct typed transcript.
 - Signing bytes: `KIRJE-AUTHORIZATION-V1` strict tagged binary.
 - Owner entropy: 32-byte OS-random realm and nonce.
+- Owner public key: exact 32-byte parsed non-weak `OwnerPublicKey`, distinct
+  owner/recovery values, no serde/default/private/signing surface in T202A.
 - Fixed authority: platform anchor/journal/apply-lock paths, no normal override.
+- Authority DB identity: `application_id=0x4B49524A` (`KIRJ`), user version 1,
+  full schema created by T202A and reused unchanged by T202B-T202E.
+- Bootstrap: one outer transaction owns schema body, initial rows, application
+  ID/version, and commit; create-only external anchor write then exact confirm.
+  Anchor-present/DB-missing, every third-state mismatch, and every T202A staged
+  state require recovery.
+- Trust bundle: exact seven-field `KIRJE-TRUST-BUNDLE-V1` transcript; journal
+  location is a separate typed digest pin.
+- Authority IDs: every UUID is BLOB16 including operation/effect-claim/session;
+  observation identity is transcript SHA-256/BLOB32.
+- Exact retry: immutable proof/receipt/use/claim/start/observation transcripts,
+  historical replay without refreshed authority, and current context at every
+  first use/claim/invocation boundary.
+- Rotation: exact one-active/one-staged-successor state machine; T202E classifies
+  and finalizes only after core-snapshot receipt/POP verification, with historical
+  retention and recovery registry blocking.
 - Config location: exact platform-tagged TLV from opened parent identity and a
   Unix-native final-component byte sequence or exact Windows native UTF-16LE
   final-component code units.
@@ -287,7 +407,9 @@ authorized production shortcuts, broader file ownership, or weakened tests.
 - IMAP initial response: Kirje-owned 12 MiB pump from first server byte.
 - Capability security: complete bounded typed set; display metadata separate.
 
-No product-spec or executable-contract question blocks T202 packetization.
+No product-spec or executable-contract question blocks T202A packetization.
+T202B-T202E remain dependency-gated Draft tasks and T202 remains a Draft
+acceptance umbrella.
 
 ## Watch Items
 
@@ -306,11 +428,20 @@ APIs cannot support it, T209 is blocked until the adapter is replaced or the
 affected runtime capability is explicitly disabled. Post-connect truncation is
 not an accepted fallback.
 
+### L-003 Suffixed Task Validator Selection
+
+The shared artifact validator recognizes numeric `T###` headings but cannot
+select `T202A`-`T202E` through `--task-id`. Feature-wide validation still checks
+the confirmed work graph and scans every packet file once present. Child packet
+review must therefore use feature-wide validation plus the declared packet and
+evidence paths until the validator is extended in a separately allowed tooling
+task. This is a smoke-tool limitation, not permission to merge child evidence or
+relax the strict serial gates.
+
 ## Execution Gate
 
-`APPROVED_FOR_T202_PACKETIZATION`
+`APPROVED_FOR_T202A_PACKETIZATION`
 
-T201-A001 is preserved as a stopped attempt and T201-A002 as a GREEN but
-review-failed attempt. T201-A003 may edit only the narrowed core/test scope,
-must first add failing invariant tests, and may not weaken canonical bytes,
-strict verification, first-boundary limits, or privacy constraints.
+T202A may edit only its declared schema/bootstrap files and must begin with the
+declared RED evidence. It cannot implement later challenge, registry, effect, or
+rotation operations. The T202 umbrella remains non-Accepted.
