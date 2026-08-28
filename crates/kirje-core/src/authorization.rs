@@ -32,6 +32,40 @@ const MAX_AUTHORIZATION_LIFETIME_MS: i64 = 900_000;
 const MAX_AUTHORIZATION_EFFECTS: usize = 8;
 const MAX_ASSERTION_TEXT_BYTES: usize = 1_024;
 
+#[derive(Clone, Eq, PartialEq)]
+pub struct OwnerPublicKey([u8; 32]);
+
+impl OwnerPublicKey {
+    #[must_use]
+    pub const fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+impl TryFrom<[u8; 32]> for OwnerPublicKey {
+    type Error = MailError;
+
+    fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
+        let key = VerifyingKey::from_bytes(&bytes)
+            .map_err(|_| malformed("owner public key is malformed"))?;
+        if key.is_weak() {
+            return Err(malformed("owner public key is weak"));
+        }
+        Ok(Self(bytes))
+    }
+}
+
+impl TryFrom<&[u8]> for OwnerPublicKey {
+    type Error = MailError;
+
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        let exact: [u8; 32] = bytes
+            .try_into()
+            .map_err(|_| malformed("owner public key must contain exactly 32 bytes"))?;
+        Self::try_from(exact)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SensitiveAction {

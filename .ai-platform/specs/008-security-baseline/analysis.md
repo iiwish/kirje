@@ -3,7 +3,7 @@
 ## Metadata
 
 - Feature ID: `008-security-baseline`
-- Status: T201_Accepted_T202A_Ready
+- Status: T202A_Accepted_T202B_Ready
 - Updated: 2026-08-28
 - Inputs: `spec.md`, `checklists/requirements.md`, `plan.md`, `research.md`,
   `data-model.md`, `contracts/**`, `tasks.md`, project constitution and AGENTS
@@ -21,19 +21,22 @@
   requests, and rotation/recovery state machine.
 - Medium findings: 0 unresolved. Public target/receipt projection, audit bounds,
   state derivation, and event privacy are closed in the same contract.
-- Low findings: 2 accepted watch items: future policy/assurance snapshot schemas
-  remain executable fail-closed unsupported, and the generic artifact validator
-  cannot select letter-suffixed child IDs independently.
-- Execution decision: T201 remains Accepted. T202 is a Draft acceptance umbrella
-  split into strict serial T202A-T202E. T202A is the only Ready production task;
-  T202B-T202E and T203-T212 remain Draft. T204 and every later task directly
-  require the T202 umbrella to be Accepted. T202A remains Ready only with the
-  remediated packet hash and contract boundaries recorded below.
+- Low findings: 3 accepted watch items: future policy/assurance snapshot schemas
+  remain executable fail-closed unsupported; the generic artifact validator
+  cannot select letter-suffixed child IDs independently; and the frozen
+  canonical DDL includes one final blank line that `git diff HEAD --check`
+reports even though its exact byte hash is required. The generated unified-diff
+evidence is excluded from whitespace lint because its context lines use the
+standard single-space patch marker.
+- Execution decision: T201 and T202A are Accepted. T202 remains a Draft
+  acceptance umbrella split into strict serial T202A-T202E. T202B is the only
+  Ready production task; T202C-T202E and T203-T212 remain Draft. T204 and every
+  later task directly require the T202 umbrella to be Accepted.
 
 The product requirements remain confirmed and do not add a remote mailbox
-effect or broaden authentication/protocol scope. This revision changes only
-governance artifacts. T202A owns complete schema/bootstrap behavior; later
-authority operations cannot change or invent its schema.
+effect or broaden authentication/protocol scope. T202A owns the accepted
+schema/bootstrap behavior; later authority operations reuse its exact schema
+and cannot invent a second authority format.
 
 ## Artifact Consistency
 
@@ -407,8 +410,8 @@ and `git diff --check` passes.
 - IMAP initial response: Kirje-owned 12 MiB pump from first server byte.
 - Capability security: complete bounded typed set; display metadata separate.
 
-No product-spec or executable-contract question blocks T202A packetization.
-T202B-T202E remain dependency-gated Draft tasks and T202 remains a Draft
+No product-spec or executable-contract question blocks T202B packetization.
+T202C-T202E remain dependency-gated Draft tasks and T202 remains a Draft
 acceptance umbrella.
 
 ## Watch Items
@@ -438,10 +441,23 @@ evidence paths until the validator is extended in a separately allowed tooling
 task. This is a smoke-tool limitation, not permission to merge child evidence or
 relax the strict serial gates.
 
+### L-004 Canonical DDL Diff Lint
+
+The accepted authority v1 DDL ends with one empty line and its exact SHA-256 is
+part of the reviewed contract. `git diff HEAD --check` therefore reports a new
+blank line at EOF when the schema first enters Git. All source and governance
+diffs other than that canonical file pass the same check; generated
+`evidence/T202A/diff.patch` is excluded because unified-diff context markers are
+not source whitespace. The fixed v1 bytes take precedence over normalization; a
+future schema version may normalize its own canonical source before freezing
+its digest.
+
 ## Execution Gate
 
-`APPROVED_FOR_T202A_PACKETIZATION`
+`T202A_ACCEPTED_T202B_READY`
 
-T202A may edit only its declared schema/bootstrap files and must begin with the
-declared RED evidence. It cannot implement later challenge, registry, effect, or
-rotation operations. The T202 umbrella remains non-Accepted.
+T202A is accepted from four test-first attempts, independent security and QA
+review, the exact canonical schema digest, and fresh packet/workspace gates.
+T202B may edit only its declared core snapshot and challenge/proof/receipt files
+and must begin with its declared RED evidence. The T202 umbrella remains
+non-Accepted.

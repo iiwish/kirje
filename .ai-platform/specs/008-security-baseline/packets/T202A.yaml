@@ -4,7 +4,7 @@ task_id: T202A
 feature_id: 008-security-baseline
 mode: execute_one_task
 adapter: codex_worker
-status: ready
+status: accepted
 
 governance_inputs:
   constitution: .ai-platform/memory/constitution.md

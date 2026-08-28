@@ -14,11 +14,11 @@ use kirje_core::{
     EndpointSnapshot, HostKind, InvalidationScope, InvocationId, JournalId, LocatorKind,
     MailAccountConfig, MailboxManifest, MailboxSpecialUseInput, MailboxStrategy, ManifestAddress,
     ManifestContext, ManifestPayload, ManifestSupport, ManifestTarget, McpMutationPolicy,
-    MimeBuilderVersion, OperationId, OwnerKeyRole, OwnerRealmId, OwnerRecoverManifest, Protocol,
-    RemoteEffectId, SendSubmitManifest, SensitiveAction, Sha256Digest, StoreEnrollManifest,
-    StoreEnrollmentState, StoreId, StoredCredentialState, TargetKind, TransitionId,
-    TransportSecurity, TrustPermissionMask, TrustRotationManifest, owner_key_id,
-    verify_authorization_signature,
+    MimeBuilderVersion, OperationId, OwnerKeyRole, OwnerPublicKey, OwnerRealmId,
+    OwnerRecoverManifest, Protocol, RemoteEffectId, SendSubmitManifest, SensitiveAction,
+    Sha256Digest, StoreEnrollManifest, StoreEnrollmentState, StoreId, StoredCredentialState,
+    TargetKind, TransitionId, TransportSecurity, TrustPermissionMask, TrustRotationManifest,
+    owner_key_id, verify_authorization_signature,
 };
 
 const GOLDEN_MANIFEST_HEX: &str = "4b49524a452d4d414e49464553542d5631000019000100000002000100020000000200010003000000103333333333334333833333333333333300040000001011111111111141118111111111111111000500000010222222222222422282222222222222220006000000203333333333333333333333333333333333333333333333333333333333333333000700000020444444444444444444444444444444444444444444444444444444444444444400080000000200010009000000104444444444444444844444444444444401000000000800000000000000070101000000354b49524a452d414444524553532d5631000002000100000002014600020000001466726f6d406578616d706c652e696e76616c696401020000003a00010000000000324b49524a452d414444524553532d563100000200010000000100000200000012746f406578616d706c652e696e76616c6964010300000002000001040000000200000105000000015301060000000201420107000000010001080000000200000109000000133c6d406578616d706c652e696e76616c69643e010a00000008000001a3185c5000010b000000020001010c0000000162010d0000000100010e000000020000010f00000000";
@@ -1230,6 +1230,40 @@ fn owner_key_identity_is_role_separated() {
         owner_key_id(OwnerKeyRole::Owner, &public_key),
         owner_key_id(OwnerKeyRole::Recovery, &public_key)
     );
+}
+
+#[test]
+fn owner_public_key_accepts_only_exact_non_weak_ed25519_keys() {
+    let bytes =
+        decode_hex::<32>("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a");
+    let key = OwnerPublicKey::try_from(bytes.as_slice()).expect("RFC8032 public key");
+    assert_eq!(key.as_bytes(), &bytes);
+    assert!(key == key.clone());
+
+    for malformed in [&bytes[..31], &[0_u8; 33][..]] {
+        let Err(error) = OwnerPublicKey::try_from(malformed) else {
+            panic!("malformed key was accepted");
+        };
+        assert_eq!(
+            error.code,
+            kirje_core::MailErrorCode::AuthorizationMalformed
+        );
+        assert!(!error.retryable);
+    }
+
+    let weak_identity = {
+        let mut value = [0_u8; 32];
+        value[0] = 1;
+        value
+    };
+    let Err(error) = OwnerPublicKey::try_from(weak_identity.as_slice()) else {
+        panic!("weak key was accepted");
+    };
+    assert_eq!(
+        error.code,
+        kirje_core::MailErrorCode::AuthorizationMalformed
+    );
+    assert!(!error.retryable);
 }
 
 fn hex(bytes: &[u8]) -> String {

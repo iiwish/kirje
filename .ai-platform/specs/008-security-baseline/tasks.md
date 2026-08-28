@@ -195,7 +195,7 @@ Evidence required:
 
 ### T202A: Schema And Bootstrap
 
-Status: Ready
+Status: Accepted
 Priority: P0
 Story / Requirement: US-003; FR-012, FR-018; NFR-001-NFR-003, NFR-006,
 NFR-007
@@ -311,7 +311,7 @@ Evidence required:
 
 ### T202B: Challenges, Proofs, And Receipts
 
-Status: Draft
+Status: Ready
 Priority: P0
 Story / Requirement: US-003; FR-013-FR-015, FR-018; NFR-001-NFR-003,
 NFR-006, NFR-007

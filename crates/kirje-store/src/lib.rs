@@ -1,7 +1,9 @@
 //! Transactional `SQLite` message index for Kirje.
 
+mod authority;
 mod outbox;
 
+pub use authority::*;
 pub use outbox::{SqliteOutbox, SqliteOutbox as SqliteOperationLedger};
 
 use std::{
