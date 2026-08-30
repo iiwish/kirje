@@ -590,9 +590,9 @@ Additional security gates include:
 
 The security product and architecture contract remains Confirmed. T202A,
 T202B, T202C1, and T202C1S are Accepted at their recorded commits and evidence.
-T202C2 is Needs_Review: T109 recovered the interrupted attempt, resolved three
-review findings with RED/GREEN tests, and produced validated commit `94f3495`.
-Explicit user acceptance remains. The v1 program work graph owns remaining
+T202C2 is Accepted: T109 recovered the interrupted attempt, resolved three
+review findings with RED/GREEN tests, produced validated commit `94f3495`, and
+received explicit user acceptance on 2026-08-30. The v1 program work graph owns remaining
 executable batches and maps all T202C3-T212 acceptance coverage into T110-T112.
 Execution still requires one self-contained packet per risky batch, verified
 RED evidence, review, and explicit user acceptance.

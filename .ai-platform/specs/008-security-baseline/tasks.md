@@ -632,10 +632,10 @@ Evidence required:
 
 ### T202C2: Account Creation Transition
 
-Status: Needs_Review
+Status: Accepted
 Execution state: T109 review and fresh validation completed with three scoped
-RED/GREEN fixes and no unresolved Critical or High finding. Production commit
-`94f3495` awaits explicit user acceptance.
+RED/GREEN fixes and no unresolved Critical or High finding. The user accepted
+production commit `94f3495` on 2026-08-30.
 Packet review: `T202C2_A006_PACKET_REVIEW_PASS` with zero Critical, High,
 Medium, or Low findings
 Priority: P0

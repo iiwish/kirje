@@ -173,8 +173,8 @@ None.
 
 ## Residual Risks
 
-- The reviewed account-create checkpoint still requires explicit user
-  acceptance before T110 starts.
+- T109 and the account-create checkpoint were explicitly accepted by the user
+  on 2026-08-30; T110 may start after its just-in-time packet review.
 - Cross-platform support claims remain Draft until T119 produces platform
   evidence.
 - Real-provider checks depend on dedicated credentials and may produce honest
@@ -183,8 +183,8 @@ None.
 
 ## Gate Result
 
-`T109_REVIEW_COMPLETE_AWAITING_ACCEPTANCE`
+`T109_ACCEPTED_T110_PACKETIZATION_ALLOWED`
 
 The user approved `plan.md` and `tasks.md` on 2026-08-30. T109 review and fresh
-validation are complete at `94f3495`; no new production scope starts before
-the user accepts this checkpoint.
+validation are complete at `94f3495`; the user explicitly accepted the
+checkpoint on 2026-08-30.

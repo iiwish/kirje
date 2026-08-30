@@ -41,8 +41,9 @@
 
 ## T109: Recover And Review The Current Account-Create Checkpoint
 
-Status: Needs_Review
-Implementation state: reviewed production commit `94f3495`; user acceptance pending
+Status: Accepted
+Implementation state: accepted by the user on 2026-08-30 at reviewed production
+commit `94f3495`; governance/evidence commit `c8208f6`
 Priority: P0
 Depends on: T202C1S Accepted at commit `8eceaff`
 Blocks: T110

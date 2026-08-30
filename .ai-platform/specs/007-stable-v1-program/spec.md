@@ -357,5 +357,5 @@ the final release commit.
 ## User Review Gate
 
 Confirmed on 2026-08-30. The narrow 1.0 product boundary and incremental
-checkpoint model, technical plan, and work graph are approved. T109 review is
-complete and awaits explicit checkpoint acceptance.
+checkpoint model, technical plan, and work graph are approved. T109 was
+explicitly accepted by the user on 2026-08-30 at production commit `94f3495`.

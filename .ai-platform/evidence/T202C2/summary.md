@@ -2,8 +2,7 @@
 
 ## Status
 
-Needs_Review. T109 review and validation are complete; explicit user acceptance
-is still required before `Accepted`.
+Accepted by the user on 2026-08-30 after T109 review and validation completed.
 
 ## Result
 
@@ -13,6 +12,9 @@ contract defects in the interrupted implementation. Each defect received a
 discriminating RED, a scoped fix, and fresh GREEN evidence. No unresolved
 Critical or High finding remains. The reviewed production commit is
 `94f3495604e4705894f80ebca084854c32f31a57`.
+
+Acceptance was explicitly granted by the user on 2026-08-30. The governance
+and review evidence was committed as `c8208f6`.
 
 ## Changed Files
 

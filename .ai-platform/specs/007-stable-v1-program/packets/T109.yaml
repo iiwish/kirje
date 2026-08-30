@@ -4,7 +4,7 @@ task_id: T109
 feature_id: 007-stable-v1-program
 mode: recover_and_review_interrupted_task
 adapter: direct_or_delegated_reviewer
-status: review_complete_needs_user_acceptance
+status: accepted
 
 governance_inputs:
   constitution: .ai-platform/memory/constitution.md
@@ -26,7 +26,7 @@ governance_inputs:
     work_graph: confirmed by user on 2026-08-30
     requirements_checklist: completed
     analysis: no Critical or High finding
-    implementation: reviewed and freshly validated; user acceptance pending
+    implementation: accepted by the user on 2026-08-30 at production commit 94f3495
 
 work_unit:
   title: Recover and review the interrupted account-create checkpoint
@@ -198,10 +198,10 @@ review_contract:
   acceptance:
     - no unresolved Critical or High finding
     - validation contract satisfied
-    - explicit user acceptance before Accepted status
+    - explicit user acceptance recorded on 2026-08-30
 
 handoff:
-  expected_state_after_execution: Needs_Review
+  expected_state_after_execution: Accepted
   production_commit: 94f3495604e4705894f80ebca084854c32f31a57
   commit_policy:
     - commit production and tests only after review and validation

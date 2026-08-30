@@ -6,9 +6,9 @@ Completed phases are `001-agent-first-bootstrap`, `002-read-only-mvp`,
 `006-agent-mail-operations`.
 
 The active program is `007-stable-v1-program`. Its product boundary and
-accelerated technical plan/work graph are Confirmed. The current implementation
-checkpoint is T109, which preserves and reviews the interrupted T202C2
-account-create diff before new production scope begins.
+accelerated technical plan/work graph are Confirmed. T109 and its T202C2
+account-create checkpoint are Accepted at production commit `94f3495`. The
+current implementation checkpoint is T110 authority lifecycle completion.
 
 ## T100: Govern The Next Product Phase
 

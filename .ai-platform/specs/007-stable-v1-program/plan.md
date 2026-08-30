@@ -268,5 +268,5 @@ are additive.
 
 The product boundary and checkpoint direction were confirmed by the user on
 2026-08-30. This technical plan and the work graph are `Confirmed`. T109 review
-and fresh validation are complete at production commit `94f3495`; no new
-production task starts before checkpoint acceptance.
+and fresh validation are complete at production commit `94f3495`, and the user
+accepted the checkpoint on 2026-08-30. T110 is the next production task.

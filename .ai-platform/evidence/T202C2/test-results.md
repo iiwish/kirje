@@ -2,8 +2,8 @@
 
 ## Status
 
-Review fixes and all required local gates passed. User acceptance remains
-pending.
+Review fixes and all required local gates passed. The user accepted the
+checkpoint on 2026-08-30.
 
 ## Review RED/GREEN
 
