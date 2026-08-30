@@ -143,6 +143,14 @@ manifest. GREEN covers all four actions, pending reuse, intrinsic-shape
 negatives, stale account state, busy store state, zero effects, restart, and
 unchanged schema/dependency bytes. No Critical or High finding remains.
 
+`T202C3-A002` is the active bounded attempt. Packet review found one intentional
+create-only API gap: the authority schema stores private cleanup locator
+material, while the T202C2 prepare request has no field for it. The attempt may
+add a non-printable, bounded store-layer cleanup reservation whose digest must
+match the signed descriptor. This is required for the canonical account-update
+tombstone and does not expose cleanup claim/delete, keyring, runtime, config,
+protocol, CLI, MCP, or network capability. No blocking planning finding remains.
+
 ## Current Implementation Evidence Check
 
 T109 recovered and reviewed the interrupted T202C2 attempt:

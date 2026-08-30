@@ -704,7 +704,9 @@ Evidence required:
 Status: Running
 Execution state: `T202C3-A001` completed review at production commit `daf22a0`.
 It owns effect-free challenge issuance for account update/remove and credential
-set/delete. Transition execution and cleanup remain later serial attempts.
+set/delete. `T202C3-A002` is Ready and owns only the account-update transition
+and its provisional-to-ready cleanup rows. Remaining transition kinds and
+cleanup claim/delete remain later serial attempts.
 Priority: P0
 Story / Requirement: US-001, US-003; FR-003-FR-009, FR-016; NFR-001-NFR-003,
 NFR-006, NFR-007
