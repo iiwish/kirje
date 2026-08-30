@@ -121,7 +121,8 @@ Evidence required:
 
 Status: Running
 Execution state: T109 is Accepted. T110 runs as four strict serial security
-batches; the active batch is T202C3-A001 challenge issuance. No later batch is
+batches. T202C3-A001 challenge issuance is reviewed at commit `daf22a0`; the
+active next attempt is T202C3 transition execution. No later security batch is
 Ready until its predecessor is reviewed and accepted.
 Priority: P0
 Depends on: T109 Accepted

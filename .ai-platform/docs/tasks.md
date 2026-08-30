@@ -9,6 +9,8 @@ The active program is `007-stable-v1-program`. Its product boundary and
 accelerated technical plan/work graph are Confirmed. T109 and its T202C2
 account-create checkpoint are Accepted at production commit `94f3495`. The
 current implementation checkpoint is T110 authority lifecycle completion.
+Its first bounded T202C3 challenge-issuance checkpoint is reviewed at commit
+`daf22a0`; transition execution remains next.
 
 ## T100: Govern The Next Product Phase
 

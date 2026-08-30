@@ -4,7 +4,7 @@ task_id: T110
 feature_id: 007-stable-v1-program
 mode: direct_test_first_execution
 adapter: direct_executor
-status: ready
+status: review_complete
 
 governance_inputs:
   constitution: .ai-platform/memory/constitution.md
@@ -169,6 +169,8 @@ review_contract:
 
 handoff:
   expected_state_after_execution: T110 Running and T202C3 Running
+  production_commit: daf22a0
+  evidence_state: T202C3-A001 complete and reviewed; T202C3 remains Running
   commit_policy:
     - commit the packet before production execution
     - commit production tests after RED/GREEN and changed-crate validation

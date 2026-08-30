@@ -702,8 +702,8 @@ Evidence required:
 ### T202C3: Account Credential And Cleanup Lifecycles
 
 Status: Running
-Execution state: `T202C3-A001` is the bounded first attempt under T110 and owns
-effect-free challenge issuance for account update/remove and credential
+Execution state: `T202C3-A001` completed review at production commit `daf22a0`.
+It owns effect-free challenge issuance for account update/remove and credential
 set/delete. Transition execution and cleanup remain later serial attempts.
 Priority: P0
 Story / Requirement: US-001, US-003; FR-003-FR-009, FR-016; NFR-001-NFR-003,
