@@ -165,6 +165,16 @@ The user explicitly accepted A003 on 2026-08-30. Credential set is the active
 bounded attempt; credential delete, cleanup claim/delete, config, keyring,
 runtime, protocol, CLI, MCP, and network behavior remain excluded.
 
+`T202C3-A004` is Ready with no blocking packet finding. The credential-targeted
+grant binds the complete signed before/after account mutation and
+`active_locator_sha256`, while authority stores no credential bytes or locator
+material. Prepare advances only the account generation/receipt projection and
+blocks account/store without inserting a credential or cleanup row. Config
+commit creates the next store and account versions with the existing credential
+identity; finalize activates the authorized/bound after projection. Abort
+restores the predecessor receipt and tuple, and unsafe observation remains
+fail-closed recovery. Credential delete and cleanup remain excluded.
+
 ## Current Implementation Evidence Check
 
 T109 recovered and reviewed the interrupted T202C2 attempt:

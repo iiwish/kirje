@@ -708,9 +708,10 @@ set/delete. `T202C3-A002` is accepted at production commit `2c00f32` and owns
 the exact account-update transition plus provisional-to-ready cleanup rows.
 `T202C3-A003` is accepted at production commit `703b5a1` and owns the exact
 account-remove transition, preserved removed history, store-only after
-versioning, and cleanup readiness. Credential set is the active bounded
-attempt. Credential delete and cleanup claim/delete remain later serial
-attempts.
+versioning, and cleanup readiness. `T202C3-A004` is Ready and owns only the
+credential-set transition, existing credential identity, immutable after
+versions, and no-cleanup/no-keyring boundary. Credential delete and cleanup
+claim/delete remain later serial attempts.
 Priority: P0
 Story / Requirement: US-001, US-003; FR-003-FR-009, FR-016; NFR-001-NFR-003,
 NFR-006, NFR-007

@@ -124,8 +124,9 @@ Execution state: T109 is Accepted. T110 runs as four strict serial security
 batches. T202C3-A001 challenge issuance is reviewed at commit `daf22a0`; the
 T202C3-A002 account-update transition is accepted at commit `2c00f32`.
 `T202C3-A003` account-remove transition is accepted at commit `703b5a1`.
-Credential set is the active bounded attempt. No later attempt or security
-batch is Ready until its predecessor is reviewed and accepted.
+`T202C3-A004` is Ready and owns only the credential-set transition lifecycle.
+No later attempt or security batch is Ready until its predecessor is reviewed
+and accepted.
 Priority: P0
 Depends on: T109 Accepted
 Blocks: T111
@@ -190,7 +191,9 @@ Evidence required:
    attempts. `T202C3-A003` delivers reviewed account-remove prepare through
    terminal state, removed-history preservation, store-only after versioning,
    and cleanup readiness at commit `703b5a1`. Credential set is the next
-   bounded attempt.
+   bounded attempt; `T202C3-A004` owns credential-targeted prepare through
+   terminal state, existing credential identity, immutable account/store
+   versioning, and the no-cleanup/no-keyring boundary.
 2. `T202C4`: remote challenge registry binding and planner-owned effect row.
 3. `T202D`: effect claim, invocation permit, observation, and ambiguity.
 4. `T202E`: owner rotation/recovery, audit, and aggregate authority acceptance.
