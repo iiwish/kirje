@@ -4,7 +4,7 @@ task_id: T110
 feature_id: 007-stable-v1-program
 mode: direct_test_first_execution
 adapter: direct_executor
-status: review_complete
+status: accepted
 
 governance_inputs:
   constitution: .ai-platform/memory/constitution.md
@@ -173,7 +173,8 @@ result:
   production_commit: 2c00f32
   evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A002.md
   review: no unresolved Critical, High, or Medium finding
-  next_gate: user acceptance before account-remove packet execution
+  acceptance: explicitly accepted by the user on 2026-08-30
+  next_gate: account-remove packet review
 
 stop_conditions:
   - A required change touches schema, core, runtime, keyring, local I/O, protocol, CLI, MCP, network, or dependency files.

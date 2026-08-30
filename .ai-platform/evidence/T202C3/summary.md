@@ -3,8 +3,8 @@
 ## Status
 
 Running. `T202C3-A001` challenge issuance is reviewed at production commit
-`daf22a0`. `T202C3-A002` account-update transition execution is reviewed at
-production commit `2c00f32`.
+`daf22a0`. `T202C3-A002` account-update transition execution is accepted at
+production commit `2c00f32` by explicit user decision on 2026-08-30.
 
 ## Delivered
 

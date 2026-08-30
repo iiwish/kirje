@@ -148,8 +148,8 @@ production commit `2c00f32`. Account update supports exact prepare, config
 commit, finalize, abort, unsafe recovery, retry, expiry, restart, immutable
 versions, replacement credential reservation, and private provisional-to-ready
 cleanup. Review reproduced and fixed an expired-update restart defect. No
-unresolved Critical, High, or Medium finding remains. Account remove is the
-next bounded attempt after explicit A002 acceptance.
+unresolved Critical, High, or Medium finding remains. The user explicitly
+accepted A002 on 2026-08-30. Account remove is the active bounded attempt.
 
 ## Current Implementation Evidence Check
 
