@@ -917,6 +917,180 @@ fn credential_set_after_config_sha256() -> Sha256Digest {
     Sha256Digest::digest(b"synthetic-t202c3-after-config-80")
 }
 
+fn credential_delete_manifest() -> ActionManifest {
+    let mut before = initial_account_snapshot(Some(AccountStateReason::CredentialReentryRequired));
+    before.generation = NonZeroU64::new(2).unwrap();
+    before.binding_state = BindingState::Authorized;
+    before.credential_state = StoredCredentialState::Bound;
+    before.state_reason = None;
+    let mut after = before.clone();
+    after.generation = NonZeroU64::new(3).unwrap();
+    after.credential_state = StoredCredentialState::Missing;
+    ActionManifest::new(
+        ManifestContext {
+            target: ManifestTarget::Credential(credential_id()),
+            store_id: Some(store_id(0)),
+            account_id: Some(account_id()),
+            account_binding_sha256: Some(before.binding_sha256),
+            policy_sha256: None,
+            effect_id: None,
+        },
+        ManifestPayload::CredentialDelete(CredentialMutationManifest {
+            account: kirje_core::AccountMutationManifest {
+                transition_id: t202c3_uuid::<TransitionId>(0x5300_0000, 90),
+                config_cas: ConfigCas {
+                    store_id: store_id(0),
+                    generation: NonZeroU64::new(3).unwrap(),
+                    exact_content_sha256: credential_set_after_config_sha256(),
+                    location_sha256: location_sha256(0),
+                },
+                before: Some(before),
+                after: Some(after),
+                next_config_generation: NonZeroU64::new(4).unwrap(),
+                after_config_sha256: credential_delete_after_config_sha256(),
+                cleanup: Vec::new(),
+            },
+            active_locator_sha256: Sha256Digest::digest(b"synthetic-a005-active-locator"),
+        }),
+    )
+    .unwrap()
+}
+
+fn a004_bound_credential_fixture() -> ReadyFixture {
+    let fixture = a002_active_account_fixture();
+    let authorized = authorize_credential_set(&fixture);
+    open_ready(&fixture, deterministic(Vec::new()))
+        .prepare_account_transition(prepare_credential_set_request(&authorized, 506_200))
+        .unwrap();
+    open_ready(&fixture, deterministic(Vec::new()))
+        .mark_config_committed(observe_credential_set(
+            AccountTransitionState::Prepared,
+            3,
+            credential_set_after_config_sha256(),
+            506_300,
+        ))
+        .unwrap();
+    open_ready(&fixture, deterministic(Vec::new()))
+        .finalize_account_transition(observe_credential_set(
+            AccountTransitionState::ConfigCommitted,
+            3,
+            credential_set_after_config_sha256(),
+            506_400,
+        ))
+        .unwrap();
+    fixture
+}
+
+fn authorize_credential_delete(fixture: &ReadyFixture) -> AuthorizedFixture {
+    let manifest = credential_delete_manifest();
+    let challenge = open_ready(fixture, deterministic(vec![0x90; 48]))
+        .create_challenge(CreateChallengeRequest {
+            manifest: manifest.clone(),
+            observed_at_unix_ms: 509_000,
+            expires_at_unix_ms: 509_900,
+        })
+        .unwrap();
+    let proof = AuthorizationProof::new(
+        challenge.challenge_id,
+        challenge.key_id,
+        challenge.signing_payload_sha256,
+        a002_signature("credential_delete_signature"),
+    );
+    let receipt = open_ready(fixture, deterministic(vec![0x91; 16]))
+        .verify_proof(VerifyProofRequest {
+            proof: proof.clone(),
+            observed_at_unix_ms: 509_100,
+        })
+        .unwrap();
+    let connection = Connection::open(fixture.home.database_path()).unwrap();
+    let grant: Vec<u8> = connection
+        .query_row(
+            "SELECT grant_id FROM authorization_challenges WHERE challenge_id=?1",
+            [challenge.challenge_id.as_bytes()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    AuthorizedFixture {
+        challenge,
+        receipt,
+        proof,
+        manifest,
+        grant_id: AuthorizationGrantId::try_from(Uuid::from_slice(&grant).unwrap()).unwrap(),
+    }
+}
+
+fn prepare_credential_delete_request(
+    authorized: &AuthorizedFixture,
+    observed_at_unix_ms: i64,
+) -> PrepareAccountTransitionRequest {
+    prepare_credential_delete_request_with_target(
+        authorized,
+        TargetKind::Credential,
+        credential_id().as_bytes().to_vec(),
+        observed_at_unix_ms,
+    )
+}
+
+fn prepare_credential_delete_request_with_target(
+    authorized: &AuthorizedFixture,
+    target_kind: TargetKind,
+    target_id: Vec<u8>,
+    observed_at_unix_ms: i64,
+) -> PrepareAccountTransitionRequest {
+    let ManifestPayload::CredentialDelete(mutation) = authorized.manifest.payload() else {
+        unreachable!();
+    };
+    let after = mutation.account.after.as_ref().unwrap();
+    PrepareAccountTransitionRequest::new(
+        GrantUseRequest::new(
+            authorized.grant_id,
+            authorized.receipt.receipt_id,
+            SensitiveAction::CredentialDelete,
+            target_kind,
+            target_id,
+            authorized.manifest.sha256(),
+        )
+        .unwrap(),
+        mutation.account.transition_id,
+        mutation.account.config_cas.store_id,
+        after.account_id,
+        AccountTransitionKind::CredentialDelete,
+        mutation.account.config_cas.exact_content_sha256,
+        mutation.account.after_config_sha256,
+        mutation.account.config_cas.generation,
+        mutation.account.next_config_generation,
+        Sha256Digest::digest(&encode(
+            b"KIRJE-ACCOUNT-DISPLAY-ID-V1\0",
+            &[after.display_id.as_bytes()],
+        )),
+        after.generation,
+        after.credential_id,
+        after.binding_sha256,
+        observed_at_unix_ms,
+    )
+    .unwrap()
+}
+
+fn observe_credential_delete(
+    state: AccountTransitionState,
+    generation: u64,
+    config_sha256: Sha256Digest,
+    observed_at_unix_ms: i64,
+) -> AccountTransitionObservationRequest {
+    AccountTransitionObservationRequest::new(
+        t202c3_uuid::<TransitionId>(0x5300_0000, 90),
+        state,
+        NonZeroU64::new(generation).unwrap(),
+        config_sha256,
+        observed_at_unix_ms,
+    )
+    .unwrap()
+}
+
+fn credential_delete_after_config_sha256() -> Sha256Digest {
+    Sha256Digest::digest(b"synthetic-t202c3-after-config-90")
+}
+
 fn removed_replacement_account_id() -> AccountId {
     t202c3_uuid::<AccountId>(0x5600_0000, 70)
 }
@@ -4767,6 +4941,345 @@ fn credential_set_transition_lifecycle_is_exact() {
         .unwrap()
         .execute(
             "UPDATE account_transitions SET kind='credential_delete' WHERE kind='credential_set'",
+            [],
+        )
+        .unwrap();
+    assert_recovery_required(&fixture);
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn credential_delete_transition_lifecycle_is_exact() {
+    let fixture = a004_bound_credential_fixture();
+    let authorized = authorize_credential_delete(&fixture);
+    let before = (
+        account_registry_fingerprint(&Connection::open(fixture.home.database_path()).unwrap()),
+        scalar(
+            &Connection::open(fixture.home.database_path()).unwrap(),
+            "SELECT COUNT(*) FROM credential_cleanup",
+        ),
+    );
+    let prepared = match open_ready(&fixture, deterministic(Vec::new()))
+        .prepare_account_transition(prepare_credential_delete_request(&authorized, 509_200))
+    {
+        Ok(projection) => projection,
+        Err(error) => {
+            assert_eq!(error.code, MailErrorCode::AuthorizationContextStale);
+            assert_eq!(
+                (
+                    account_registry_fingerprint(
+                        &Connection::open(fixture.home.database_path()).unwrap(),
+                    ),
+                    scalar(
+                        &Connection::open(fixture.home.database_path()).unwrap(),
+                        "SELECT COUNT(*) FROM credential_cleanup",
+                    ),
+                ),
+                before
+            );
+            panic!("credential-delete transition remains unsupported");
+        }
+    };
+    assert!(prepared.transition_state == AccountTransitionState::Prepared);
+    assert!(prepared.account_state == RegisteredAccountState::Blocked);
+    assert_eq!(prepared.account_generation.get(), 3);
+    let connection = Connection::open(fixture.home.database_path()).unwrap();
+    assert_eq!(
+        scalar(&connection, "SELECT COUNT(*) FROM registered_credentials"),
+        1
+    );
+    assert_eq!(
+        scalar(
+            &connection,
+            "SELECT COUNT(*) FROM registered_account_versions"
+        ),
+        2
+    );
+    assert_eq!(
+        scalar(&connection, "SELECT COUNT(*) FROM credential_cleanup"),
+        0
+    );
+    drop(connection);
+
+    let retry = open_ready(&fixture, deterministic(Vec::new()))
+        .prepare_account_transition(prepare_credential_delete_request(&authorized, 509_250))
+        .unwrap();
+    assert!(retry.transition_state == AccountTransitionState::Prepared);
+    let committed = open_ready(&fixture, deterministic(Vec::new()))
+        .mark_config_committed(observe_credential_delete(
+            AccountTransitionState::Prepared,
+            4,
+            credential_delete_after_config_sha256(),
+            509_300,
+        ))
+        .unwrap();
+    assert!(committed.transition_state == AccountTransitionState::ConfigCommitted);
+    assert_eq!(committed.account_generation.get(), 3);
+    let connection = Connection::open(fixture.home.database_path()).unwrap();
+    assert_eq!(
+        scalar(
+            &connection,
+            "SELECT COUNT(*) FROM registered_store_versions"
+        ),
+        4
+    );
+    assert_eq!(
+        scalar(
+            &connection,
+            "SELECT COUNT(*) FROM registered_account_versions"
+        ),
+        3
+    );
+    assert_eq!(
+        scalar(&connection, "SELECT COUNT(*) FROM registered_credentials"),
+        1
+    );
+    assert_eq!(
+        scalar(&connection, "SELECT COUNT(*) FROM credential_cleanup"),
+        0
+    );
+    drop(connection);
+
+    let finalized = open_ready(&fixture, deterministic(Vec::new()))
+        .finalize_account_transition(observe_credential_delete(
+            AccountTransitionState::ConfigCommitted,
+            4,
+            credential_delete_after_config_sha256(),
+            509_400,
+        ))
+        .unwrap();
+    assert!(finalized.transition_state == AccountTransitionState::Finalized);
+    assert!(finalized.account_state == RegisteredAccountState::Active);
+    assert!(finalized.store_state == RegisteredStoreTransitionState::Active);
+    assert_eq!(finalized.account_generation.get(), 3);
+    assert!(matches!(
+        open_ready(&fixture, deterministic(Vec::new())).state(),
+        AuthorityOpenState::Ready(_)
+    ));
+    let replay = open_ready(&fixture, deterministic(Vec::new()))
+        .prepare_account_transition(prepare_credential_delete_request(&authorized, 509_500))
+        .unwrap();
+    assert!(replay.transition_state == AccountTransitionState::Finalized);
+
+    let target_fixture = a004_bound_credential_fixture();
+    let target_authorized = authorize_credential_delete(&target_fixture);
+    let before = account_registry_fingerprint(
+        &Connection::open(target_fixture.home.database_path()).unwrap(),
+    );
+    let target_error = exact_error(
+        open_ready(&target_fixture, deterministic(Vec::new())).prepare_account_transition(
+            prepare_credential_delete_request_with_target(
+                &target_authorized,
+                TargetKind::Credential,
+                removed_replacement_credential_id().as_bytes().to_vec(),
+                509_200,
+            ),
+        ),
+    );
+    assert_eq!(target_error.code, MailErrorCode::AuthorizationContextStale);
+    assert_eq!(
+        account_registry_fingerprint(
+            &Connection::open(target_fixture.home.database_path()).unwrap(),
+        ),
+        before
+    );
+
+    let aborted_fixture = a004_bound_credential_fixture();
+    let aborted_authorized = authorize_credential_delete(&aborted_fixture);
+    let original_receipt: Vec<u8> = Connection::open(aborted_fixture.home.database_path())
+        .unwrap()
+        .query_row(
+            "SELECT authorized_receipt_id FROM registered_accounts WHERE account_id=?1",
+            [account_id().as_bytes()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    open_ready(&aborted_fixture, deterministic(Vec::new()))
+        .prepare_account_transition(prepare_credential_delete_request(
+            &aborted_authorized,
+            509_200,
+        ))
+        .unwrap();
+    let aborted = open_ready(&aborted_fixture, deterministic(Vec::new()))
+        .abort_transition(observe_credential_delete(
+            AccountTransitionState::Prepared,
+            3,
+            credential_set_after_config_sha256(),
+            509_300,
+        ))
+        .unwrap();
+    assert!(aborted.transition_state == AccountTransitionState::Aborted);
+    assert!(aborted.account_state == RegisteredAccountState::Active);
+    assert_eq!(aborted.account_generation.get(), 2);
+    let connection = Connection::open(aborted_fixture.home.database_path()).unwrap();
+    let restored_receipt: Vec<u8> = connection
+        .query_row(
+            "SELECT authorized_receipt_id FROM registered_accounts WHERE account_id=?1",
+            [account_id().as_bytes()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(restored_receipt, original_receipt);
+    assert_eq!(
+        scalar(&connection, "SELECT COUNT(*) FROM registered_credentials"),
+        1
+    );
+    assert_eq!(
+        scalar(&connection, "SELECT COUNT(*) FROM credential_cleanup"),
+        0
+    );
+    drop(connection);
+    let abort_replay = open_ready(&aborted_fixture, deterministic(Vec::new()))
+        .prepare_account_transition(prepare_credential_delete_request(
+            &aborted_authorized,
+            509_400,
+        ))
+        .unwrap();
+    assert!(abort_replay.transition_state == AccountTransitionState::Aborted);
+
+    let recovery_fixture = a004_bound_credential_fixture();
+    let recovery_authorized = authorize_credential_delete(&recovery_fixture);
+    open_ready(&recovery_fixture, deterministic(Vec::new()))
+        .prepare_account_transition(prepare_credential_delete_request(
+            &recovery_authorized,
+            509_200,
+        ))
+        .unwrap();
+    let recovery = open_ready(&recovery_fixture, deterministic(Vec::new()))
+        .mark_transition_recovery_required(observe_credential_delete(
+            AccountTransitionState::Prepared,
+            5,
+            Sha256Digest::digest(b"synthetic-a005-third-config"),
+            509_300,
+        ))
+        .unwrap();
+    assert!(recovery.transition_state == AccountTransitionState::RecoveryRequired);
+    assert!(recovery.account_state == RegisteredAccountState::Blocked);
+    assert!(recovery.store_state == RegisteredStoreTransitionState::RecoveryRequired);
+    assert_eq!(recovery.account_generation.get(), 3);
+    assert_eq!(
+        scalar(
+            &Connection::open(recovery_fixture.home.database_path()).unwrap(),
+            "SELECT COUNT(*) FROM credential_cleanup"
+        ),
+        0
+    );
+    let recovery_replay = open_ready(&recovery_fixture, deterministic(Vec::new()))
+        .prepare_account_transition(prepare_credential_delete_request(
+            &recovery_authorized,
+            509_400,
+        ))
+        .unwrap();
+    assert!(recovery_replay.transition_state == AccountTransitionState::RecoveryRequired);
+
+    let expired_fixture = a004_bound_credential_fixture();
+    let expired_authorized = authorize_credential_delete(&expired_fixture);
+    let expired = exact_error(
+        open_ready(&expired_fixture, deterministic(Vec::new())).prepare_account_transition(
+            prepare_credential_delete_request(&expired_authorized, 510_000),
+        ),
+    );
+    assert_eq!(expired.code, MailErrorCode::AuthorizationExpired);
+    assert!(matches!(
+        open_ready(&expired_fixture, deterministic(Vec::new())).state(),
+        AuthorityOpenState::Ready(_)
+    ));
+
+    let fault_fixture = a004_bound_credential_fixture();
+    let fault_authorized = authorize_credential_delete(&fault_fixture);
+    let before = account_registry_fingerprint(
+        &Connection::open(fault_fixture.home.database_path()).unwrap(),
+    );
+    let error = exact_error(
+        open_ready_with_fault(
+            &fault_fixture,
+            AuthorityFaultPoint::AccountTransitionInserted,
+        )
+        .prepare_account_transition(prepare_credential_delete_request(
+            &fault_authorized,
+            509_200,
+        )),
+    );
+    assert_eq!(error.code, MailErrorCode::StoreWrite);
+    assert_eq!(
+        account_registry_fingerprint(
+            &Connection::open(fault_fixture.home.database_path()).unwrap(),
+        ),
+        before
+    );
+    open_ready(&fault_fixture, deterministic(Vec::new()))
+        .prepare_account_transition(prepare_credential_delete_request(
+            &fault_authorized,
+            509_250,
+        ))
+        .unwrap();
+    let error = exact_error(
+        open_ready_with_fault(&fault_fixture, AuthorityFaultPoint::AccountVersionInserted)
+            .mark_config_committed(observe_credential_delete(
+                AccountTransitionState::Prepared,
+                4,
+                credential_delete_after_config_sha256(),
+                509_300,
+            )),
+    );
+    assert_eq!(error.code, MailErrorCode::StoreWrite);
+    let connection = Connection::open(fault_fixture.home.database_path()).unwrap();
+    assert_eq!(
+        scalar(
+            &connection,
+            "SELECT COUNT(*) FROM registered_store_versions"
+        ),
+        3
+    );
+    assert_eq!(
+        scalar(
+            &connection,
+            "SELECT COUNT(*) FROM registered_account_versions"
+        ),
+        2
+    );
+    drop(connection);
+    open_ready(&fault_fixture, deterministic(Vec::new()))
+        .mark_config_committed(observe_credential_delete(
+            AccountTransitionState::Prepared,
+            4,
+            credential_delete_after_config_sha256(),
+            509_350,
+        ))
+        .unwrap();
+    let error = exact_error(
+        open_ready_with_fault(
+            &fault_fixture,
+            AuthorityFaultPoint::AccountFinalizeAccountUpdated,
+        )
+        .finalize_account_transition(observe_credential_delete(
+            AccountTransitionState::ConfigCommitted,
+            4,
+            credential_delete_after_config_sha256(),
+            509_400,
+        )),
+    );
+    assert_eq!(error.code, MailErrorCode::StoreWrite);
+    assert_eq!(
+        scalar(
+            &Connection::open(fault_fixture.home.database_path()).unwrap(),
+            "SELECT COUNT(*) FROM registered_accounts WHERE state='blocked'"
+        ),
+        1
+    );
+    open_ready(&fault_fixture, deterministic(Vec::new()))
+        .finalize_account_transition(observe_credential_delete(
+            AccountTransitionState::ConfigCommitted,
+            4,
+            credential_delete_after_config_sha256(),
+            509_450,
+        ))
+        .unwrap();
+
+    Connection::open(fixture.home.database_path())
+        .unwrap()
+        .execute(
+            "UPDATE account_transitions SET kind='credential_set' WHERE kind='credential_delete'",
             [],
         )
         .unwrap();
