@@ -4,169 +4,187 @@
 
 - Feature ID: `007-stable-v1-program`
 - Status: Completed
-- Analyzed artifacts: `spec.md`, `plan.md`, `tasks.md`,
-  `checklists/requirements.md`, project constitution, current product design,
-  architecture, security model, v0.3 release evidence, and repository contracts
-- Updated: 2026-08-27
+- Inputs: constitution, spec, plan, work graph, requirements checklist,
+  `008-security-baseline` contracts/tasks, current Git state, and interrupted
+  T202C2 execution evidence
+- Updated: 2026-08-30
 
-## Result
+## Executive Result
 
-The program artifacts are internally consistent and ready for explicit user
-review. The current v0.3 baseline contains one Critical and several High
-findings. Immediate credential, approval, input-boundary, and capability-claim
-risks are covered by the dedicated v0.3.1 requirements and T101; contract and
-release findings are scheduled behind that gate in T105-T107. No later
-production task may execute until T101 is accepted. T101 remediation itself
-remains blocked until the program artifacts and the security-baseline child
-artifacts are user-approved.
+The direct-to-1.0 checkpoint model is internally consistent and preserves the
+confirmed Kirje product and security boundaries. It removes duplicate
+per-version governance stacks while retaining executor-sized tasks, TDD,
+content-addressed evidence, adversarial review, complete checkpoint gates, and
+human acceptance.
 
-## Constitution Compliance
+No Critical or High planning finding remains. One Medium implementation finding
+is assigned: the unchanged branch dependency graph contains yanked
+`chacha20 0.10.1`, which makes `cargo deny check advisories` fail. T111
+owns remediation and Security Alpha cannot be Accepted until the complete
+dependency gate passes.
 
-- Local-first runtime: pass.
-- No graphical or hosted control plane: pass.
-- Shared CLI/MCP application services: pass.
-- Mailbox content remains untrusted: pass.
-- Secret exclusion: pass.
-- Verified TLS and no provider guessing: pass.
-- Immutable remote-write approval and no agent approval: pass.
-- Reused protocol engines behind Kirje adapters: pass.
-- TDD and reproducible evidence: pass.
+## Requirement Coverage
 
-No proposed requirement weakens a confirmed principle.
+- SFR-001-SFR-003 map to T109-T112.
+- SFR-004-SFR-007 map to T111-T112.
+- FR-001-FR-003 map to T113.
+- FR-004-FR-005 map to T114.
+- FR-006-FR-010 map to T115.
+- FR-011 maps to T116.
+- FR-012-FR-017 map to T117.
+- FR-018-FR-021 map to T118.
+- FR-022-FR-025 map to T119.
+- FR-026-FR-029 map to T120.
+- FR-030-FR-032 map to T121.
+- NFR-001-NFR-008 are present in every task whose behavior touches the
+  corresponding risk boundary.
 
-## Requirements To Work Graph Coverage
+Coverage gaps: none.
 
-| Requirements | Program task | Coverage |
-|---|---|---|
-| SFR-001-SFR-007 | T101 | Epic mapped; child validation blocked |
-| FR-001-FR-005 | T102 | Epic mapped; child validation blocked |
-| FR-006-FR-011 | T103 | Epic mapped; child validation blocked |
-| FR-012-FR-017 | T104 | Epic mapped; child validation blocked |
-| FR-018-FR-021 | T105 | Epic mapped; child validation blocked |
-| FR-022-FR-025 | T106 | Epic mapped; child validation blocked |
-| FR-026-FR-029 | T107 | Epic mapped; child validation blocked |
-| FR-030-FR-032 | T108 | Epic mapped; child validation blocked |
-| NFR-001-NFR-008 | T101-T108 | Cumulative child mapping required |
+## Unmapped Task Check
 
-Program tasks intentionally do not own broad production globs. Each task
-requires a confirmed child graph with exact paths and validation before it can
-be executed. This preserves the existing one-governed-task-at-a-time rule.
+Every task maps to at least one user story and one functional/security or
+non-functional requirement. T109 is additionally justified by D-005 current
+branch recovery. No process-only task can become Accepted without a concrete
+commit, tag, release artifact, or accepted evidence output.
 
-## Current Baseline Findings
+Unmapped tasks: none.
 
-1. Keyring credentials are currently addressed only by reusable account ID,
-   while account creation silently replaces an existing account with the same
-   ID. Endpoint or username replacement can therefore redirect an old
-   credential to a new authenticated endpoint.
-2. Current approval checks terminal presence and exact ID entry but does not
-   prove an independent operator identity; an automated pseudo-terminal can
-   satisfy the same check.
-3. Local attachment import checks path metadata and then opens the path again
-   with an unbounded read, allowing replacement between the check and read.
-4. The current index advances only a newest-message high-water UID and cannot
-   resume historical backfill toward older UIDs.
-5. Current refresh behavior replaces one mailbox scope with another newest
-   window and therefore is not state convergence.
-6. Existing sync does not reconcile old flags, disappearance, or moves and has
-   no tombstone or thread entity.
-7. Initial IMAP sync can request all UIDs before truncating locally; v0.4 must
-   move the bound into the protocol operation.
-8. SMTP success currently ends the send operation before Sent-folder filing.
-9. The current ledger cannot distinguish SMTP uncertainty from Sent APPEND
-   uncertainty and has no append-only operator resolution.
-10. MIME bytes are built inside the SMTP adapter, so an independent Sent writer
-   cannot yet prove byte identity.
-11. OAuth2 is explicitly unavailable and JMAP has reference metadata only, while
-   top-level product wording currently implies broader runtime support.
-12. Workspace package version remains `0.1.0`, no repository tag or GitHub
-   Release exists, and CI currently tests only Ubuntu.
+## Constitution Alignment
 
-These findings are mapped to T101 through T106 and do not require broadening the
-proposed 1.0 scope.
+- Local-first/no GUI: pass.
+- Provider-neutral core and shared CLI/MCP application services: pass.
+- Untrusted mailbox content: pass.
+- Secret-free command, output, fixture, log, and evidence boundary: pass.
+- Verified TLS and no guessed provider semantics: pass.
+- Plan/authorize/apply and independent owner authorization: pass.
+- No automatic uncertain remote-effect replay: pass.
+- Protocol/auth/sync/write TDD and reproducible evidence: pass.
 
-## Terminology Check
+Constitution conflicts: none.
 
-- `SMTP accepted` is consistently distinct from recipient delivery.
-- `Sent filing` means client-managed APPEND or bounded verification under an
-  explicitly approved policy, not guessing a localized folder.
-- `ambiguous` remains possibly applied and non-retryable.
-- `reconciled` or `closed` means an append-only operator assertion, not proof
-  that Kirje observed a remote outcome.
-- `provider preset`, `fixture-tested`, and `live verified` remain distinct.
-- `supported platform` means a published and verified release target, not only
-  a successful cross-compile.
+## Dependency And Ordering Check
 
-No terminology conflict was found across the program artifacts.
+The checkpoint chain is acyclic:
+
+```text
+T109 -> T110 -> T111 -> T112
+  -> T113 -> T114
+  -> T115 -> T116
+  -> T117
+  -> T118 -> T119
+  -> T120
+  -> T121
+```
+
+This ordering preserves the key safety constraints:
+
+- security alpha precedes mailbox production changes;
+- mailbox convergence precedes delivery state expansion;
+- delivery behavior precedes policy freeze;
+- product behavior precedes compatibility freeze;
+- compatibility freeze precedes distribution;
+- distribution precedes hardening and stable publication.
+
+No task is marked parallel. CI jobs and read-only review may run concurrently
+without changing production ownership.
+
+## Scope And Conflict Check
+
+T109 has exact allowed files matching the preserved interrupted diff and its
+evidence/status integration. The task forbids schema, dependency, runtime, CLI,
+MCP, keyring, protocol, and network scope growth.
+
+Future Draft tasks use crate/directory scopes because exact files depend on
+accepted predecessor APIs. Their packets must narrow those scopes before they
+can become Ready. This is deliberate just-in-time packetization, not permission
+for broad edits.
+
+Cross-task write conflicts are represented by serial dependencies.
+
+## Packet Completeness
+
+T109 packet:
+
+- governance inputs: present;
+- exact work unit and dependencies: present;
+- preserved hashes and current branch context: present;
+- allowed and forbidden files: present;
+- evidence-reuse rule: present;
+- focused validation loop: present;
+- review and stop conditions: present;
+- handoff: present;
+- execution status: approved for T109 review on 2026-08-30.
+
+Future packets are intentionally absent because their tasks are Draft and their
+exact context depends on predecessor output. They must be created and analyzed
+before those tasks become Ready.
+
+Blocking packet gaps for the first checkpoint: none after user approval.
+
+## Current Implementation Evidence Check
+
+T109 recovered and reviewed the interrupted T202C2 attempt:
+
+- Turn status: interrupted; workspace diff preserved.
+- RED included unresolved account-transition imports/methods and an exact
+  `UnsupportedCapability` failure for account-create preparation.
+- Original focused registry GREEN: 32 passed.
+- Authorization/schema/no-default command: passed.
+- Package all-features: passed.
+- Rust 1.88 package test: passed.
+- Workspace all-features test: passed.
+- Workspace Clippy and build: passed.
+- Formatting, diff, schema hash, query-bound, privacy, secret, and no-external
+  scans: passed.
+- `cargo deny` licenses/bans/sources: passed.
+- `cargo deny` advisories: failed only on the unchanged yanked
+  `chacha20 0.10.1` transitive dependency.
+
+- Review found and fixed two P1 defects and one P2 defect with discriminating
+  RED/GREEN tests.
+- Fresh focused registry GREEN: 35 passed.
+- Fresh no-default, Rust 1.88, workspace tests, workspace Clippy, and workspace
+  build: passed.
+- Reviewed production commit: `94f3495`.
+
+The final evidence records exact content hashes. Any later change invalidates
+the affected result and requires the corresponding gate to run again.
 
 ## Findings
 
 ### Critical
 
-1. Credential lookup is not bound to account endpoint and identity. T101 must
-   resolve this before any later remote-operation feature merges.
+None.
 
 ### High
 
-1. TTY presence is currently overstated as independent human approval. T101
-   must require external owner signatures for every remote or
-   security-sensitive action; TTY becomes review-only.
-2. Local file import has a metadata-check/open race and unbounded `fs::read`.
-   Explicit CLI JSON stdin already uses a limit-plus-one reader, but file JSON
-   has the same check/open race and `rmcp` stdio currently accepts an unbounded
-   JSON-RPC line. T101 must bind file validation/bytes to one handle and enforce
-   a bound at every file, stream, and MCP transport entry point.
-3. Product protocol/provider claims exceed runtime support. T101 must correct
-   the known overclaim immediately; T104 later adds operation-level support
-   tiers and conformance evidence.
-4. Binary, machine-contract, error, state, and database versions are not one
-   stable contract. T105 owns the compatibility freeze.
-5. CI, branch/tag governance, dependency alerts, target evidence, and release
-   automation are insufficient for a stable binary release. T106 and T107 own
-   the release controls and verification.
+None.
 
 ### Medium
 
-1. Child data models and exact state enums are not yet fixed. This is expected
-   at program level; T101 through T103 cannot become Ready until their child plans
-   define migrations and full transition tables.
-2. Performance thresholds require a measured baseline. Each child spec must set
-   a bounded fixture size and acceptance threshold for the path it changes.
-3. Real-provider breadth depends on externally available dedicated accounts.
-   The spec resolves the minimum with one real provider plus one deterministic
-   standards-based server and forbids inflated claims.
+M-001: The dependency policy gate fails on yanked `chacha20 0.10.1` through
+`io-imap`. `Cargo.lock` is unchanged by T202C2, so this is not introduced by
+the preserved diff. T111 owns removal before Security Alpha acceptance.
 
 ### Low
 
-1. The exact artifact attestation mechanism remains a v0.8 child-plan decision.
-2. Release slice numbers may skip a public prerelease if a slice contains only
-   contract work; repository semver and release notes must still identify the
-   accepted slice consistently.
+None.
 
-## Security Review
+## Residual Risks
 
-- Sent filing introduces a second remote effect but retains one immutable plan,
-  durable claims, separate certainty, and no automatic resend.
-- Operator close is a new authority and requires the same external owner
-  signature as remote approval; it remains append-only and performs no remote
-  write.
-- Policy cannot substitute for approval and is checked again at apply.
-- Policy, account identity, approval-trust, and owner-key changes require owner
-  authorization and invalidate incompatible prior approvals.
-- Legacy unbound credentials are quarantined and cannot be silently attached to
-  current account endpoints.
-- Release automation requires least privilege, tag identity, artifact
-  verification, and no local state.
+- The reviewed account-create checkpoint still requires explicit user
+  acceptance before T110 starts.
+- Cross-platform support claims remain Draft until T119 produces platform
+  evidence.
+- Real-provider checks depend on dedicated credentials and may produce honest
+  sanitized blockers.
+- Future task file scopes require narrowing during just-in-time packetization.
 
-No new approval path is exposed to MCP.
+## Gate Result
 
-## Execution Gate
+`T109_REVIEW_COMPLETE_AWAITING_ACCEPTANCE`
 
-Status: APPROVED_FOR_T101_CHILD_PLANNING
-
-Required next steps:
-
-1. Preserve the confirmed `spec.md`, `plan.md`, and `tasks.md` meaning.
-2. Complete `008-security-baseline` planning, analysis, packets, and evidence
-   gates before production code.
-3. Execute only T101 remediation until its findings are accepted; then create
-   `009-mailbox-convergence` artifacts for v0.4.
+The user approved `plan.md` and `tasks.md` on 2026-08-30. T109 review and fresh
+validation are complete at `94f3495`; no new production scope starts before
+the user accepts this checkpoint.

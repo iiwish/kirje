@@ -5,473 +5,761 @@
 - Feature ID: `007-stable-v1-program`
 - Status: Confirmed
 - Source: `spec.md`, `plan.md`
-- Updated: 2026-08-27
+- Updated: 2026-08-30
+- Target release: `v1.0.0`
 
 ## Scheduling Rules
 
-- T101 through T108 are sequential release epics.
-- Research and read-only review may run in parallel when file scopes do not
-  conflict. Production implementation cannot merge out of sequence.
-- Each epic must create a child feature task graph with executor-sized tasks,
-  exact allowed files, RED/GREEN commands, packets, and evidence before code
-  changes begin.
-- A release epic becomes Accepted only after its child tasks, review, local
-  gates, PR CI, merge, and post-merge main CI are complete.
+- T101 through T108 are sequential user-visible checkpoints.
+- Each implementation task ends in a reviewed commit. Each checkpoint ends in
+  a PR/merge decision and, except T109, a prerelease or stable tag.
+- Focused RED/GREEN and changed-crate gates run per task. Full workspace,
+  dependency, migration, CI, and checkpoint-specific gates run once per tag.
+- Future packets are generated just in time after their predecessor is
+  Accepted. Only T109 is packetized in this governance round.
+- Existing accepted T201-T202C1S commits and evidence remain immutable.
+- The preserved T202C2 implementation is not modified during governance. After
+  plan approval, T109 moves directly to review because implementation and
+  test evidence already exist.
+- Production tasks are serial when their state, migration, or public contracts
+  conflict. Read-only review and CI jobs may run concurrently.
+- A failed gate remains visible and gets a named remediation owner. It is not
+  converted into a passing checkpoint claim.
 
-## T101: Govern And Deliver v0.3.1 Security Baseline
+## Checkpoint Summary
 
-Status: Running
+| Checkpoint | Tasks | Output |
+| --- | --- | --- |
+| Current branch | T109 | reviewed checkpoint commit and PR/merge decision |
+| Security Alpha | T110-T112 | `v1.0.0-alpha.1` |
+| Mailbox Alpha | T113-T114 | `v1.0.0-alpha.2` |
+| Delivery Beta | T115-T116 | `v1.0.0-beta.1` |
+| Policy Beta | T117 | `v1.0.0-beta.2` |
+| Contract RC | T118-T119 | `v1.0.0-rc.1` |
+| Hardening RC | T120 | `v1.0.0-rc.2` |
+| Stable | T121 | `v1.0.0` |
+
+## T109: Recover And Review The Current Account-Create Checkpoint
+
+Status: Needs_Review
+Implementation state: reviewed production commit `94f3495`; user acceptance pending
 Priority: P0
-Depends on: v0.3 accepted baseline
-Blocks: T102-T108
-Story / Requirement: SFR-001-SFR-007, NFR-001-NFR-008
+Depends on: T202C1S Accepted at commit `8eceaff`
+Blocks: T110
+Story / Requirement: US-001, US-003; SFR-001-SFR-003; NFR-001-NFR-003,
+NFR-006-NFR-008
 Parallel: No
-Conflicts with: Any concurrent account, credential, approval, local-import, or
-remote-write production change
+Conflicts with: Any concurrent authority store or account-registry edit
 
 Goal:
-Eliminate credential redirection, distinguish terminal presence from strong
-owner authorization, make local imports race-safe and bounded, and correct the
-documented local threat boundary before adding new remote behavior.
+Preserve the interrupted T202C2 account-create implementation, integrate its
+real RED/GREEN evidence, perform adversarial spec and engineering review, close
+only review findings in the original scope, and produce one checkpoint commit.
 
 Allowed files:
-- `.ai-platform/specs/008-security-baseline/**`
-- `.ai-platform/docs/tasks.md`
-- Production and documentation paths must be narrowed by the confirmed child
-  task graph before implementation.
+- `crates/kirje-store/src/lib.rs`
+- `crates/kirje-store/src/authority.rs`
+- `crates/kirje-store/tests/authority_registry.rs`
+- `crates/kirje-store/tests/fixtures/authority/registry/account_create/**`
+- `.ai-platform/evidence/T202C2/**`
+- `.ai-platform/specs/008-security-baseline/tasks.md` for reviewed status only
 
 Test targets:
-- Credential identity/fingerprint migration, account replacement rejection,
-  legacy quarantine, endpoint-change invalidation, trusted bootstrap, signed
-  remote/control-plane authorization, nonce/expiry/replay rejection, MCP
-  exclusion, same-handle bounded file import, bounded stdin, capability/response
-  bounds, and corrected product/security documentation.
+- Account-create challenge, prepare, config-committed, finalize, abort,
+  recovery, concurrency, corruption, restart, and bounded-history tests.
+- Exact schema, predecessor fixture, privacy, query-count, and query-plan gates.
 
 Deliverables:
-- Confirmed `008-security-baseline` artifacts.
-- Accepted child implementation tasks and v0.3.1 evidence.
-- Merged security baseline commit and green post-merge CI.
+- Reviewed account-create diff.
+- Complete T202C2 evidence summary and test results.
+- One production commit plus one evidence/status commit, or one combined
+  checkpoint commit when review makes no production change.
+- Explicit record of the unchanged baseline `cargo deny` finding.
 
 Acceptance criteria:
-- SFR-001 through SFR-007 and mapped NFRs have passing evidence.
-- Existing credentials cannot be redirected by account ID reuse.
-- TTY cannot create remote or security-sensitive authorization.
-- Path replacement or oversized input cannot bypass import bounds.
-- No prerelease retains the known OAuth2/JMAP/Gmail/Outlook runtime overclaim.
+- Exact source/test/fixture hashes match the interrupted attempt unless review
+  records and validates a scoped fix.
+- The account-create lifecycle is crash-safe, idempotent, bounded, private, and
+  schema-preserving.
+- No new account-create scope, dependency, schema, runtime, CLI, MCP, keyring,
+  protocol, or network behavior is introduced.
+- Review has no unresolved Critical or High finding.
 
 Definition of Done:
-- Child artifacts, TDD, security review, full gates, PR, CI, merge, and release
-  report are complete.
+- Attempt evidence is integrated.
+- Focused verification is fresh; unchanged-hash full-suite evidence is valid.
+- Review findings and the yanked dependency baseline are explicit.
+- Diff is committed and ready for checkpoint PR/merge acceptance.
 
 Validation commands:
-- Program artifact validator for T101.
-- Commands confirmed in the child feature task graph.
-- Full workspace gates from `plan.md`.
+```bash
+cargo fmt --all --check
+cargo test -p kirje-store --test authority_registry --all-features --locked
+cargo clippy -p kirje-store --all-targets --all-features --locked -- -D warnings
+git diff --check
+```
 
 TDD plan:
-- RED: Reproduce endpoint credential reuse, account replacement, automated TTY
-  authorization, signature replay/expiry, privileged config bypass,
-  symlink/path replacement, oversized file/stream handling, and an unbounded
-  MCP stdio JSON-RPC line.
-- GREEN: Implement bound credential identities, explicit account updates,
-  owner-signed authorization, bounded imports, and honest capability claims.
-- REFACTOR: Consolidate only after secret exclusion and migration tests pass.
+- RED: Reuse the recorded missing-surface and unsupported-capability failures
+  from T202C2-A001 only when exact content hashes match.
+- GREEN: Reuse recorded focused/package/workspace/MSRV results only under the
+  same hash rule.
+- REFACTOR: Make no refactor unless review identifies a concrete defect; any
+  fix receives a new focused RED.
 
 Packet path:
-- `.ai-platform/specs/008-security-baseline/packets/`
+- `.ai-platform/specs/007-stable-v1-program/packets/T109.yaml`
 
 Evidence required:
-- Child task evidence, threat review, migration results, PR/CI/merge references,
-  and a credential/content-free security summary.
+- `.ai-platform/evidence/T202C2/attempts/T202C2-A001.md`
+- `.ai-platform/evidence/T202C2/summary.md`
+- `.ai-platform/evidence/T202C2/test-results.md`
+- Changed-file hashes, review findings, validation results, and residual risk.
 
-## T102: Govern And Deliver v0.4 Mailbox Convergence
+## T110: Complete Authority Lifecycles
 
 Status: Draft
 Priority: P0
-Depends on: T101 Accepted
-Blocks: T103-T108
-Story / Requirement: US-001, US-002, FR-001-FR-005, NFR-001-NFR-008
+Depends on: T109 Accepted
+Blocks: T111
+Story / Requirement: US-001, US-003; SFR-001-SFR-003; NFR-001-NFR-003,
+NFR-006-NFR-008
 Parallel: No
-Conflicts with: Any concurrent index, sync, message-reference, or thread-model
-production change
+Conflicts with: Authority schema, registry, authorization, claim, event, and
+restart validation work
 
 Goal:
-Deliver explicit resumable history backfill, scoped state reconciliation,
-coverage semantics, and deterministic thread queries as v0.4.
+Complete account update/remove, credential set/delete/cleanup, registry-bound
+remote challenges, effect claims, owner rotation/recovery, audit export, and
+their fail-closed restart contracts.
 
 Allowed files:
-- `.ai-platform/specs/009-mailbox-convergence/**`
-- `.ai-platform/docs/tasks.md`
-- Production and documentation paths must be narrowed by the confirmed child
-  task graph before implementation.
+- `crates/kirje-core/src/account.rs`
+- `crates/kirje-core/src/authorization.rs`
+- `crates/kirje-core/src/operation.rs`
+- `crates/kirje-core/tests/**`
+- `crates/kirje-store/src/authority.rs`
+- `crates/kirje-store/src/authority/schema_v1.sql`
+- `crates/kirje-store/tests/authority_*.rs`
+- `crates/kirje-store/tests/fixtures/authority/**`
 
 Test targets:
-- Child-spec requirement checklist and analysis.
-- Store migration, cursor interruption, reconciliation, thread graph, CLI/MCP
-  contract, and controlled read-only mailbox tests.
+- T202C3-T202E acceptance matrices in `008-security-baseline/tasks.md`.
 
 Deliverables:
-- Confirmed `009-mailbox-convergence` artifacts.
-- Accepted child implementation tasks and v0.4 evidence.
-- Merged v0.4 release commit and green post-merge CI.
+- One reviewed authority-lifecycle commit and evidence summary.
 
 Acceptance criteria:
-- FR-001 through FR-005 and mapped NFRs have passing evidence.
-- No false deletion is inferred outside reconciled coverage.
-- Existing v0.3 references and ledgers remain valid or migrate explicitly.
+- Remaining authority lifecycles are exact, immutable, crash-safe, bounded, and
+  free of generic signing, credential, or remote-effect surfaces.
 
 Definition of Done:
-- Child artifacts, TDD, reviews, full gates, PR, CI, merge, and release report
-  are complete.
+- Focused RED/GREEN, changed-crate gates, review, evidence, and commit pass.
 
 Validation commands:
-- Program artifact validator for T102.
-- Commands confirmed in the child feature task graph.
-- Full workspace gates from `plan.md`.
+- `cargo test -p kirje-core --all-features --locked`
+- `cargo test -p kirje-store --all-features --locked`
+- `cargo clippy -p kirje-store --all-targets --all-features --locked -- -D warnings`
 
 TDD plan:
-- RED: Child tasks prove interruption, remote drift, thread anomalies, and
-  contract gaps fail on the v0.3 baseline.
-- GREEN: Implement the minimum provider-neutral convergence services.
-- REFACTOR: Consolidate only after all migration and contract tests pass.
+- RED: Add exact lifecycle, crash, corruption, and capability negatives.
+- GREEN: Implement the minimum authority behavior.
+- REFACTOR: Consolidate only after lifecycle matrices are green.
 
 Packet path:
-- `.ai-platform/specs/009-mailbox-convergence/packets/`
+- `.ai-platform/specs/007-stable-v1-program/packets/T110.yaml`
 
 Evidence required:
-- Child task evidence, aggregate release evidence, PR/CI/merge references, and
-  sanitized controlled-mailbox results.
+- RED/GREEN commands, state/fault matrix, hashes, review, and residual risk.
 
-## T103: Govern And Deliver v0.5 Delivery Reconciliation
+## T111: Integrate Safe Local State And Runtime Authorization
 
 Status: Draft
 Priority: P0
-Depends on: T102 Accepted
-Blocks: T104-T108
-Story / Requirement: US-003, FR-006-FR-011, NFR-001-NFR-008
+Depends on: T110 Accepted
+Blocks: T112
+Story / Requirement: US-001, US-003, US-005; SFR-001-SFR-006;
+NFR-001-NFR-008
 Parallel: No
-Conflicts with: Any concurrent ledger, send-state, SMTP, or IMAP APPEND change
+Conflicts with: Config, credential, ledger, runtime authorization, local input,
+protocol capability, and public error changes
 
 Goal:
-Deliver separately recorded SMTP acceptance and Sent filing plus append-only,
-CLI-only operator reconciliation without automatic resend.
+Deliver bounded no-follow local I/O, config v2 and credential binding, ledger v3
+migration, shared authorization and crash recovery, and bounded protocol
+responses through one validated account snapshot.
 
 Allowed files:
-- `.ai-platform/specs/010-delivery-reconciliation/**`
-- `.ai-platform/docs/tasks.md`
-- Production and documentation paths must be narrowed by the confirmed child
-  task graph before implementation.
+- `Cargo.toml`
+- `Cargo.lock`
+- `crates/kirje-local-io/**`
+- `crates/kirje-core/**`
+- `crates/kirje-store/**`
+- `crates/kirje-runtime/**`
+- `crates/kirje-protocol/**`
 
 Test targets:
-- Composite send state, ledger migration, SMTP/IMAP failure windows, no-replay
-  crash recovery, CLI-only reconciliation, MCP exclusion, and live self-send.
+- T203-T206 and T209 acceptance coverage in `008-security-baseline/tasks.md`.
 
 Deliverables:
-- Confirmed `010-delivery-reconciliation` artifacts.
-- Accepted child implementation tasks and v0.5 evidence.
-- Merged v0.5 release commit and green post-merge CI.
+- Reviewed local-state/runtime integration commits.
+- Removal of the yanked `chacha20 0.10.1` dependency or an upstream-safe
+  dependency graph that makes `cargo deny check` green.
 
 Acceptance criteria:
-- FR-006 through FR-011 and mapped NFRs have passing evidence.
-- No uncertain SMTP invocation can be replayed automatically.
-- Sent destinations are provider-declared or explicitly approved.
+- Legacy credentials cannot be redirected.
+- File/stdin and protocol inputs are bounded before allocation or effect.
+- Pending legacy operations cannot invoke remote work without new authority.
+- `cargo deny check` passes.
 
 Definition of Done:
-- Child artifacts, TDD, reviews, full gates, PR, CI, merge, and release report
-  are complete.
+- Focused RED/GREEN, migrations, no-default/MSRV where relevant, dependency
+  gate, review, evidence, and commits pass.
 
 Validation commands:
-- Program artifact validator for T103.
-- Commands confirmed in the child feature task graph.
-- Full workspace gates from `plan.md`.
+- `cargo test -p kirje-runtime --all-features --locked`
+- `cargo test -p kirje-store --all-features --locked`
+- `cargo test -p kirje-protocol --all-features --locked`
+- `cargo deny check`
 
 TDD plan:
-- RED: Child tasks model each SMTP and filing interruption boundary.
-- GREEN: Extend the existing ledger and shared runtime services minimally.
-- REFACTOR: Preserve terminal-state and migration invariants while simplifying.
+- RED: Reproduce redirect, path replacement, over-limit, migration, and crash
+  boundaries.
+- GREEN: Implement the smallest shared services and adapters.
+- REFACTOR: Consolidate after migration and authorization tests pass.
 
 Packet path:
-- `.ai-platform/specs/010-delivery-reconciliation/packets/`
+- `.ai-platform/specs/007-stable-v1-program/packets/T111.yaml`
 
 Evidence required:
-- Child evidence, state-transition matrix, sanitized send results, and
-  PR/CI/merge references.
+- Migration matrix, dependency result, RED/GREEN logs, review, and residual risk.
 
-## T104: Govern And Deliver v0.6 Policy And Provider Compatibility
+## T112: Deliver Security Alpha
 
 Status: Draft
 Priority: P0
-Depends on: T103 Accepted
-Blocks: T105-T108
-Story / Requirement: US-004, FR-012-FR-017, NFR-001-NFR-008
+Depends on: T111 Accepted
+Blocks: T113
+Story / Requirement: US-001, US-003, US-005; SFR-001-SFR-007;
+NFR-001-NFR-008
 Parallel: No
-Conflicts with: Concurrent account-config, authorization, provider-registry, or
-capability-reporting changes
+Conflicts with: CLI/MCP schemas, capability reporting, security docs, CI, and
+release metadata
 
 Goal:
-Enforce versioned local account policy and publish honest provider compatibility
-tiers without expanding the 1.0 protocol/authentication boundary.
+Expose owner/account/credential workflows through CLI, preserve the MCP deny
+surface, align capability and security documentation, run complete gates, and
+publish `v1.0.0-alpha.1`.
 
 Allowed files:
-- `.ai-platform/specs/011-policy-provider-compatibility/**`
-- `.ai-platform/docs/tasks.md`
-- Production and documentation paths must be narrowed by the confirmed child
-  task graph before implementation.
+- `crates/kirje-cli/**`
+- `crates/kirje-mcp/**`
+- `crates/kirje-runtime/**`
+- `skills/kirje/**`
+- `docs/**`
+- `README.md`
+- `.github/workflows/**`
+- `.ai-platform/docs/**`
+- `.ai-platform/evidence/**`
 
 Test targets:
-- Policy canonicalization, migration, plan/apply races, recipient and mailbox
-  scopes, capability reasons, fixtures, secret scans, and provider smoke tests.
+- T207-T212 acceptance coverage and every `SFR-*`.
 
 Deliverables:
-- Confirmed `011-policy-provider-compatibility` artifacts.
-- Accepted child implementation tasks and v0.6 evidence.
-- Merged v0.6 release commit and green post-merge CI.
+- Usable CLI workflow, exact MCP exclusions, canonical docs, checkpoint
+  evidence, PR/merge, and `v1.0.0-alpha.1`.
 
 Acceptance criteria:
-- FR-012 through FR-017 and mapped NFRs have passing evidence.
-- Legacy plans cannot bypass newly introduced policy.
-- OAuth2/JMAP limitations and provider tiers are consistent everywhere.
+- Security alpha success path works without exposing secrets.
+- Full local gates, CI, controlled account workflow, and dependency policy pass.
 
 Definition of Done:
-- Child artifacts, TDD, reviews, full gates, PR, CI, merge, and release report
-  are complete.
+- Checkpoint review is accepted and the tag matches the published evidence.
 
 Validation commands:
-- Program artifact validator for T104.
-- Commands confirmed in the child feature task graph.
-- Full workspace gates from `plan.md`.
+- Full tagged-checkpoint gate from `plan.md`.
+- Controlled secret-free account workflow.
 
 TDD plan:
-- RED: Child tasks prove missing policy, races, and claim inflation.
-- GREEN: Add canonical policy and shared enforcement services.
-- REFACTOR: Keep provider quirks and policy decisions out of CLI/MCP handlers.
+- RED: CLI/MCP contract and capability snapshots expose missing or unsafe paths.
+- GREEN: Wire shared services and exact deny surface.
+- REFACTOR: Remove duplicate adapter logic only after parity tests pass.
 
 Packet path:
-- `.ai-platform/specs/011-policy-provider-compatibility/packets/`
+- `.ai-platform/specs/007-stable-v1-program/packets/T112.yaml`
 
 Evidence required:
-- Child evidence, policy matrix, compatibility report, secret scan, and
-  PR/CI/merge references.
+- CLI/MCP snapshots, full gates, CI, tag, and sanitized workflow results.
 
-## T105: Govern And Deliver v0.7 Stable Contracts
+## T113: Deliver Mailbox Convergence Core
 
 Status: Draft
 Priority: P0
-Depends on: T104 Accepted
-Blocks: T106-T108
-Story / Requirement: US-005, FR-018-FR-021, NFR-001-NFR-008
+Depends on: T112 Accepted
+Blocks: T114
+Story / Requirement: US-001; FR-001-FR-003; NFR-001-NFR-008
 Parallel: No
-Conflicts with: Concurrent public schema, error, state, or migration changes
+Conflicts with: Index schema, sync cursor, message reference, and IMAP query work
 
 Goal:
-Freeze and test the external and persisted compatibility contract that 1.x will
-support.
+Implement bounded resumable backfill, scoped reconciliation, coverage state,
+tombstones, and transactional UIDVALIDITY rebuild.
 
 Allowed files:
-- `.ai-platform/specs/012-stable-contracts/**`
-- `.ai-platform/docs/tasks.md`
-- Production, golden-contract, and documentation paths must be narrowed by the
-  confirmed child task graph before implementation.
+- `crates/kirje-core/**`
+- `crates/kirje-store/**`
+- `crates/kirje-runtime/**`
+- `crates/kirje-protocol/**`
 
 Test targets:
-- CLI/MCP/schema/error snapshots, capability reasons, database migrations,
-  backup/restore, downgrade rejection, and deprecation checks.
+- Interruption, remote drift, missing coverage, UIDVALIDITY, migration, and
+  bounded UID query fixtures.
 
 Deliverables:
-- Confirmed `012-stable-contracts` artifacts.
-- Accepted child implementation tasks and v0.7 evidence.
-- Merged v0.7 release commit and green post-merge CI.
+- Reviewed convergence core commit and evidence.
 
 Acceptance criteria:
-- FR-018 through FR-021 and mapped NFRs have passing evidence.
+- Sync resumes without skipped coverage, false deletion, duplicate rows, or
+  unbounded remote UID materialization.
+
+Definition of Done:
+- Focused RED/GREEN, migration, changed-crate gates, review, and commit pass.
+
+Validation commands:
+- Focused core/store/runtime/protocol sync suites.
+
+TDD plan:
+- RED: Reproduce interruption, drift, stale reference, and bound failures.
+- GREEN: Implement transactional convergence services.
+- REFACTOR: Consolidate after migration and interruption tests pass.
+
+Packet path:
+- `.ai-platform/specs/007-stable-v1-program/packets/T113.yaml`
+
+Evidence required:
+- Coverage/migration matrix, RED/GREEN logs, review, and residual risk.
+
+## T114: Deliver Thread Queries And Mailbox Alpha
+
+Status: Draft
+Priority: P0
+Depends on: T113 Accepted
+Blocks: T115
+Story / Requirement: US-001, US-002; FR-004-FR-005; NFR-001-NFR-008
+Parallel: No
+Conflicts with: Thread schema, CLI/MCP sync/query contracts, and release metadata
+
+Goal:
+Deliver deterministic header-based thread graphs and bounded CLI/MCP
+convergence, coverage, and thread services; publish `v1.0.0-alpha.2`.
+
+Allowed files:
+- `crates/kirje-core/**`
+- `crates/kirje-store/**`
+- `crates/kirje-runtime/**`
+- `crates/kirje-cli/**`
+- `crates/kirje-mcp/**`
+- `docs/**`
+- `.ai-platform/evidence/**`
+
+Test targets:
+- Cycle, duplicate, missing-parent, provisional-thread, parity, and controlled
+  read-only mailbox scenarios.
+
+Deliverables:
+- Thread/query commits, checkpoint evidence, PR/merge, and alpha.2 tag.
+
+Acceptance criteria:
+- Thread identity is deterministic and never inferred authoritatively from
+  subject alone; outputs are bounded and parity-tested.
+
+Definition of Done:
+- Full checkpoint gate, CI, live read-only validation, review, and tag pass.
+
+Validation commands:
+- Full tagged-checkpoint gate plus controlled read-only mailbox scripts.
+
+TDD plan:
+- RED: Header anomaly and adapter parity fixtures fail.
+- GREEN: Implement thread and adapter services.
+- REFACTOR: Optimize only with unchanged deterministic fixtures.
+
+Packet path:
+- `.ai-platform/specs/007-stable-v1-program/packets/T114.yaml`
+
+Evidence required:
+- Thread fixtures, parity, full gates, CI, tag, and live summary.
+
+## T115: Deliver Reconciled Send Core
+
+Status: Draft
+Priority: P0
+Depends on: T114 Accepted
+Blocks: T116
+Story / Requirement: US-003; FR-006-FR-010; NFR-001-NFR-008
+Parallel: No
+Conflicts with: MIME, ledger, SMTP, IMAP APPEND, and reconciliation state work
+
+Goal:
+Persist canonical MIME, SMTP progress, Sent filing, certainty, claims, and
+append-only owner reconciliation without automatic uncertain replay.
+
+Allowed files:
+- `crates/kirje-core/**`
+- `crates/kirje-store/**`
+- `crates/kirje-runtime/**`
+- `crates/kirje-protocol/**`
+
+Test targets:
+- MIME golden, ledger migration, SMTP/APPEND crash matrix, filing destination,
+  and no-replay reconciliation.
+
+Deliverables:
+- Reviewed delivery-core commits and evidence.
+
+Acceptance criteria:
+- SMTP and filing outcomes are independently inspectable and no uncertain
+  remote effect is automatically repeated.
+
+Definition of Done:
+- Focused RED/GREEN, migration/fault gates, review, and commits pass.
+
+Validation commands:
+- Focused core/store/runtime/protocol delivery suites.
+
+TDD plan:
+- RED: Reproduce every remote-effect interruption boundary.
+- GREEN: Extend the shared ledger and runtime minimally.
+- REFACTOR: Preserve immutable MIME and certainty invariants.
+
+Packet path:
+- `.ai-platform/specs/007-stable-v1-program/packets/T115.yaml`
+
+Evidence required:
+- State/fault matrix, migration, RED/GREEN logs, review, and residual risk.
+
+## T116: Deliver Delivery Beta
+
+Status: Draft
+Priority: P0
+Depends on: T115 Accepted
+Blocks: T117
+Story / Requirement: US-003; FR-006-FR-011; NFR-001-NFR-008
+Parallel: No
+Conflicts with: CLI/MCP send/reconciliation schemas and release metadata
+
+Goal:
+Expose bounded status/apply/reconciliation workflows, keep owner reconciliation
+CLI-only, complete controlled self-send evidence, and publish
+`v1.0.0-beta.1`.
+
+Allowed files:
+- `crates/kirje-cli/**`
+- `crates/kirje-mcp/**`
+- `crates/kirje-runtime/**`
+- `scripts/**`
+- `docs/**`
+- `.ai-platform/evidence/**`
+
+Test targets:
+- CLI/MCP parity and deny surface, live self-send, Sent filing, and ambiguous
+  operator workflow.
+
+Deliverables:
+- Adapter commits, checkpoint evidence, PR/merge, and beta.1 tag.
+
+Acceptance criteria:
+- MCP cannot approve, close, or retry uncertain effects; live evidence does not
+  overclaim recipient delivery.
+
+Definition of Done:
+- Full checkpoint gate, CI, controlled send, review, and tag pass.
+
+Validation commands:
+- Full tagged-checkpoint gate plus controlled send scripts.
+
+TDD plan:
+- RED: Contract tests expose missing parity or unsafe owner operations.
+- GREEN: Wire shared runtime behavior.
+- REFACTOR: Keep command handlers free of business state logic.
+
+Packet path:
+- `.ai-platform/specs/007-stable-v1-program/packets/T116.yaml`
+
+Evidence required:
+- Contract snapshots, full gates, CI, tag, and sanitized send results.
+
+## T117: Deliver Policy And Provider Beta
+
+Status: Draft
+Priority: P0
+Depends on: T116 Accepted
+Blocks: T118
+Story / Requirement: US-004; FR-012-FR-017; NFR-001-NFR-008
+Parallel: No
+Conflicts with: Account policy, planning/apply, provider registry, capability,
+and compatibility documentation
+
+Goal:
+Enforce canonical account policy at plan and invocation, publish honest provider
+tiers, complete sanitized conformance, and publish `v1.0.0-beta.2`.
+
+Allowed files:
+- `crates/kirje-core/**`
+- `crates/kirje-runtime/**`
+- `crates/kirje-protocol/**`
+- `crates/kirje-cli/**`
+- `crates/kirje-mcp/**`
+- `registry/**`
+- `docs/**`
+- `.ai-platform/evidence/**`
+
+Test targets:
+- Policy canonicalization/races/scopes, provider tiers, capability reasons,
+  secret scan, and sanitized conformance.
+
+Deliverables:
+- Policy/provider commits, checkpoint evidence, PR/merge, and beta.2 tag.
+
+Acceptance criteria:
+- Disallowed work fails before network mutation; provider claims match evidence.
+
+Definition of Done:
+- Full checkpoint gate, CI, conformance, review, and tag pass.
+
+Validation commands:
+- Full tagged-checkpoint gate plus policy and conformance suites.
+
+TDD plan:
+- RED: Reproduce missing policy, apply races, and inflated support claims.
+- GREEN: Add canonical policy and capability mapping.
+- REFACTOR: Keep policy and provider decisions outside adapters.
+
+Packet path:
+- `.ai-platform/specs/007-stable-v1-program/packets/T117.yaml`
+
+Evidence required:
+- Policy matrix, provider report, full gates, CI, tag, and residual risk.
+
+## T118: Freeze Stable Contracts And Migrations
+
+Status: Draft
+Priority: P0
+Depends on: T117 Accepted
+Blocks: T119
+Story / Requirement: US-005; FR-018-FR-021; NFR-001-NFR-008
+Parallel: No
+Conflicts with: Public schemas, errors, operation states, database migrations,
+version metadata, and compatibility documentation
+
+Goal:
+Freeze the supported 1.x machine and persistence contract with golden fixtures,
+complete migrations, backup/restore, downgrade rejection, and capability
+reason tests.
+
+Allowed files:
+- `crates/**`
+- `docs/**`
+- `README.md`
+- `.ai-platform/evidence/**`
+
+Test targets:
+- CLI/MCP/schema/error goldens and every supported database migration path.
+
+Deliverables:
+- Reviewed contract/migration commits and compatibility matrix.
+
+Acceptance criteria:
 - One documented version matrix matches runtime behavior and fixtures.
 
 Definition of Done:
-- Child artifacts, TDD, reviews, full gates, PR, CI, merge, and release report
-  are complete.
+- Golden, migration, backup/restore, full local gates, review, and commits pass.
 
 Validation commands:
-- Program artifact validator for T105.
-- Commands confirmed in the child feature task graph.
-- Full workspace gates from `plan.md`.
+- Full tagged-checkpoint gate plus golden and migration suites.
 
 TDD plan:
-- RED: Golden fixtures detect current unversioned or inconsistent behavior.
-- GREEN: Add the minimum version and migration guarantees.
-- REFACTOR: Remove duplicate interface metadata after snapshots pass.
+- RED: Golden fixtures detect unversioned or inconsistent behavior.
+- GREEN: Add minimum stable versions and migration guarantees.
+- REFACTOR: Remove duplicate metadata after goldens pass.
 
 Packet path:
-- `.ai-platform/specs/012-stable-contracts/packets/`
+- `.ai-platform/specs/007-stable-v1-program/packets/T118.yaml`
 
 Evidence required:
-- Child evidence, compatibility matrix, migration receipts, and PR/CI/merge
-  references.
+- Compatibility matrix, migrations, backup/restore, review, and residual risk.
 
-## T106: Govern And Deliver v0.8 Distribution
+## T119: Publish Verifiable Release Candidate Artifacts
 
 Status: Draft
 Priority: P0
-Depends on: T105 Accepted
-Blocks: T107-T108
-Story / Requirement: US-006, FR-022-FR-025, NFR-001-NFR-008
+Depends on: T118 Accepted
+Blocks: T120
+Story / Requirement: US-006; FR-022-FR-025; NFR-001-NFR-008
 Parallel: No
-Conflicts with: Concurrent version, packaging, CI-permission, or release changes
+Conflicts with: Packaging, release CI, version metadata, permissions, and
+platform support claims
 
 Goal:
-Ship installable, verifiable Kirje artifacts for every supported target without
-weakening keyring or filesystem safety.
+Build, verify, and publish preview artifacts with checksums, SBOM, provenance,
+install/doctor checks, honest support tiers, and tag `v1.0.0-rc.1`.
 
 Allowed files:
-- `.ai-platform/specs/013-distribution/**`
-- `.ai-platform/docs/tasks.md`
-- Workflow, packaging, platform-test, and documentation paths must be narrowed
-  by the confirmed child task graph before implementation.
+- `.github/workflows/**`
+- `scripts/**`
+- `Cargo.toml`
+- `Cargo.lock`
+- `crates/kirje-cli/**`
+- `docs/**`
+- `README.md`
+- `.ai-platform/evidence/**`
 
 Test targets:
-- Target builds/tests, archive contents, version identity, checksums, SBOM,
-  provenance, install, doctor, keyring, paths, locking, and permissions.
+- Target builds, archives, version identity, checksums, SBOM, provenance,
+  install, keyring, permissions, locking, paths, and upgrades.
 
 Deliverables:
-- Confirmed `013-distribution` artifacts.
-- Accepted child implementation tasks and v0.8 evidence.
-- Merged v0.8 release commit and green post-merge CI.
+- Target artifacts, verifier results, checkpoint evidence, and rc.1 tag.
 
 Acceptance criteria:
-- FR-022 through FR-025 and mapped NFRs have passing evidence.
-- Release artifacts contain no local account state or secrets.
+- Published assets match the tag and contain no local account state or secrets.
 
 Definition of Done:
-- Child artifacts, TDD, reviews, full gates, PR, CI, merge, and release report
-  are complete.
+- Target CI, artifact verification, review, PR/merge, and tag pass.
 
 Validation commands:
-- Program artifact validator for T106.
-- Commands confirmed in the child feature task graph.
-- Full workspace and target release gates from `plan.md`.
+- Full tagged-checkpoint gate plus target artifact verification.
 
 TDD plan:
-- RED: Packaging verification fails on absent/mismatched platform artifacts.
-- GREEN: Add least-privilege build and verification automation.
-- REFACTOR: Deduplicate release metadata only after target verification passes.
+- RED: Verifier rejects missing or mismatched artifacts.
+- GREEN: Add least-privilege build and publication workflow.
+- REFACTOR: Deduplicate metadata only after target verification passes.
 
 Packet path:
-- `.ai-platform/specs/013-distribution/packets/`
+- `.ai-platform/specs/007-stable-v1-program/packets/T119.yaml`
 
 Evidence required:
-- Child evidence, artifact manifests, verifier output, and PR/CI/merge references.
+- Artifact manifest, checksums, SBOM, provenance, CI, tag, and support tiers.
 
-## T107: Govern And Deliver v0.9 Release Candidate
+## T120: Harden And Accept The Release Candidate
 
 Status: Draft
 Priority: P0
-Depends on: T106 Accepted
-Blocks: T108
-Story / Requirement: US-001-US-006, FR-026-FR-029, NFR-001-NFR-008
+Depends on: T119 Accepted
+Blocks: T121
+Story / Requirement: US-001-US-006; FR-026-FR-029; NFR-001-NFR-008
 Parallel: No
 Conflicts with: Unreviewed feature development or release workflow changes
 
 Goal:
-Harden the complete 1.0 candidate under parser, state, crash, provider, security,
-migration, and operational stress without adding new product scope.
+Complete fuzz, property, fault, migration, provider, security, privacy,
+performance, documentation, and disaster-recovery acceptance; publish
+`v1.0.0-rc.2`.
 
 Allowed files:
-- `.ai-platform/specs/014-release-candidate/**`
-- `.ai-platform/docs/tasks.md`
-- Test, fixture, review, documentation, and narrowly justified bug-fix paths
-  must be declared by the confirmed child task graph.
+- `crates/**`
+- `fuzz/**`
+- `scripts/**`
+- `tests/**`
+- `docs/**`
+- `.github/workflows/**`
+- `.ai-platform/evidence/**`
 
 Test targets:
-- Fuzz/property suites, fault injection, long-run tests, threat review,
-  migration rehearsal, local standards server, real provider, and release dry
-  run.
+- Adversarial parser/state suites, every crash boundary, migration rehearsal,
+  deterministic standards server, real provider, and release dry run.
 
 Deliverables:
-- Confirmed `014-release-candidate` artifacts.
-- Accepted hardening and fix tasks with v0.9 evidence.
-- Merged release-candidate commit and green post-merge CI.
+- Finding register, conformance report, fixes, dry-run manifest, and rc.2 tag.
 
 Acceptance criteria:
-- FR-026 through FR-029 and every NFR have passing or explicitly accepted
-  evidence.
-- No unresolved P0 or P1 finding remains.
+- No unresolved P0/P1 finding remains and unavailable external checks are
+  honest sanitized blockers.
 
 Definition of Done:
-- Child artifacts, tests, reviews, full gates, PR, CI, merge, RC artifacts, and
-  release report are complete.
+- Hardening gates, review, PR/merge, evidence, and rc.2 tag pass.
 
 Validation commands:
-- Program artifact validator for T107.
-- Commands confirmed in the child feature task graph.
-- Full workspace, fuzz/fault, conformance, and release-dry-run gates.
+- Full tagged-checkpoint gate plus fuzz/fault/conformance/release dry run.
 
 TDD plan:
-- RED: New adversarial and fault cases reproduce concrete failures or missing
-  guarantees.
-- GREEN: Fix only accepted RC blockers.
-- REFACTOR: No scope growth; cleanup requires unchanged acceptance evidence.
+- RED: Reproduce each accepted hardening finding.
+- GREEN: Fix only release blockers.
+- REFACTOR: No scope growth during RC.
 
 Packet path:
-- `.ai-platform/specs/014-release-candidate/packets/`
+- `.ai-platform/specs/007-stable-v1-program/packets/T120.yaml`
 
 Evidence required:
-- Child evidence, finding register, conformance summary, dry-run manifest, and
-  PR/CI/merge references.
+- Finding register, conformance, full gates, CI, dry run, tag, and residual risk.
 
-## T108: Publish v1.0.0
+## T121: Publish Kirje 1.0.0
 
 Status: Draft
 Priority: P0
-Depends on: T107 Accepted
+Depends on: T120 Accepted
 Blocks: None
-Story / Requirement: US-001-US-006, FR-030-FR-032, NFR-001-NFR-008
+Story / Requirement: US-001-US-006; FR-030-FR-032; NFR-001-NFR-008
 Parallel: No
-Conflicts with: Any unmerged production or documentation change
+Conflicts with: Any unmerged production, contract, documentation, or release
+workflow change
 
 Goal:
-Create the exact clean, green, documented, tagged, verifiable Kirje v1.0.0
-release and prove its published artifacts.
+Publish the exact clean, green, reviewed Kirje `v1.0.0` commit and verify its
+artifacts and final release report.
 
 Allowed files:
-- `.ai-platform/specs/015-v1-release/**`
+- Release version and notes paths declared in the packet.
 - `.ai-platform/docs/release-report.md`
-- Release version and notes paths declared by the confirmed child task graph.
+- `.ai-platform/evidence/**`
 
 Test targets:
-- Final contract/version checks, target CI, artifact verification, install
-  smoke, tag identity, GitHub Release contents, and post-release checks.
+- Final versions/contracts, target CI, artifact download verification,
+  installation, tag identity, GitHub Release, and post-release smoke.
 
 Deliverables:
-- Confirmed `015-v1-release` artifacts.
-- Accepted release task evidence.
-- Annotated `v1.0.0` tag and published GitHub Release.
+- Release commit, annotated tag, GitHub Release, verified assets, and canonical
+  release report.
 
 Acceptance criteria:
-- FR-030 through FR-032 and all program success criteria are satisfied.
-- Published assets match the tagged commit and documented support matrix.
+- FR-030-FR-032 and every program success criterion have accepted evidence.
 
 Definition of Done:
-- Final gates, user acceptance, clean release commit, tag, release, artifact
-  verification, and release evidence are complete.
+- Final gates, user acceptance, clean commit, tag, publication, and post-release
+  verification pass.
 
 Validation commands:
-- Program artifact validator for T108.
-- Commands confirmed in the release child task graph.
-- Tag, GitHub Release, checksum, SBOM, provenance, and install verification.
+- Final tagged-checkpoint and downloaded-artifact verification.
 
 TDD plan:
-- RED: Release dry-run verifier rejects missing or mismatched v1.0 assets.
-- GREEN: Publish only the exact accepted release commit and assets.
-- REFACTOR: Not applicable after tag; any correction requires a new release.
+- RED: Release verifier rejects missing or mismatched final assets.
+- GREEN: Publish only the exact accepted commit and assets.
+- REFACTOR: Not applicable after tag; corrections require a new release.
 
 Packet path:
-- `.ai-platform/specs/015-v1-release/packets/`
+- `.ai-platform/specs/007-stable-v1-program/packets/T121.yaml`
 
 Evidence required:
-- Release commit, tag, URL, asset manifest, verification output, CI runs,
-  support matrix, and final release report.
+- Release commit, tag, URL, asset manifest, checksums, SBOM, provenance, CI,
+  installation, smoke, and final report.
+
+## Requirement Coverage
+
+- SFR-001-SFR-003: T109-T112
+- SFR-004-SFR-007: T111-T112
+- FR-001-FR-003: T113
+- FR-004-FR-005: T114
+- FR-006-FR-010: T115
+- FR-011: T116
+- FR-012-FR-017: T117
+- FR-018-FR-021: T118
+- FR-022-FR-025: T119
+- FR-026-FR-029: T120
+- FR-030-FR-032: T121
+- NFR-001-NFR-008: enforced at every relevant task and checkpoint.
 
 ## User Review Gate
 
-Approval changes this work graph to Confirmed and allows T101 to enter child
-security-baseline planning. It does not pre-approve later child specs or remote
-mailbox mutations; those retain their own review and owner-signature gates.
+This work graph is `Confirmed`. The user approved the accelerated plan and task
+breakdown on 2026-08-30. T109 is executable and is in `Needs_Review` because
+its interrupted implementation and test evidence already exist.

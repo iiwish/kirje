@@ -4,19 +4,23 @@
 
 - Feature ID: `008-security-baseline`
 - Status: Confirmed
-- Target release: `v0.3.1`
+- Target checkpoint: `v1.0.0-alpha.1`
 - Source: `spec.md`, `plan.md`, `research.md`, `data-model.md`, `contracts/**`
-- Updated: 2026-08-28
+- Updated: 2026-08-30
 - Review authority: delegated project owner
 
 ## Scheduling Rules
 
-- Production tasks T201, T202A-T202E, and T203-T211 execute serially. Their
-  shared Rust contracts and migrations make parallel write scopes unsafe even
-  where individual files differ.
+- Accepted tasks T201, T202A, T202B, T202C1, and T202C1S retain their exact
+  commit and evidence identity.
+- The v1 program work graph in `../007-stable-v1-program/tasks.md` owns
+  executable batching, checkpoint output, and Git handoff. Remaining task
+  blocks in this document are binding security acceptance coverage and may be
+  satisfied by one of the bounded T101 batches without an independent release
+  program or PR per block.
 - Read-only research and independent review may run in parallel.
-- Every production task needs a self-contained packet and verified RED evidence
-  before implementation.
+- Every executable production batch needs a self-contained packet and verified
+  RED evidence before implementation.
 - A worker executes one task/attempt, edits only allowed files, does not delegate,
   and does not mark the task Accepted.
 - The orchestrator performs scope, spec, engineering, and QA review and writes
@@ -24,11 +28,9 @@
 - No task may expose credentials, owner private keys, signatures, mailbox
   content, account addresses, endpoints, UIDs, or raw provider responses in
   committed fixtures/evidence.
-- T202 is an acceptance umbrella, not an implementation packet. T202A-T202E are
-  strict serial children; the umbrella becomes Accepted only after T202E review
-  and evidence-based acceptance by the delegated project owner. The user's
-  standing execution authorization removes conversational approval checkpoints,
-  but never waives a failed or missing gate.
+- T202 is an acceptance umbrella, not an implementation packet. Its remaining
+  acceptance coverage is mapped into T109-T112. The umbrella becomes
+  Accepted only after its complete contract, review, and evidence pass.
 - T204-T212 each require the T202 umbrella to be Accepted, in addition to their
   direct predecessor dependencies.
 - T212 begins only after T201-T211 have no blocking findings.
@@ -630,7 +632,10 @@ Evidence required:
 
 ### T202C2: Account Creation Transition
 
-Status: Ready
+Status: Needs_Review
+Execution state: T109 review and fresh validation completed with three scoped
+RED/GREEN fixes and no unresolved Critical or High finding. Production commit
+`94f3495` awaits explicit user acceptance.
 Packet review: `T202C2_A006_PACKET_REVIEW_PASS` with zero Critical, High,
 Medium, or Low findings
 Priority: P0
@@ -1624,7 +1629,7 @@ Conflicts with: Product/security/provider/operation claims, Agent Skill, release
 and architecture documentation
 
 Goal:
-Make every canonical product and operator surface accurately describe v0.3.1
+Make every canonical product and operator surface accurately describe Security Alpha
 authentication, trust, storage, migration, backup/restore, retention/erasure,
 authorization, ambiguous outcomes, bounded input, and MCP boundaries.
 
@@ -1705,7 +1710,7 @@ metadata change
 Goal:
 Run complete migration/replay/fault/platform/privacy gates, independent security
 reviews, controlled read-only real-account verification, version/release
-preparation, and produce a clean v0.3.1 release candidate.
+preparation, and produce a clean Security Alpha release candidate.
 
 Allowed files:
 - `Cargo.toml`
@@ -1765,7 +1770,7 @@ Definition of Done:
 - Independent reviews have no Critical/High/blocking finding.
 - Controlled evidence is credential/content-free and accurately read-only or a
   sanitized environment blocker.
-- Workspace/package version and release notes identify v0.3.1.
+- Workspace/package version and release notes identify `v1.0.0-alpha.1`.
 - Branch is ready for one reviewed release commit and PR.
 
 Packet path:
@@ -1782,14 +1787,14 @@ Status: Draft
 Priority: P0
 Story / Requirement: NFR-008, SC-008, release acceptance
 Depends on: T202 Accepted, T211 Accepted
-Blocks: 007 T102 and every v0.4 production change
+Blocks: 007 T102 and every Mailbox Alpha production change
 Parallel: No
 Conflicts with: Any concurrent branch/release/PR/version change
 
 Goal:
 Create the Conventional Commit, push the governed branch, open and review the
 PR, obtain green required CI, merge, verify post-merge main CI, tag/publish the
-v0.3.1 release when repository policy supports it, and update sanitized release
+Security Alpha checkpoint when repository policy supports it, and update sanitized release
 evidence and parent-program status.
 
 Allowed files:
@@ -1811,7 +1816,7 @@ Test targets:
 - PR diff equals accepted local diff
 - Required CI green on PR and post-merge main
 - Release artifact/tag identity and version consistency
-- Parent T101 status/evidence link and v0.4 gate
+- Parent T101 status/evidence link and Mailbox Alpha gate
 
 Deliverables:
 - Reviewed commit/PR/merge/tag chain and post-merge CI evidence
@@ -1819,7 +1824,7 @@ Deliverables:
 
 Acceptance criteria:
 - Remote Git/CI/release states are observed and recorded without inference.
-- v0.4 remains blocked until merged v0.3.1 main CI is green.
+- Mailbox Alpha remains blocked until merged Security Alpha CI is green.
 
 TDD plan:
 - RED/GREEN does not apply to remote metadata; every state claim uses observed
@@ -1834,11 +1839,12 @@ gh pr checks --watch
 ```
 
 Definition of Done:
-- Accepted v0.3.1 changes are committed, reviewed, merged, and green on main.
+- Accepted Security Alpha changes are committed, reviewed, merged, tagged, and
+  green on main.
 - Tag/release is published and verified when enabled, or an exact external
   blocker is recorded without false closure.
 - T101 becomes Accepted only after this evidence exists.
-- No v0.4 production task starts earlier.
+- No Mailbox Alpha production task starts earlier.
 
 Packet path:
 - `.ai-platform/specs/008-security-baseline/packets/T212.yaml`

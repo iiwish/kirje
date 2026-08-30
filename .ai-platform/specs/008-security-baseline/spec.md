@@ -4,12 +4,12 @@
 
 - Feature ID: `008-security-baseline`
 - Status: Confirmed
-- Target release: `v0.3.1`
+- Target checkpoint: `v1.0.0-alpha.1`
 - Product: Kirje
-- Updated: 2026-08-27
+- Updated: 2026-08-30
 - Source: `007-stable-v1-program`, the accepted v0.3 baseline, and the
   credential, approval, input-boundary, and capability-claim audits performed
-  before v0.4 planning.
+  before Mailbox Alpha planning.
 - Depends on: Confirmed `007-stable-v1-program` spec, plan, and work graph.
 - Review: Confirmed on 2026-08-27 under the user's delegated project-owner
   authority after three scope-specific independent security reviews reported no
@@ -17,7 +17,7 @@
 
 ## Goal
 
-Kirje v0.3.1 closes the security gaps that would otherwise make later mailbox
+Kirje Security Alpha closes the security gaps that would otherwise make later mailbox
 convergence and delivery work unsafe. A stored credential cannot be redirected
 by reusing an account display ID, terminal automation cannot create owner
 authorization, local imports cannot bypass their file-type or byte bounds, and
@@ -46,7 +46,7 @@ Scenario:
 ### US-002: Safe upgrade from v0.3
 
 An existing user can upgrade without an unbound legacy credential or terminal
-approval silently becoming trusted under the stronger v0.3.1 model.
+approval silently becoming trusted under the stronger Security Alpha model.
 
 Scenario:
 
@@ -179,7 +179,7 @@ granting mailbox access.
   for active lookup or deletion semantics.
 - FR-004: Account creation is insert-only. Creating an account with an existing
   display ID returns a stable non-retryable conflict and leaves the stored
-  account and credential untouched. The display ID is immutable in v0.3.1.
+  account and credential untouched. The display ID is immutable in 1.0.
   Removing and later recreating the same display ID produces a new account and
   credential identity, so stale operation references cannot resolve to the new
   account.
@@ -447,7 +447,7 @@ granting mailbox access.
 
 - FR-031: Runtime capability reporting, README, product definition, Agent Skill,
   architecture, security, provider, conformance, and operator documentation
-  state that v0.3.1 supports IMAP and SMTP with password or provider-issued
+  state that Security Alpha supports IMAP and SMTP with password or provider-issued
   app-password authentication. OAuth2, Gmail API, Microsoft Graph, and JMAP
   runtime operations are explicitly unsupported rather than implied by
   provider-neutral type names or registry metadata.
@@ -519,7 +519,7 @@ granting mailbox access.
 - No terminal-only, biometric-prompt-only, typed-ID-only, or agent-prompt-based
   substitute for detached owner authorization.
 - No encryption-at-rest or cryptographic transparency-log claim for the local
-  configuration, index, operation ledger, or drafts in v0.3.1.
+  configuration, index, operation ledger, or drafts in Security Alpha.
 - No new remote mailbox behavior, background daemon, permanent deletion,
   automatic resend, or automatic ambiguous-state reconciliation.
 - No exposure of credential or authorization mutation through MCP.
@@ -638,7 +638,7 @@ granting mailbox access.
   local storage and attacker limitations.
 - SC-008: Full workspace gates, supported-target tests, secret scanning,
   controlled read-only account verification, security review, PR CI, merge, and
-  post-merge CI pass with credential-free evidence before v0.4 production work.
+  post-merge CI pass with credential-free evidence before Mailbox Alpha work.
 
 ## Acceptance Criteria
 
@@ -660,28 +660,27 @@ granting mailbox access.
 5. Security review confirms that documentation claims do not exceed the
    explicit trusted-computing-base and same-user attacker assumptions.
 6. A controlled real-account check may confirm only read-only authentication
-   and capability behavior in v0.3.1 unless a separately authorized test action
+   and capability behavior in Security Alpha unless a separately authorized test action
    is part of an approved execution packet. Its evidence contains no account
    address, credential, UID, subject, body, endpoint identifier, or signature.
-7. The v0.3.1 release is merged with green CI before any v0.4 production change
-   begins.
+7. The Security Alpha checkpoint is merged, tagged, and green before Mailbox
+   Alpha production work begins.
 
 ## Clarifications
 
-- 2026-08-27: The parent program requires v0.3.1 to precede v0.4 and requires
-  random credential identity, legacy quarantine, external owner signatures,
-  same-handle bounded import, honest storage claims, bounded remote responses,
-  and correction of unsupported protocol claims.
+- Security Alpha precedes Mailbox Alpha and requires random credential identity,
+  legacy quarantine, external owner signatures, same-handle bounded import,
+  honest storage claims, bounded remote responses, and correction of
+  unsupported protocol claims.
 - 2026-08-27: External signatures protect supported Kirje state transitions
   within an enforced local trust boundary. They do not claim to withstand an
   agent that can replace the trusted binary or directly rewrite protected local
   state as the same unrestricted OS principal.
 - 2026-08-27: Legacy TTY approval is preserved as historical audit metadata but
   is not sufficient to invoke pending remote work after upgrade.
-- 2026-08-27: The user explicitly delegated project-owner authority and asked
-  Codex to proceed without per-step approval interruptions. The requirements
-  contract is confirmed; the technical plan must resolve the listed design
-  decisions without weakening it.
+- The security requirements contract is confirmed. Executable batching follows
+  the user-reviewed `007-stable-v1-program` plan and cannot weaken these design
+  decisions.
 
 ## Open Questions
 

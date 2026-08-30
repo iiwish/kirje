@@ -4,11 +4,13 @@
 
 - Feature ID: `007-stable-v1-program`
 - Status: Confirmed
-- Target releases: `v0.4` through `v1.0`
+- Target release: `v1.0.0`
+- Delivery checkpoints: `alpha.1`, `alpha.2`, `beta.1`, `beta.2`, `rc.1`,
+  `rc.2`, and stable
 - Product: Kirje
-- Updated: 2026-08-27
-- Source: User continuation of the approved v0.3 delivery and the recommended
-  narrow, reliability-first 1.0 roadmap.
+- Updated: 2026-08-30
+- Source: User-confirmed direct delivery of the narrow, reliability-first 1.0
+  product through incremental, usable checkpoints.
 
 ## Goal
 
@@ -70,7 +72,7 @@ its checksum, provenance, dependency inventory, and release notes.
 
 ## Functional Requirements
 
-### v0.3.1 Security Baseline
+### Security Alpha
 
 - SFR-001: A credential is addressed by a random immutable credential identity
   and is cryptographically or canonically bound to the account username,
@@ -108,13 +110,13 @@ its checksum, provenance, dependency inventory, and release notes.
   restore, and erasure boundaries are explicit.
 - SFR-006: Remote capability strings and provider responses remain bounded and
   untrusted at every CLI, MCP, log, audit, and evidence boundary.
-- SFR-007: The v0.3.1 runtime capability report, README, product definition,
+- SFR-007: The Security Alpha runtime capability report, README, product definition,
   Skill, architecture, and security documentation state the actual IMAP/SMTP
   password or app-password boundary and mark OAuth2, Gmail/Outlook APIs, and
   JMAP runtime operations unsupported. No later prerelease may carry the known
   broader claim.
 
-### v0.4 Mailbox Convergence
+### Mailbox Alpha
 
 - FR-001: Historical backfill is explicit, bounded per invocation, ordered,
   resumable from a transactional cursor, and safe to interrupt. It never turns
@@ -135,7 +137,7 @@ its checksum, provenance, dependency inventory, and release notes.
 - FR-005: CLI and MCP expose the same task-level backfill, reconciliation,
   coverage, and thread-query services with bounded versioned output.
 
-### v0.5 Delivery Reconciliation
+### Delivery Beta
 
 - FR-006: A send plan binds a Sent-copy policy and the complete immutable MIME
   snapshot before approval. Reply-derived plans include their normalized
@@ -170,7 +172,7 @@ its checksum, provenance, dependency inventory, and release notes.
   work, but it cannot approve, assert or close an external outcome, retry an
   uncertain effect, or alter credentials.
 
-### v0.6 Policy And Provider Compatibility
+### Policy Beta
 
 - FR-012: Each account can define a local policy for allowed remote operation
   kinds, readable and writable mailbox scopes, recipient addresses or domains,
@@ -192,7 +194,7 @@ its checksum, provenance, dependency inventory, and release notes.
 - FR-017: Runtime and documentation reject or clearly defer OAuth2 and JMAP
   operations in 1.0 rather than advertising unavailable support.
 
-### v0.7 Stable Contracts
+### Stable Contracts
 
 - FR-018: Release, binary, JSON envelope, schema, MCP server, error catalog,
   operation state, and SQLite schema versions have one documented compatibility
@@ -205,7 +207,7 @@ its checksum, provenance, dependency inventory, and release notes.
 - FR-021: Capability discovery lets clients distinguish unsupported, disabled by
   policy, unavailable from the provider, and temporarily failed operations.
 
-### v0.8 Distribution And Platform Support
+### Distribution And Platform Support
 
 - FR-022: Release automation builds versioned binaries for macOS arm64 and
   x86_64, Linux x86_64 and arm64, and Windows x86_64, runs target-appropriate
@@ -222,7 +224,7 @@ its checksum, provenance, dependency inventory, and release notes.
 - FR-025: Release archives contain the binary, license, concise installation
   instructions, and generated shell completions without bundling account data.
 
-### v0.9 Release Candidate
+### Release Candidate
 
 - FR-026: Protocol parsing, MIME construction, contract decoding, migration,
   and operation-state transitions receive fuzz, property, or fault-injection
@@ -280,21 +282,30 @@ its checksum, provenance, dependency inventory, and release notes.
   directly observes.
 - Body indexing, semantic search, attachment execution, or autonomous approval.
 
-## Release Slices
+## Delivery Checkpoints
 
-1. `v0.3.1`: credential binding, honest approval assurance, safe file import,
-   and corrected security boundaries.
-2. `v0.4`: mailbox convergence and deterministic threads.
-3. `v0.5`: Sent filing and operator-driven uncertainty reconciliation.
-4. `v0.6`: local policy and honest provider compatibility tiers.
-5. `v0.7`: stable machine and persistence contracts.
-6. `v0.8`: supported-platform distribution and verifiable artifacts.
-7. `v0.9`: release-candidate hardening and acceptance.
-8. `v1.0.0`: stable tagged release.
+1. Current branch checkpoint: preserve, review, and merge the accepted security
+   foundation plus the account-create transition already under test.
+2. `v1.0.0-alpha.1`: complete owner-authorized account, credential, local-input,
+   runtime, CLI, MCP-deny, and capability boundaries.
+3. `v1.0.0-alpha.2`: deliver resumable mailbox convergence and deterministic
+   thread queries through shared CLI/MCP services.
+4. `v1.0.0-beta.1`: deliver separate SMTP/Sent progress and explicit uncertain
+   outcome reconciliation without automatic replay.
+5. `v1.0.0-beta.2`: enforce local account policy and publish honest provider
+   compatibility tiers.
+6. `v1.0.0-rc.1`: freeze stable machine/persistence contracts and publish
+   verifiable preview artifacts for every buildable target.
+7. `v1.0.0-rc.2`: complete fuzz, fault, migration, conformance, security,
+   privacy, performance, and disaster-recovery acceptance.
+8. `v1.0.0`: publish the exact accepted release commit and artifacts.
 
-Each slice requires its own confirmed feature spec, requirement checklist,
-technical plan, task graph, execution packets, evidence, review, PR, green CI,
-merge, and post-merge main CI before the next slice changes production code.
+This spec, one program plan, one program work graph, and checkpoint evidence are
+the v1 governance SSOT. A checkpoint may use executor-sized packets for risky
+implementation batches, but it does not create an independent release program,
+duplicate product spec, or repeated approval chain. Focused tests run per code
+batch; the complete local gate runs once at each tagged checkpoint and once on
+the final release commit.
 
 ## Success Criteria
 
@@ -322,31 +333,29 @@ merge, and post-merge main CI before the next slice changes production code.
 
 1. Every `FR-*` and `NFR-*` maps to at least one release task and validation
    command before implementation begins.
-2. Every `SFR-*` is completed before v0.4 production work merges.
+2. Every `SFR-*` is completed before the mailbox-alpha checkpoint merges.
 3. No phase weakens the confirmed constitution or the v0.3 remote-write safety
    invariants.
 4. Documentation and runtime capability reporting match the narrow IMAP/SMTP
-   1.0 boundary in v0.3.1 and remain consistent through release.
+   1.0 boundary at `alpha.1` and remain consistent through release.
 5. A failed or unavailable real-provider check is recorded as a sanitized
    blocker and cannot be converted into a compatibility claim.
-6. The final `v1.0.0` release is created only after v0.9 acceptance and a clean,
-   green release commit.
+6. The final `v1.0.0` release is created only after `rc.2` acceptance and a
+   clean, green release commit.
 
 ## Clarifications
 
-- 2026-08-27: The user requested a continuing goal covering v0.4 through v1.0
-  and explicitly authorized creation of subtasks.
-- 2026-08-27: The preceding roadmap recommended a narrow, reliable IMAP/SMTP
-  1.0 and deferring OAuth2/JMAP breadth; this spec makes that recommendation the
-  proposed review boundary.
-- 2026-08-27: The user explicitly delegated project-owner authority to Codex,
-  requested autonomous delivery without per-step approval interruptions, and
-  directed Kirje to be developed to a world-class quality bar. This confirms
-  the program boundary and authorizes progression through the governed release
-  sequence while preserving evidence and safety gates.
+- The 1.0 product boundary is the narrow IMAP/SMTP runtime defined in this spec.
+- Delivery targets `v1.0.0` directly through incremental usable checkpoints.
+- Every checkpoint produces a reviewed commit, PR/merge decision, prerelease
+  tag, or stable release rather than planning-only progress.
+- The confirmed product boundary does not waive failed security, privacy,
+  migration, remote-write, CI, or release gates.
+- The detailed technical plan and work graph require explicit user approval
+  before new production execution begins.
 
 ## User Review Gate
 
-Approved on 2026-08-27 under the user's delegated project-owner authority. The
-narrow 1.0 boundary, release slices, and independently evidenced delivery gates
-remain binding throughout autonomous execution.
+Confirmed on 2026-08-30. The narrow 1.0 product boundary and incremental
+checkpoint model, technical plan, and work graph are approved. T109 review is
+complete and awaits explicit checkpoint acceptance.

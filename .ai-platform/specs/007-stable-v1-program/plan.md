@@ -5,153 +5,227 @@
 - Feature ID: `007-stable-v1-program`
 - Status: Confirmed
 - Source spec: `spec.md`
-- Updated: 2026-08-27
+- Updated: 2026-08-30
+- Target release: `v1.0.0`
 
 ## Decision Summary
 
-Kirje reaches 1.0 through sequential, independently releasable reliability
-slices. Each slice receives its own feature spec and governed task graph. The
-program does not batch multiple unfinished remote-write or persistence changes
-into one release branch.
+Kirje reaches 1.0 through one governed program and a sequence of usable
+checkpoints. The checkpoints are integration and evidence boundaries, not
+independent product programs. Each implementation batch is small enough to
+review and commit; each tagged checkpoint runs the complete local gate and CI
+matrix once.
+
+The current `codex/v1-roadmap-governance` branch is the first checkpoint. Its
+accepted commits and interrupted account-create implementation are preserved.
+The account-create diff enters review from its recorded RED/GREEN evidence; it
+is not discarded, regenerated, or expanded before review.
 
 ## Constitution Check
 
-- Local-first and no GUI: satisfied. No release slice adds a hosted service or
-  graphical client.
-- Shared CLI/MCP services: satisfied. New interfaces remain runtime services
-  with CLI and MCP adapters.
-- Untrusted mailbox content: satisfied. Threads, reconciliation, fixtures, and
-  diagnostics preserve untrusted markers and bounded output.
-- Secret exclusion: satisfied. Policy, contracts, CI, artifacts, and evidence
-  contain references and aggregate facts only.
-- Verified TLS and honest providers: satisfied. Compatibility tiers prevent a
-  preset from becoming an unsupported claim.
-- Immutable approval and independent human authorization: satisfied. Sent
-  filing and reconciliation extend the ledger without adding agent approval.
-- Protocol reuse behind adapters: satisfied. IMAP/SMTP engines remain behind
-  Kirje-owned ports.
-- TDD and evidence: satisfied. Every production slice requires RED, GREEN,
-  review, full gates, PR CI, merge, and post-merge CI.
+- Local-first and no GUI: satisfied. No checkpoint adds a hosted service or UI.
+- Shared CLI/MCP services: satisfied. Runtime services remain the behavior
+  owner; MCP keeps the exact deny surface for approval and owner mutations.
+- Untrusted mailbox content: satisfied. Sync, thread, protocol, and evidence
+  outputs remain bounded and marked untrusted.
+- Secret exclusion: satisfied. Credentials remain in the OS keyring and owner
+  private keys remain outside Kirje, fixtures, logs, and evidence.
+- Plan/authorize/apply: satisfied. Send, mailbox mutation, account mutation,
+  policy, and reconciliation retain immutable authorization boundaries.
+- Protocol neutrality: satisfied. IMAP/SMTP behavior stays behind adapters.
+- TDD and evidence: satisfied. Behavior batches require discriminating RED;
+  checkpoint recovery may reuse same-attempt evidence only when exact content
+  hashes prove that the tested code and fixtures are unchanged.
+- Git and review: satisfied. Coherent batches commit independently; checkpoint
+  integration receives spec, engineering, and QA review before merge or tag.
 
 No constitution exception is proposed.
 
 ## Technical Decisions
 
-### D-000 Security Baseline Before New Remote Capability
+### D-001 One V1 Governance Stack
 
-Before v0.4 changes production behavior, Kirje binds each credential to an
-immutable credential identity and normalized account endpoint fingerprint,
-separates account creation from endpoint-changing updates, and replaces the
-claim that TTY presence proves an independent human. Every remote effect and
-security-sensitive control-plane action requires an external owner signature
-bound to action, digest, nonce, and expiry; TTY is review-only and cannot create
-authorization. Legacy unbound credentials are quarantined and re-entered rather
-than silently attached to current endpoints. File and stdin imports are bounded
-before allocation, and file metadata/bytes come from one non-symlink handle.
-These changes ship as a v0.3.1 security baseline and block every later release
-slice.
+`007-stable-v1-program` is the v1 product, plan, work-graph, analysis, and
+checkpoint SSOT. Feature directories such as `008-security-baseline` provide
+specialized contracts and accepted evidence. They do not create a second
+release train or require a separate PR and post-merge cycle for every internal
+contract unit.
 
-### D-001 Sequential Release Slices
+### D-002 Incremental User-Visible Checkpoints
 
-Production work proceeds in order: convergence, delivery reconciliation,
-policy/provider compatibility, stable contracts, distribution, release
-candidate, stable release. Later slices may research in parallel but cannot
-merge production behavior before the previous slice has accepted evidence.
+The delivery sequence is:
 
-### D-002 Explicit Convergence Sessions
+1. current branch checkpoint;
+2. `v1.0.0-alpha.1` security foundation;
+3. `v1.0.0-alpha.2` mailbox convergence;
+4. `v1.0.0-beta.1` delivery reconciliation;
+5. `v1.0.0-beta.2` policy and provider compatibility;
+6. `v1.0.0-rc.1` stable contracts and distribution;
+7. `v1.0.0-rc.2` hardening and acceptance;
+8. `v1.0.0` stable release.
 
-Backfill and reconciliation are explicit bounded application operations with
-transactional cursors. No resident daemon is introduced. The index represents
-coverage and remote disappearance explicitly rather than treating local row
-absence as a remote fact. Baseline protocol operations use bounded UID ranges
-or exact bounded UID sets and cannot issue an unbounded `SEARCH ALL` before
-truncating locally. Capability extensions may optimize but never weaken this
-baseline.
+Every checkpoint ends with a concrete commit or tag, evidence summary, known
+limitations, and the next executable batch. A checkpoint cannot remain Running
+while producing only planning artifacts.
 
-### D-003 Header-Based Thread Graph
+### D-003 Two Validation Cadences
 
-Thread identity is derived from normalized Message-ID relationships. A thread
-graph stores deterministic parent/root relationships and bounded anomaly
-metadata. Incomplete history produces provisional thread identity. Subject
-heuristics may be reported separately but cannot create an authoritative reply
-relationship.
+Implementation batches run focused RED/GREEN tests, formatting, changed-crate
+Clippy, and diff/privacy checks. Tagged checkpoints run the complete workspace
+test, Clippy, build, dependency policy, migration, and checkpoint-specific
+acceptance gates. CI owns cross-platform and release matrix work.
 
-### D-004 Composite Send Progress In The Existing Ledger
+An unchanged content hash may reuse a successful command from the same
+execution attempt. A code, test, fixture, schema, dependency, toolchain, or
+relevant configuration change invalidates that evidence. Failed commands are
+never hidden; a baseline dependency failure receives a named remediation task.
 
-SMTP submission and optional Sent filing are child steps of one approved send
-operation in the unified ledger. Migration extends existing records rather than
-creating an unrelated queue. Each step has its own certainty and receipt while
-the top-level state remains stable and bounded. Planning prepares one canonical
-RFC822 artifact whose digest is approved and whose exact bytes are used by both
-SMTP DATA and client-managed IMAP APPEND. A durable claim precedes each remote
-effect. Legacy sent records remain auditable without retroactive filing; legacy
-planned or approved sends require re-planning under the new policy.
+### D-004 Commit And Merge Cadence
 
-### D-005 Append-Only Operator Reconciliation
+Each executor-sized batch produces one coherent commit after review. A
+checkpoint PR contains only reviewed batch commits and checkpoint evidence.
+The branch does not accumulate another multi-thousand-line unreviewed diff.
+Accepted history keeps its commit identity and is never rewritten to simplify
+the plan.
 
-External reconciliation adds a terminal assertion event and derived outcome;
-it does not delete or edit the original ambiguous result. Only an owner-signed
-CLI action can record or close the assertion. A separate bounded inspection
-service may perform read-only Sent lookup, but the close command cannot invoke
-SMTP, APPEND, or repeat an uncertain IMAP mutation.
+### D-005 Current Branch Recovery
 
-### D-006 Versioned Account Policy
+The current branch checkpoint starts at `ab9f059` plus the preserved
+account-create diff in:
 
-Policy is local configuration with a canonical serialized representation and
-digest. Planning records the evaluated policy revision; apply re-evaluates the
-current policy and rejects work that is no longer allowed. Policy never grants
-approval, cannot be changed through MCP, and requires an external owner
-signature to create or revise.
+- `crates/kirje-store/src/authority.rs`
+- `crates/kirje-store/tests/authority_registry.rs`
+- `crates/kirje-store/tests/fixtures/authority/registry/account_create/**`
 
-### D-007 One Compatibility Contract
+The interrupted attempt recorded real RED failures, focused GREEN, package and
+workspace tests, MSRV tests, Clippy, build, schema hash, query-bound, and
+privacy scans. The remaining work is evidence integration, adversarial review,
+resolution or scheduling of the existing yanked transitive dependency, and Git
+handoff. New account-create scope is not part of checkpoint recovery.
 
-The binary semver, JSON envelope version, schema snapshot, MCP server/tool
-contract, stable error catalog, operation states, SQLite schemas, and provider
-support tiers are documented together. Golden fixtures detect unreviewed drift.
+### D-006 Security Alpha Batching
 
-### D-008 Verifiable GitHub Releases
+The security checkpoint uses four bounded batches:
 
-GitHub Actions builds supported target archives from a tag, publishes SHA-256
-checksums, an SPDX or CycloneDX SBOM, and GitHub build provenance/attestation,
-then verifies the downloaded artifacts before the release is marked stable.
-Secrets are limited to platform-provided release credentials.
+1. recover and review account-create;
+2. complete account, credential, challenge, claim, rotation, and recovery
+   authority lifecycles;
+3. integrate safe local I/O, config v2, ledger v3, runtime authorization,
+   adapters, capability bounds, and the dependency-policy remediation;
+4. complete CLI/MCP workflows, canonical docs, security review, CI, and the
+   `alpha.1` tag.
 
-## Alternatives Considered
+The detailed `008-security-baseline` contracts remain binding. Its remaining
+task blocks are acceptance coverage for these batches, not mandatory one-PR
+release units.
 
-- Ship 1.0 immediately from v0.3: rejected because synchronization does not yet
-  converge deletions/flag drift, delivery lacks Sent filing, and no installable
-  release exists.
-- Include OAuth2 and JMAP in 1.0: rejected for the proposed narrow boundary;
-  either would add a new authentication or protocol security surface before the
-  current runtime is operationally stable.
-- Add an always-running daemon for convergence: rejected. Explicit sync remains
-  easier to authorize, test, stop, and audit.
-- Automatically retry ambiguous sends: rejected because duplicate delivery is
-  more harmful than requiring operator reconciliation.
-- Store policy only in agent prompts: rejected because mailbox content and agent
-  context cannot be trusted as an authorization boundary.
-- Release only source code: rejected because keyring and platform behavior need
-  tested binaries and users need verifiable artifacts.
+### D-007 Narrow 1.0 Boundary
 
-## Feature Sequence
+IMAP and SMTP with password or provider-issued app-password authentication are
+the 1.0 runtime boundary. OAuth2, Gmail API, Microsoft Graph, JMAP runtime,
+resident sync, permanent delete, automatic uncertain replay, semantic search,
+and embedded AI remain outside 1.0.
 
-1. `008-security-baseline` targeting v0.3.1.
-2. `009-mailbox-convergence` targeting v0.4.
-3. `010-delivery-reconciliation` targeting v0.5.
-4. `011-policy-provider-compatibility` targeting v0.6.
-5. `012-stable-contracts` targeting v0.7.
-6. `013-distribution` targeting v0.8.
-7. `014-release-candidate` targeting v0.9.
-8. `015-v1-release` targeting v1.0.0.
+### D-008 Supported And Preview Targets
 
-Each child feature must contain its own spec, requirement checklist, plan,
-tasks, analysis, execution packets, and evidence. Child plans may refine data
-models and exact file ownership but cannot broaden the program boundary without
-new user approval.
+Release automation builds macOS arm64/x86_64, Linux arm64/x86_64, and Windows
+x86_64 artifacts. A target is supported only when keyring, permissions, paths,
+locking, installation, and upgrade behavior have platform evidence. Other
+buildable artifacts remain preview quality and are labeled honestly.
 
-## Cross-Release Validation
+## Checkpoint Plan
 
-Every production slice runs:
+### Current Branch Checkpoint
+
+Outcome: reviewed account-create implementation, integrated evidence, one clean
+checkpoint commit, PR/merge decision, and no unexplained workspace changes.
+
+Gate: account-create focused tests, exact content hashes, diff/privacy checks,
+independent code review, and the already recorded unchanged-hash full-test
+evidence. The yanked `chacha20` dependency is a visible baseline finding and
+must be removed before `alpha.1` acceptance.
+
+### Security Alpha
+
+Outcome: owner-authorized account and credential workflows are usable through
+CLI, forbidden through MCP where required, and enforced by shared runtime
+services. Local imports, configuration, ledgers, protocol outputs, and stdio are
+bounded. Runtime/docs report the exact IMAP/SMTP authentication boundary.
+
+Gate: `SFR-001` through `SFR-007`, all `008` acceptance coverage, migration,
+secret scan, full local gate, CI, controlled account workflow, and tag
+`v1.0.0-alpha.1`.
+
+### Mailbox Alpha
+
+Outcome: explicit resumable backfill, scoped reconciliation, UIDVALIDITY
+rebuild, coverage semantics, deterministic thread graph, and CLI/MCP parity.
+
+Gate: interruption and drift fixtures, bounded protocol queries, migration,
+thread anomalies, controlled read-only mailbox validation, full local gate,
+CI, and tag `v1.0.0-alpha.2`.
+
+### Delivery Beta
+
+Outcome: one approved MIME artifact drives SMTP and optional Sent filing;
+certainty is recorded per step; uncertain effects never resend automatically;
+owner-signed CLI reconciliation is append-only.
+
+Gate: SMTP/APPEND fault matrix, ledger migration, no-replay crash tests,
+CLI/MCP deny surface, controlled self-send, full local gate, CI, and tag
+`v1.0.0-beta.1`.
+
+### Policy Beta
+
+Outcome: canonical account policy is enforced at plan and invocation; provider
+tiers distinguish reference, fixture-tested, and live-verified behavior.
+
+Gate: policy race and scope matrix, capability fixtures, secret scan,
+sanitized provider conformance, full local gate, CI, and tag
+`v1.0.0-beta.2`.
+
+### Contract And Distribution RC
+
+Outcome: one documented stable compatibility matrix covers binary, JSON, CLI,
+MCP, errors, operation states, and SQLite schemas. Verifiable artifacts are
+published for buildable targets with honest support tiers.
+
+Gate: golden contracts, every supported migration, backup/restore, target CI,
+archives, checksums, SBOM, provenance, installation, `doctor`, full local gate,
+and tag `v1.0.0-rc.1`.
+
+### Hardening RC
+
+Outcome: parser, MIME, state, migration, crash, provider, security, privacy,
+performance, and recovery risks have no unresolved P0/P1 findings.
+
+Gate: fuzz/property/fault suites, deterministic local server, at least one
+credentialed provider, migration rehearsal, release dry run, and tag
+`v1.0.0-rc.2`.
+
+### Stable Release
+
+Outcome: the accepted clean commit is tagged and published as `v1.0.0` with
+matching artifacts and a canonical release report.
+
+Gate: final contract/version checks, target CI, downloaded-artifact
+reverification, annotated tag, GitHub Release, and post-release smoke.
+
+## Standard Validation
+
+Implementation batch:
+
+```bash
+cargo fmt --all --check
+cargo clippy -p kirje-store --all-targets --all-features --locked -- -D warnings
+cargo test -p kirje-store --test authority_registry --all-features --locked
+git diff --check
+```
+
+Later packets replace the crate and focused target with exact commands for their
+declared allowed files before the task can become Ready.
+
+Tagged checkpoint:
 
 ```bash
 cargo fmt --all --check
@@ -161,63 +235,38 @@ cargo build --workspace --all-features --locked
 cargo deny check
 ```
 
-Additional gates accumulate rather than replace earlier gates:
-
-- v0.3.1: credential endpoint binding, account replacement rejection, approval
-  owner-signature enforcement, bounded same-handle file import, CLI/MCP
-  exclusion, migration, and corrected threat-boundary documentation.
-- v0.4: index migration, backfill interruption, reconciliation, thread graph,
-  CLI/MCP parity, and controlled read-only mailbox checks.
-- v0.5: SMTP/IMAP fault matrix, ledger migration, no-replay crash tests,
-  owner-signed reconciliation tests, and controlled self-addressed send checks.
-- v0.6: policy matrix, support-tier fixtures, secret scan, and sanitized
-  provider conformance.
-- v0.7: golden external contracts and every supported schema migration path.
-- v0.8: target matrix builds, archive verification, SBOM, checksums,
-  provenance, install, doctor, and keyring behavior.
-- v0.9: fuzz/fault suites, long-run tests, threat review, release dry run, and
-  sanitized real-provider checks.
-- v1.0: clean release commit, full target CI, artifact re-verification,
-  annotated tag, published release, and post-release smoke checks.
+Checkpoint-specific migration, fault, conformance, platform, and artifact gates
+are additive.
 
 ## Risks And Mitigations
 
-- Remote deletion inference can erase valid local facts. Mitigation: coverage
-  intervals, explicit tombstones, and no inference outside reconciled ranges.
-- Account display-ID reuse can redirect an existing credential. Mitigation:
-  random credential identity, endpoint fingerprint binding, explicit update,
-  and mandatory interactive re-entry after identity changes.
-- A pseudo-terminal can be automated and is not identity proof. Mitigation:
-  mandatory external owner signatures for remote and security-sensitive
-  actions; TTY cannot create authorization and MCP never receives a signing or
-  approval operation.
-- Attachment paths can change between metadata check and read. Mitigation:
-  open once without symlink traversal, validate the opened handle, and read at
-  most the configured bound plus one byte.
-- Thread headers can be malicious or cyclic. Mitigation: bounded normalization,
-  cycle detection, duplicate handling, and no subject-only authority.
-- SMTP succeeds while Sent filing fails. Mitigation: separate persisted steps,
-  no resend, provider-declared destination, and operator-visible certainty.
-- Reconciliation can become a hidden approval bypass. Mitigation: CLI-only,
-  no network invocation, explicit assertion text/category, append-only audit.
-- Policy changes can race apply. Mitigation: canonical policy digest at plan and
-  mandatory re-evaluation immediately before protocol invocation.
-- Platform release automation can create unsigned or mismatched artifacts.
-  Mitigation: tag-bound builds, least-privilege workflows, checksums, SBOM,
-  provenance, and download verification.
-- External provider credentials may be unavailable. Mitigation: deterministic
-  local protocol fixtures plus sanitized blockers; no fabricated support claim.
+- Large accepted branch delta: close the current checkpoint before starting new
+  production scope; keep commits intact and review the uncommitted diff first.
+- Hidden baseline dependency failure: keep `cargo deny` failure visible and
+  remediate the yanked transitive dependency before `alpha.1`.
+- Reduced process mistaken for reduced safety: preserve TDD, content-hash
+  evidence, adversarial review, full checkpoint gates, and explicit blockers.
+- Checkpoint scope growth: each batch has allowed paths, a packet, stop
+  conditions, and a commit-sized Definition of Done.
+- Cross-platform evidence arrives late: build preview targets continuously in
+  CI and grant supported status only at `rc.1`.
+- Real-provider access unavailable: deterministic local fixtures remain the
+  baseline; unavailable live checks are sanitized blockers, never support
+  claims.
 
 ## Supporting Artifacts
 
-- Program requirements: `spec.md`
-- Requirement quality gate: `checklists/requirements.md`
-- Program work graph: `tasks.md`
+- Product contract: `spec.md`
+- Requirement checklist: `checklists/requirements.md`
+- Work graph: `tasks.md`
 - Consistency analysis: `analysis.md`
-- Child feature artifacts under `.ai-platform/specs/008-*` through `015-*`
+- Security contracts: `../008-security-baseline/`
+- First recovery packet: `packets/T109.yaml`
+- Interrupted attempt evidence: `../../evidence/T202C2/attempts/T202C2-A001.md`
 
 ## User Review Gate
 
-Confirmed on 2026-08-27 under the user's delegated project-owner authority. The
-feature sequence, technical decisions, cumulative gates, and narrow 1.0
-boundary govern autonomous execution.
+The product boundary and checkpoint direction were confirmed by the user on
+2026-08-30. This technical plan and the work graph are `Confirmed`. T109 review
+and fresh validation are complete at production commit `94f3495`; no new
+production task starts before checkpoint acceptance.

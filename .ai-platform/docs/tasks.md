@@ -5,6 +5,11 @@ Completed phases are `001-agent-first-bootstrap`, `002-read-only-mvp`,
 `003-local-sync-index`, `004-provider-registry`, `005-governed-send`, and
 `006-agent-mail-operations`.
 
+The active program is `007-stable-v1-program`. Its product boundary and
+accelerated technical plan/work graph are Confirmed. The current implementation
+checkpoint is T109, which preserves and reviews the interrupted T202C2
+account-create diff before new production scope begins.
+
 ## T100: Govern The Next Product Phase
 
 - Status: Complete
@@ -28,3 +33,35 @@ Completed phases are `001-agent-first-bootstrap`, `002-read-only-mvp`,
 - TDD plan: requirements checklist and analysis precede implementation tests.
 - Packet path: `.ai-platform/specs/006-agent-mail-operations`
 - Evidence required: approval and analysis records
+
+## T101: Deliver Kirje 1.0 Through Incremental Checkpoints
+
+- Status: Running
+- Priority: P0
+- Story / Requirement: US-001-US-006, SFR-001-SFR-007, FR-001-FR-032,
+  NFR-001-NFR-008
+- Dependencies: completed v0.3 baseline and accepted T201-T202C1S security work
+- Blocks: `v1.0.0` publication
+- Parallel: false for conflicting production state; CI and read-only review may
+  run concurrently
+- Conflicts with: any second v1 release train or concurrent writes to the same
+  state/schema contracts
+- Goal: deliver one narrow IMAP/SMTP 1.0 product through current-branch,
+  alpha.1, alpha.2, beta.1, beta.2, rc.1, rc.2, and stable checkpoints.
+- Allowed files: narrowed per executor task under
+  `.ai-platform/specs/007-stable-v1-program/tasks.md`
+- Test targets: focused RED/GREEN per batch; full local, CI, migration,
+  conformance, platform, artifact, and release gates per checkpoint
+- Deliverables: reviewed commits and tags culminating in `v1.0.0`
+- Acceptance criteria: every checkpoint produces code or a verifiable release
+  artifact and every FR/NFR has accepted evidence before stable publication
+- Definition of Done: clean accepted release commit, annotated tag, matching
+  published artifacts, and post-release verification
+- Validation commands: checkpoint gates in
+  `.ai-platform/specs/007-stable-v1-program/plan.md`
+- TDD plan: high-risk behavior starts with discriminating RED; unchanged-hash
+  evidence may be reused only within the same interrupted attempt
+- Packet path:
+  `.ai-platform/specs/007-stable-v1-program/packets/T109.yaml`
+- Evidence required: checkpoint summaries, test results, reviews, CI, tags, and
+  final release report

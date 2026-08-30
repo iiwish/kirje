@@ -5,11 +5,11 @@
 - Version: `v0.1`
 - Status: Completed
 - Source spec: `.ai-platform/specs/008-security-baseline/spec.md`
-- Updated: 2026-08-27
+- Updated: 2026-08-30
 
 ## Checklist Scope
 
-- Feature: `008-security-baseline`, targeting `v0.3.1`
+- Feature: `008-security-baseline`, targeting `v1.0.0-alpha.1`
 - Reviewed artifacts:
   - `.ai-platform/specs/008-security-baseline/spec.md`
   - `.ai-platform/specs/007-stable-v1-program/spec.md`
@@ -25,8 +25,8 @@
 
 - [x] Each user story identifies an actor, trigger, and observable security
   outcome. [Completeness]
-- [x] The feature is limited to the pre-v0.4 security baseline and does not add
-  new remote mailbox behavior. [Scope]
+- [x] The feature is limited to the pre-Mailbox-Alpha security baseline and
+  does not add new remote mailbox behavior. [Scope]
 - [x] OAuth2, provider APIs, JMAP runtime, GUI approval, hosted signing,
   encryption at rest, and tamper-proof local history are explicit non-goals.
   [Scope]

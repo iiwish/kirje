@@ -4,14 +4,14 @@
 
 - Feature ID: `008-security-baseline`
 - Status: Confirmed
-- Target release: `v0.3.1`
+- Target checkpoint: `v1.0.0-alpha.1`
 - Source spec: `spec.md`
-- Updated: 2026-08-28
+- Updated: 2026-08-30
 - Review authority: delegated project owner
 
 ## Decision Summary
 
-Kirje v0.3.1 establishes one fail-closed security path for account identity,
+Kirje Security Alpha establishes one fail-closed security path for account identity,
 mailbox credentials, owner authorization, local input, MCP framing, and remote
 response data. The fixed owner authority store is the only source of owner
 trust, config-store enrollment, authorization receipts, and global remote-effect
@@ -543,7 +543,7 @@ Additional security gates include:
 - Authority schema creation and ledger v3 migration use SQLite transactions and
   reject newer versions.
 - A binary rollback may inspect exported sanitized data but must not apply
-  v0.3.1-governed work with a v0.3 binary. The release runbook requires backup
+  Security-Alpha-governed work with a v0.3 binary. The release runbook requires backup
   before migration and documents that owner receipts/effect claims must remain
   paired with their authority journal.
 - Restoring only a caller-selected ledger cannot restore authority. Restoring
@@ -588,15 +588,11 @@ Additional security gates include:
 
 ## User Review Gate
 
-Confirmed on 2026-08-28 under the user's delegated project-owner authority.
-T202 is a serial umbrella. T202A and T202B are Accepted. T202C is a Draft
-acceptance umbrella split into strict serial T202C1, T202C1S, and T202C2-T202C4. T202C1 is Accepted
-at production commit `aa53efb` after `T202C1_A003_CODE_REVIEW_PASS` and fresh
-packet/workspace gates. T202C1S is Accepted at production commit `8eceaff`
-after `T202C1S_A001_CODE_REVIEW_PASS` and fresh packet/workspace gates. T202C2
-is Ready for delegated execution after `T202C2_A006_PACKET_REVIEW_PASS` with
-zero Critical, High, Medium, or Low findings. T202C3-T202C4 and
-T202D-E remain Draft until their predecessor is Accepted. T204 and every
-later production task additionally require the T202 umbrella to be Accepted.
-Execution still requires one self-contained packet per ready task, verified RED
-evidence, and review.
+The security product and architecture contract remains Confirmed. T202A,
+T202B, T202C1, and T202C1S are Accepted at their recorded commits and evidence.
+T202C2 is Needs_Review: T109 recovered the interrupted attempt, resolved three
+review findings with RED/GREEN tests, and produced validated commit `94f3495`.
+Explicit user acceptance remains. The v1 program work graph owns remaining
+executable batches and maps all T202C3-T212 acceptance coverage into T110-T112.
+Execution still requires one self-contained packet per risky batch, verified
+RED evidence, review, and explicit user acceptance.
