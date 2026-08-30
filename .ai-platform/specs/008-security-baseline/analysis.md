@@ -3,7 +3,7 @@
 ## Metadata
 
 - Feature ID: `008-security-baseline`
-- Status: T202C1S_Accepted_T202C2_Ready
+- Status: T202C3_A006_Packet_Blocked
 - Updated: 2026-08-30
 - Inputs: `spec.md`, `checklists/requirements.md`, `plan.md`, `research.md`,
   `data-model.md`, `contracts/**`, `tasks.md`, project constitution and AGENTS
@@ -12,8 +12,12 @@
 
 ## Gate Result
 
-- Critical findings: 0 unresolved
-- High findings: 0 unresolved in the confirmed requirement contract. The 3 A001 T202C1 findings are closed by A002
+- Critical findings: 0 unresolved.
+- High findings: 1 unresolved. `T202C3-A006` cannot safely admit cleanup
+  challenge issuance because the confirmed contracts do not define the domain,
+  transcript, or derivation of signed `tombstone_sha256`. It must not be assumed
+  equal to `locator_sha256`, and an execution packet cannot invent that security
+  semantic. The 3 A001 T202C1 findings are closed by A002
   and `T202C1_A002_PACKET_REVIEW_PASS`. Historical challenge validation is now
   intrinsic, lifecycle replacement and final-state terminals are distinct, and
   durable grant/event time is store-derived effective authority time with a
@@ -55,15 +59,12 @@ production source has no raw string and independent source review confirms no
 prohibited trait implementation. The T202C1S registry-parent preflight is
 currently called once but has no dedicated test-support query counter; T202C2
 must preserve that placement or add an explicit counter before loop expansion.
-- Execution decision: T201 and T202A are Accepted. T202 remains a Draft
-  acceptance umbrella split into strict serial T202A-T202E. T202B is Accepted
-  at production commit `43f0788`; T202C is a Draft acceptance umbrella split
-  into strict serial T202C1, T202C1S, and T202C2-T202C4. T202C1 is Accepted at
-  production commit `aa53efb`; T202C1S is Accepted at production commit
-  `8eceaff` after `T202C1S_A001_CODE_REVIEW_PASS`. T202C2 is Ready for delegated
-  execution after `T202C2_A006_PACKET_REVIEW_PASS`; T202C3-T202C4, T202D-T202E,
-  and T203-T212 remain Draft. T204 and every
-  later task directly require the T202 umbrella to be Accepted.
+- Execution decision: T201, T202A, T202B, T202C1, T202C1S, and T202C2 are
+  Accepted. T202C3 is Blocked after the user's explicit acceptance of
+  `T202C3-A005` at production commit `316dae0` on 2026-08-30. The next attempt,
+  T202C3-A006, has a blocked packet and no production execution permission.
+  T202C4, T202D-T202E, and T203-T212 remain dependency-gated Draft work. T204
+  and every later task directly require the T202 umbrella to be Accepted.
 
 The product requirements remain confirmed and do not add a remote mailbox
 effect or broaden authentication/protocol scope. T202A owns accepted bootstrap
@@ -490,8 +491,9 @@ T202C2 owns account-create issuance and transitions; T202C3 owns remaining accou
 credential, and delete-only cleanup lifecycles; T202C4 owns six remote challenge
 effects and aggregate T202C validation. These tasks are strict serial because
 they share the authority transaction, validator, event stream, and fixture
-surface. T202C1S is Accepted. T202C2-T202C4 plus T202D-T202E remain
-dependency-gated Draft tasks, and T202 remains a Draft acceptance umbrella.
+surface. T202C2 is Accepted, and T202C3 is Blocked at the cleanup challenge
+contract after accepted A005. T202C4 plus T202D-T202E remain dependency-gated
+Draft tasks, and T202 remains a Draft acceptance umbrella.
 
 The first T202C2 packet review issued no pass. Its mutable-parent remote-effect
 finding is closed by accepted T202C1S. A002 closed the synthetic-fixture and
@@ -583,5 +585,5 @@ rule still contradicted recovery terminality. A006 limits that rule to
 finalized/aborted transitions and freezes RecoveryRequired retry to the unchanged
 terminal current row with no successor. Independent A006 review replayed the
 prior findings, reported zero Critical, High, Medium, or Low, and issued
-`T202C2_A006_PACKET_REVIEW_PASS`. T202C2 is Ready; the T202C and T202 umbrellas
-remain non-Accepted.
+`T202C2_A006_PACKET_REVIEW_PASS`. T202C2 is Accepted. T202C3 is Blocked at
+`T202C3-A006`; the T202C and T202 umbrellas remain non-Accepted.

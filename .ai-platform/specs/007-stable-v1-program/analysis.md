@@ -17,8 +17,12 @@ per-version governance stacks while retaining executor-sized tasks, TDD,
 content-addressed evidence, adversarial review, complete checkpoint gates, and
 human acceptance.
 
-No Critical or High planning finding remains. One Medium implementation finding
-is assigned: the unchanged branch dependency graph contains yanked
+The confirmed checkpoint plan remains internally consistent, but one High
+execution-packet finding blocks `T202C3-A006`: the confirmed contracts name
+`tombstone_sha256` in the cleanup manifest without defining its domain,
+transcript, or derivation from the durable cleanup row. Inventing that rule in an
+execution packet would alter the security contract. One separate Medium
+implementation finding is assigned: the unchanged branch dependency graph contains yanked
 `chacha20 0.10.1`, which makes `cargo deny check advisories` fail. T111
 owns remediation and Security Alpha cannot be Accepted until the complete
 dependency gate passes.
@@ -187,8 +191,29 @@ account/store versions. Finalize activates the signed missing projection; abort
 restores the bound predecessor tuple and receipt; unsafe observation remains
 fail-closed recovery. Fault rollback, expiry, replay, create-set-delete restart,
 target mismatch, and kind corruption are covered. No unresolved Critical, High,
-or Medium finding remains. A005 awaits explicit user acceptance; cleanup remains
-excluded and no later attempt is Ready.
+or Medium finding remains. The user explicitly accepted A005 on 2026-08-30;
+cleanup remains excluded from that production commit.
+
+### T202C3-A006 Cleanup Packet Gate
+
+`T202C3-A006` is the next consistent attempt ID and its blocked packet is
+`.ai-platform/specs/007-stable-v1-program/packets/T110-A006.yaml`. The user also
+authorized an unattended cadence in which future internal attempts may continue
+after TDD, full validation, and three-pass review while remaining only
+`review_complete`; this does not waive confirmed security semantics or the major
+human acceptance gates.
+
+The cleanup challenge packet cannot be made Ready from the current SSOT. The
+core manifest contains `tombstone_sha256`, while the authority schema persists
+locator material and `locator_sha256`; no confirmed transcript defines how to
+derive or validate the tombstone digest. Assuming that it equals
+`locator_sha256` would silently collapse two signed fields and alter the security
+contract. This is a High blocker. Claim/delete remain a later attempt and must
+receive their own just-in-time packet review after challenge issuance is
+review-complete.
+
+Result: `T202C3_A006_PACKET_BLOCKED`. A006 remains Blocked and production work
+must stop until the user confirms the tombstone digest contract amendment.
 
 ## Current Implementation Evidence Check
 

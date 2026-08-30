@@ -4,7 +4,7 @@ task_id: T110
 feature_id: 007-stable-v1-program
 mode: direct_test_first_execution
 adapter: direct_executor
-status: review_complete
+status: accepted
 
 governance_inputs:
   constitution: .ai-platform/memory/constitution.md
@@ -29,6 +29,7 @@ governance_inputs:
     continuation: explicitly requested by user on 2026-08-30
     packet_review: no blocking finding
     production_review: passed at production commit 316dae0
+    user_acceptance: explicitly accepted on 2026-08-30 at production commit 316dae0
 
 work_unit:
   title: Complete the credential-delete authority transition
@@ -169,14 +170,14 @@ handoff:
     - commit production after RED/GREEN and changed-crate validation
     - commit evidence and status after review
     - do not push, merge, tag, or publish without a later finish decision
-  next_attempt: cleanup challenge and transition packet after explicit A005 acceptance
+  next_attempt: T202C3-A006 cleanup challenge packet, blocked on the confirmed tombstone digest contract
 
 result:
   production_commit: 316dae0
   evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A005.md
   review: no unresolved Critical, High, or Medium finding
-  acceptance: pending explicit user decision
-  next_gate: explicit A005 acceptance before cleanup packet review
+  acceptance: explicitly accepted by the user on 2026-08-30
+  next_gate: confirmed tombstone digest amendment before T202C3-A006 can become ready
 
 stop_conditions:
   - A required change touches schema, core, runtime, keyring, local I/O, protocol, CLI, MCP, network, or dependency files.

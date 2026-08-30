@@ -15,8 +15,19 @@
   a PR/merge decision and, except T109, a prerelease or stable tag.
 - Focused RED/GREEN and changed-crate gates run per task. Full workspace,
   dependency, migration, CI, and checkpoint-specific gates run once per tag.
-- Future packets are generated just in time after their predecessor is
-  Accepted. Only T109 is packetized in this governance round.
+- Future packets are generated just in time after their predecessor clears its
+  execution gate. The user explicitly accepted `T202C3-A005` on 2026-08-30.
+- For the user-authorized unattended cadence beginning 2026-08-30, an internal
+  attempt may unlock its next internal attempt only after TDD, the packet's full
+  validation loop, and all three review passes complete. Such an attempt is
+  recorded as `review_complete`, never `Accepted`, unless the user explicitly
+  accepts it. T110, T112, T114, T116, T117, T119, T120, and T121 remain explicit
+  user acceptance gates.
+- The unattended cadence permits bounded subagent management and local commits
+  only. It forbids push, merge, tag, publish, GitHub Release, live mailbox or
+  provider effects, and credential input. A Critical/High finding, material
+  scope/schema/dependency change, second same-cause failure, required credential
+  or human decision, disk shortage, or platform limitation stops execution.
 - Existing accepted T201-T202C1S commits and evidence remain immutable.
 - The preserved T202C2 implementation is not modified during governance. After
   plan approval, T109 moves directly to review because implementation and
@@ -119,15 +130,19 @@ Evidence required:
 
 ## T110: Complete Authority Lifecycles
 
-Status: Running
+Status: Blocked
 Execution state: T109 is Accepted. T110 runs as four strict serial security
 batches. T202C3-A001 challenge issuance is reviewed at commit `daf22a0`; the
 T202C3-A002 account-update transition is accepted at commit `2c00f32`.
 `T202C3-A003` account-remove transition is accepted at commit `703b5a1`.
 `T202C3-A004` credential-set transition is accepted at commit `1c6d7cb`.
-`T202C3-A005` credential-delete transition is reviewed at commit `316dae0` and
-awaits explicit acceptance. No later attempt or security batch is Ready until
-its predecessor is reviewed and accepted.
+`T202C3-A005` credential-delete transition is accepted at commit `316dae0` by
+explicit user decision on 2026-08-30. `T202C3-A006` is reserved for exact,
+effect-free cleanup challenge issuance, but its packet is Blocked: the confirmed
+contracts define `tombstone_sha256` as a signed field without defining its
+normative domain, transcript, or derivation from the durable cleanup row. No
+production execution is Ready until a confirmed contract amendment closes that
+High packet gap. Cleanup claim/delete remain a later attempt.
 Priority: P0
 Depends on: T109 Accepted
 Blocks: T111
@@ -198,7 +213,11 @@ Evidence required:
    2026-08-30. `T202C3-A005` delivers reviewed credential-targeted delete
    prepare through terminal state, permanent credential-history retention,
    immutable account/store versioning, and the no-cleanup/no-keyring boundary
-   at commit `316dae0`. Cleanup remains gated on explicit A005 acceptance.
+   at commit `316dae0`; the user explicitly accepted A005 on 2026-08-30.
+   `T202C3-A006` is the reserved cleanup-challenge attempt and remains Blocked
+   on the exact `tombstone_sha256` contract decision recorded in its packet and
+   analysis. Cleanup claim/delete remain later. The unattended cadence does not
+   waive that security-contract gate.
 2. `T202C4`: remote challenge registry binding and planner-owned effect row.
 3. `T202D`: effect claim, invocation permit, observation, and ambiguity.
 4. `T202E`: owner rotation/recovery, audit, and aggregate authority acceptance.

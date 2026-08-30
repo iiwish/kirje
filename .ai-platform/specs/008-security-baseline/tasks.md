@@ -25,6 +25,12 @@
   and does not mark the task Accepted.
 - The orchestrator performs scope, spec, engineering, and QA review and writes
   evidence after each attempt.
+- Under the user's explicit 2026-08-30 unattended cadence, an internal attempt
+  that completes TDD, its full validation loop, and all three review passes may
+  unlock the next internal attempt as `review_complete`; it is not `Accepted`
+  without a separate explicit user decision. The major v1 program gates remain
+  user acceptance gates, and all external publication, live-provider, mailbox,
+  and credential operations remain forbidden while unattended.
 - No task may expose credentials, owner private keys, signatures, mailbox
   content, account addresses, endpoints, UIDs, or raw provider responses in
   committed fixtures/evidence.
@@ -701,7 +707,7 @@ Evidence required:
 
 ### T202C3: Account Credential And Cleanup Lifecycles
 
-Status: Running
+Status: Blocked
 Execution state: `T202C3-A001` completed review at production commit `daf22a0`.
 It owns effect-free challenge issuance for account update/remove and credential
 set/delete. `T202C3-A002` is accepted at production commit `2c00f32` and owns
@@ -711,11 +717,14 @@ account-remove transition, preserved removed history, store-only after
 versioning, and cleanup readiness. `T202C3-A004` is accepted at production
 commit `1c6d7cb` and owns the exact credential-set transition, existing
 credential identity, immutable after versions, and no-cleanup/no-keyring
-boundary. `T202C3-A005` is reviewed at production commit `316dae0` and owns the
+boundary. `T202C3-A005` is accepted at production commit `316dae0` and owns the
 exact credential-delete authority transition, retained credential history,
-immutable after versions, and the no-cleanup/no-keyring boundary. A005 awaits
-explicit acceptance. Cleanup challenge/claim/delete remain later serial
-attempts, and no later attempt is Ready.
+immutable after versions, and the no-cleanup/no-keyring boundary. The user
+explicitly accepted A005 on 2026-08-30. `T202C3-A006` is reserved for effect-free
+cleanup challenge issuance, but is Blocked because the confirmed contracts do
+not define the signed `tombstone_sha256` domain, transcript, or derivation from
+the durable cleanup row. Cleanup claim/delete remain later, and no later attempt
+is Ready.
 Priority: P0
 Story / Requirement: US-001, US-003; FR-003-FR-009, FR-016; NFR-001-NFR-003,
 NFR-006, NFR-007
@@ -758,7 +767,11 @@ Definition of Done:
   where required, private, and schema-preserving.
 
 Packet path:
-- `.ai-platform/specs/008-security-baseline/packets/T202C3.yaml`
+- Controller: `.ai-platform/specs/007-stable-v1-program/packets/T110.yaml`
+- Current attempt: `.ai-platform/specs/007-stable-v1-program/packets/T110-A006.yaml`
+
+The 007 v1 work graph owns executable just-in-time attempt packets for T110;
+there is no separate `008-security-baseline/packets/T202C3.yaml`.
 
 Evidence required:
 - `.ai-platform/evidence/T202C3/summary.md`

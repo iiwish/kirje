@@ -2,15 +2,15 @@
 
 ## Status
 
-Running. `T202C3-A001` challenge issuance is reviewed at production commit
+Blocked at the cleanup packet gate. `T202C3-A001` challenge issuance is reviewed at production commit
 `daf22a0`. `T202C3-A002` account-update transition execution is accepted at
 production commit `2c00f32` by explicit user decision on 2026-08-30.
 `T202C3-A003` account-remove transition execution is accepted at production
 commit `703b5a1` by explicit user decision on 2026-08-30.
 `T202C3-A004` credential-set transition execution is accepted at production
 commit `1c6d7cb` by explicit user decision on 2026-08-30.
-`T202C3-A005` credential-delete transition execution is reviewed at production
-commit `316dae0` and awaits explicit user acceptance.
+`T202C3-A005` credential-delete transition execution is accepted at production
+commit `316dae0` by explicit user decision on 2026-08-30.
 
 ## Delivered
 
@@ -83,6 +83,8 @@ registry test, and synthetic public-signature fixture.
 
 ## Residual Scope
 
-Cleanup challenge, claim, and delete remain fail-closed unimplemented. A005
-awaits explicit acceptance before a cleanup packet can become Ready. T202C3,
-T110, and the authority umbrella remain Running.
+Cleanup challenge, claim, and delete remain fail-closed unimplemented.
+`T202C3-A006` is reserved but Blocked because the confirmed contracts do not
+define the signed `tombstone_sha256` domain, transcript, or derivation from the
+durable cleanup row. Cleanup claim/delete remain later. T202C3 and T110 remain
+Blocked; the authority umbrella remains Draft.
