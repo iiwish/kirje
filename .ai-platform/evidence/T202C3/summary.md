@@ -2,10 +2,10 @@
 
 ## Status
 
-Cleanup amendment revised after first, repeat, and final QA review. The
-capability-boundary High is closed; one literal-scan Medium is proposed fixed by
-an exhaustive AST allowlist and another independent review is pending with no
-production permission. `T202C3-A001` challenge issuance is reviewed at production commit
+Cleanup amendment and A006 packet passed final independent spec, engineering,
+and QA review at governance HEAD `3533054` with zero Critical, High, Medium, or
+Low finding. `T202C3_A006_PACKET_REVIEW_PASS` authorizes exact scoped test-first
+execution but does not accept A006, T202C3, or T110. `T202C3-A001` challenge issuance is reviewed at production commit
 `daf22a0`. `T202C3-A002` account-update transition execution is accepted at
 production commit `2c00f32` by explicit user decision on 2026-08-30.
 `T202C3-A003` account-remove transition execution is accepted at production
@@ -65,6 +65,11 @@ prepare/commit/finalize faults, expiry, restart, and transition-kind corruption.
 The implementation remains within the packet-authorized authority source,
 registry test, and synthetic public-signature fixture.
 
+The A006 packet's independent spec, engineering, and QA passes at governance
+HEAD `3533054` each returned zero Critical, High, Medium, or Low finding and
+explicitly authorized its exact production/test scopes. This packet pass is not
+implementation evidence or acceptance.
+
 ## Final Content Hashes
 
 ```text
@@ -86,6 +91,7 @@ registry test, and synthetic public-signature fixture.
 - Contract fix: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract-A002.md`
 - Contract fix: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract-A003.md`
 - Contract fix: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract-A004.md`
+- Packet review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-packet-review.md`
 - Test results: `.ai-platform/evidence/T202C3/test-results.md`
 - Production commits: `daf22a0`, `2c00f32`, `703b5a1`, `1c6d7cb`, `316dae0`
 
@@ -102,7 +108,7 @@ store, with the combined store apply method as the sole low-level production
 call site. A008 must prove this with an exhaustive AST allowlist across every
 production store Rust file, plus Cargo direct-dependency, no-re-export, and
 runtime compile-fail controls; no AST test exists yet. `T202C3-A006` is
-`ready_for_review`; production and test
-permission remain `none` until independent packet review passes. A007 claim and
-A008 delete completion remain non-executable just-in-time outlines. T202C3 and
-T110 are not Accepted; the authority umbrella remains Draft.
+Ready with production permission limited to `authority.rs` and test permission
+limited to `authority_registry.rs` plus its cleanup fixture subtree. A007 claim
+and A008 delete completion remain non-executable just-in-time outlines. T202C3
+and T110 are not Accepted; the authority umbrella remains Draft.

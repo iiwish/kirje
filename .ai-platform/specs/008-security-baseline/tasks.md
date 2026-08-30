@@ -39,8 +39,9 @@
   The same delegated decision specifies an unpublished crate with
   `kirje-store` as its sole direct dependent and supersedes the flawed shared
   runtime/pluggable deletion formulation identified by repeat review. The
-  decision is not implementation evidence; A006/A007 remain closed until their
-  independent packet and execution gates pass.
+  decision is not implementation evidence. A006's independent packet gate has
+  passed for exact source/test scopes; A007/A008 remain closed, and no execution
+  is accepted before its TDD, validation, evidence, and implementation reviews.
 - No task may expose credentials, owner private keys, signatures, mailbox
   content, account addresses, endpoints, UIDs, or raw provider responses in
   committed fixtures/evidence.
@@ -742,9 +743,11 @@ challenge eligibility, claim identity/retry/expiry/concurrency, opaque permit,
 combined deletion boundary, crash recovery, events 16/17, restart/cardinality/
 privacy invariants, closed error precedence, lower credential crate, and
 reservation-time canonicality. `T202C3-A006` is a revised execution packet
-awaiting independent packet review with production permission still
-`none`. A007 claim and A008 delete-completion are non-executable just-in-time
-outlines; neither is Ready or packetized.
+authorized by final independent spec, engineering, and QA passes at governance
+HEAD `3533054`, each with zero Critical, High, Medium, or Low finding.
+`T202C3_A006_PACKET_REVIEW_PASS` makes A006 Ready only for its exact listed
+production/test paths. A007 claim and A008 delete-completion are non-executable
+just-in-time outlines; neither is Ready or packetized.
 Priority: P0
 Story / Requirement: US-001, US-003; FR-003-FR-009, FR-016; NFR-001-NFR-003,
 NFR-006, NFR-007

@@ -26,9 +26,10 @@ single combined store adapter-call boundary, reservation/prepare canonicality,
 and complete issuance race/replacement matrices. Final QA accepted the High
 repair and found one Medium in the literal sole-call proof; A008 now requires an
 exhaustive production-store AST allowlist. The A006 challenge packet is
-ready for another independent review with production permission `none`; A007
-claim and A008 delete completion remain non-executable just-in-time outlines,
-not Ready packets or implementation permission. One separate dependency Medium
+Ready under `T202C3_A006_PACKET_REVIEW_PASS` at governance HEAD `3533054`, with
+production/test permission limited to its three packet-listed paths. A007 claim
+and A008 delete completion remain non-executable just-in-time outlines, not
+Ready packets or implementation permission. One separate dependency Medium
 implementation finding is assigned: the unchanged branch dependency graph contains yanked
 `chacha20 0.10.1`, which makes `cargo deny check advisories` fail. T111
 owns remediation and Security Alpha cannot be Accepted until the complete
@@ -243,10 +244,10 @@ changed grant recovery third, signed-context/clock/expiry next, then current
 eligibility and target lifecycle, while existing store/backend codes remain
 stable.
 
-Result: `T202C3_A006_AMENDMENT_READY_FOR_PACKET_REVIEW`. The three new High
-findings are addressed but remain open until repeat independent review passes.
-A006 retains production permission `none`; A007 and A008 remain unpacketized,
-non-executable outlines and are not Ready.
+Result: `T202C3_A006_PACKET_REVIEW_PASS`. Final independent spec, engineering,
+and QA passes at governance HEAD `3533054` each returned zero Critical, High,
+Medium, or Low finding and authorized the exact packet scopes. A006 is Ready;
+A007 and A008 remain unpacketized, non-executable outlines and are not Ready.
 
 ## Current Implementation Evidence Check
 
@@ -300,8 +301,8 @@ method still let runtime bypass authority. The proposed focused repair makes
 the low-level crate unpublished and directly depended on only by store, removes
 the trait/plugin surface, fixes `Result<(), MailError>` success semantics, and
 makes the combined store apply method the sole call site. Final QA accepted this
-High repair and returned the Medium below. A006 remains non-executable until the
-remaining review gate passes.
+High repair and returned the Medium below. The final three-pass review at
+`3533054` accepted its AST-proof repair with zero finding.
 
 ### Medium
 
@@ -317,7 +318,8 @@ Only private module `credential_cleanup_delete_adapter` and method
 low-level references; only that method may mention `DeleteOnlyLocator` and call
 `kirje_credential::delete_only` exactly once. The proof composes with Cargo
 direct-dependency, no-re-export, and runtime compile-fail checks. This contract
-fix remains open until independent review; the AST test is not implemented.
+fix is closed by `T202C3_A006_PACKET_REVIEW_PASS`; the AST test remains future
+A008 work and is not implemented by the A006 packet.
 
 ### Low
 
@@ -326,7 +328,7 @@ None.
 ## Residual Risks
 
 - T109 and the account-create checkpoint were explicitly accepted by the user
-  on 2026-08-30; T110 may start after its just-in-time packet review.
+  on 2026-08-30; T110 A006 may execute only its exact reviewed packet scope.
 - Cross-platform support claims remain Draft until T119 produces platform
   evidence.
 - Real-provider checks depend on dedicated credentials and may produce honest
@@ -335,7 +337,7 @@ None.
 
 ## Gate Result
 
-`T109_ACCEPTED_T110_PACKETIZATION_ALLOWED`
+`T109_ACCEPTED_T202C3_A006_READY`
 
 The user approved `plan.md` and `tasks.md` on 2026-08-30. T109 review and fresh
 validation are complete at `94f3495`; the user explicitly accepted the

@@ -3,7 +3,7 @@
 ## Metadata
 
 - Feature ID: `008-security-baseline`
-- Status: T202C3_A006_Amendment_Ready_For_Review
+- Status: T202C3_A006_Ready
 - Updated: 2026-08-31
 - Inputs: `spec.md`, `checklists/requirements.md`, `plan.md`, `research.md`,
   `data-model.md`, `contracts/**`, `tasks.md`, project constitution and AGENTS
@@ -25,8 +25,10 @@
   direct dependency of store only, removes the trait/plugin surface, and makes
   the combined store apply method the sole production call site. Final QA
   accepted that boundary but found one Medium in its literal call-site proof.
-  A006 remains `ready_for_review` with
-  production permission `none`; A007/A008 remain non-executable JIT outlines.
+  The final independent three-pass review at governance HEAD `3533054` accepted
+  the AST-proof repair with zero finding and issued
+  `T202C3_A006_PACKET_REVIEW_PASS`. A006 is Ready for its exact packet scopes;
+  A007/A008 remain non-executable JIT outlines.
   The 3 A001 T202C1 findings are closed by A002
   and `T202C1_A002_PACKET_REVIEW_PASS`. Historical challenge validation is now
   intrinsic, lifecycle replacement and final-state terminals are distinct, and
@@ -40,12 +42,14 @@
   packet review found mutable remote-effect parents; accepted T202C1S replaces
   them with immutable version parents and closes that High finding. T202C2 A006
   independently passed with zero findings.
-- Medium findings: 1 open pending another independent review. The literal
+- Medium findings: 0 unresolved. The literal
   sole-call scan can be bypassed by aliases, wildcards, re-exports, macros,
   function pointers, or indirect bindings. A008 now owns a dedicated exhaustive
   AST allowlist over every production store Rust file, composed with Cargo
   direct-dependency, no-re-export, and runtime compile-fail proofs. The test is
-  specified but not implemented; A007/A008 remain non-executable. The 1 A001 T202C1 finding is closed by A002
+  specified but not implemented as future A008 work; the packet-level finding
+  is closed by `T202C3_A006_PACKET_REVIEW_PASS`. A007/A008 remain non-executable.
+  The 1 A001 T202C1 finding is closed by A002
   and `T202C1_A002_PACKET_REVIEW_PASS`. A 128-or-more complete legal-history RED
   plus indexed EXPLAIN plans and O(1) memory review is now mandatory. Canonical schema ownership
   is assigned to T202B and propagated through T202C-T202E, the unreleased T202A
@@ -75,13 +79,13 @@ prohibited trait implementation. The T202C1S registry-parent preflight is
 currently called once but has no dedicated test-support query counter; T202C2
 must preserve that placement or add an explicit counter before loop expansion.
 - Execution decision: T201, T202A, T202B, T202C1, T202C1S, and T202C2 are
-  Accepted. T202C3 has a revised contract under review and remains non-executable after the user's
+  Accepted. T202C3 remains non-Accepted after the user's
   acceptance of `T202C3-A005` at production commit `316dae0` and approval of the
   cleanup security-contract amendment on 2026-08-30. The orchestrator approved
   the material unpublished store-only credential-crate architecture under
   delegated authority on 2026-08-31, superseding the flawed shared formulation.
-  The next attempt, T202C3-A006, awaits another independent packet
-  review and has no production execution permission.
+  T202C3-A006 holds `T202C3_A006_PACKET_REVIEW_PASS` and is Ready only for
+  its exact packet-listed production/test scopes; A007/A008 remain closed.
   T202C4, T202D-T202E, and T203-T212 remain dependency-gated Draft work. T204
   and every later task directly require the T202 umbrella to be Accepted.
 
@@ -520,9 +524,9 @@ T202C2 owns account-create issuance and transitions; T202C3 owns remaining accou
 credential, and delete-only cleanup lifecycles; T202C4 owns six remote challenge
 effects and aggregate T202C validation. These tasks are strict serial because
 they share the authority transaction, validator, event stream, and fixture
-surface. T202C2 is Accepted. The first A006 review failed with three High
-findings; this amendment is ready for repeat review while production permission
-remains closed. A007/A008 remain non-executable outlines. T202C4 plus
+surface. T202C2 is Accepted. T202C3-A006 passed final independent spec,
+engineering, and QA review at `3533054` and is Ready only for its exact packet
+scopes. A007/A008 remain non-executable outlines. T202C4 plus
 T202D-T202E remain dependency-gated Draft tasks, and T202 remains a Draft
 acceptance umbrella.
 
@@ -540,8 +544,8 @@ grandfathers unchanged accepted predecessor vectors and makes the account-
 transition recovery store row immutable for every canonical-v1 path through
 T202E, but its generic T1-after-T2 retry matrix still included recovery. A006
 limits cross-transition retry to finalized/aborted terminals and gives
-RecoveryRequired only an unchanged-current-row, no-successor retry case. T202C2
-remains non-executable until independent A006 review passes.
+RecoveryRequired only an unchanged-current-row, no-successor retry case. That
+T202C2 gate is closed by `T202C2_A006_PACKET_REVIEW_PASS`.
 
 ## Watch Items
 
@@ -616,6 +620,6 @@ rule still contradicted recovery terminality. A006 limits that rule to
 finalized/aborted transitions and freezes RecoveryRequired retry to the unchanged
 terminal current row with no successor. Independent A006 review replayed the
 prior findings, reported zero Critical, High, Medium, or Low, and issued
-`T202C2_A006_PACKET_REVIEW_PASS`. T202C2 is Accepted. T202C3-A006 awaits its
-independent packet review with no production permission; the T202C and T202
-umbrellas remain non-Accepted.
+`T202C2_A006_PACKET_REVIEW_PASS`. T202C2 is Accepted. T202C3-A006 holds
+`T202C3_A006_PACKET_REVIEW_PASS` and exact scoped execution permission; the
+T202C and T202 umbrellas remain non-Accepted.

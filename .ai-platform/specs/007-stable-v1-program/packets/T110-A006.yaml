@@ -4,7 +4,7 @@ task_id: T110
 feature_id: 007-stable-v1-program
 mode: delegated_test_first_execution
 adapter: codex_worker
-status: ready_for_review
+status: ready
 
 governance_inputs:
   constitution: .ai-platform/memory/constitution.md
@@ -22,6 +22,7 @@ governance_inputs:
   account_contract: .ai-platform/specs/008-security-baseline/contracts/account-config-v2.md
   data_model: .ai-platform/specs/008-security-baseline/data-model.md
   predecessor_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A005.md
+  packet_review_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A006-packet-review.md
   approval_gates:
     T202C3_A005: accepted by user on 2026-08-30 at production commit 316dae0
     cleanup_contract: approved by user on 2026-08-30
@@ -40,8 +41,10 @@ governance_inputs:
       First review failed with three High findings. Repeat review accepted the
       binding and clock repairs but found one High in the public low-level
       deletion surface. Final QA of the store-only repair found one Medium in
-      the literal call-site scan; this focused AST-allowlist revision is pending
-      another independent review.
+      the literal call-site scan. At HEAD 3533054, final independent spec,
+      engineering, and QA passes each returned PASS with zero Critical, High,
+      Medium, or Low finding and authorized exact A006 production/test scopes.
+    packet_review_token: T202C3_A006_PACKET_REVIEW_PASS
 
 work_unit:
   title: Issue an exact effect-free credential-cleanup challenge
@@ -59,7 +62,7 @@ work_unit:
   depends_on:
     - T202C3-A005 Accepted at production commit 316dae0
     - approved cleanup security contract in 008 canonical artifacts
-    - independent review of this packet before production permission
+    - T202C3_A006_PACKET_REVIEW_PASS at governance HEAD 3533054
   blocks:
     - T202C3-A007 cleanup claim packetization
     - T202C3 completion
@@ -70,6 +73,7 @@ work_unit:
 codebase_context:
   branch: codex/v1-roadmap-governance
   baseline_head: 43d0d0e
+  reviewed_governance_head: 3533054
   existing_surfaces:
     - sealed CredentialCleanupManifest and canonical authorization TLV helpers in kirje-core
     - transition-bound private cleanup reservations and cleanup-ready event 15 from accepted A002/A003
@@ -168,9 +172,12 @@ later_attempt_outlines:
     kirje-credential or locator material.
 
 execution_constraints:
-  production_permission: none_pending_independent_packet_review
-  test_permission: none_pending_independent_packet_review
-  future_allowed_files:
+  production_permission:
+    - crates/kirje-store/src/authority.rs
+  test_permission:
+    - crates/kirje-store/tests/authority_registry.rs
+    - crates/kirje-store/tests/fixtures/authority/registry/account_credential_cleanup/**
+  allowed_files:
     - crates/kirje-store/src/authority.rs
     - crates/kirje-store/tests/authority_registry.rs
     - crates/kirje-store/tests/fixtures/authority/registry/account_credential_cleanup/**
@@ -179,9 +186,8 @@ execution_constraints:
     - cleanup claim/delete, permit, deletion backend, runtime, config, keyring, protocol, CLI, MCP, network, or remote-effect behavior
     - transition state-machine behavior outside locator input hardening before cleanup insertion
   write_rules:
-    - No production or test edit may begin until independent packet review changes both permissions.
-    - After review, write a discriminating focused RED before production changes.
-    - A worker edits only future_allowed_files and does not delegate.
+    - Begin with a discriminating focused RED and confirm its expected failure before production changes.
+    - A worker edits only the exact production_permission and test_permission paths and does not delegate.
     - A worker writes only production/test/fixture paths above; evidence, SSOT, packet, and status files remain orchestrator-owned.
     - Deterministic synthetic non-real locator transcript bytes may appear only in authority_registry.rs for canonical byte goldens.
     - Signature fixtures may contain deterministic synthetic public signatures only and never locator transcripts; evidence/output/logs contain only vector IDs, digests, counts, and pass/fail results.
@@ -235,6 +241,7 @@ evidence_contract:
     - credentials, addresses, endpoints, private keys, seeds, real proofs/nonces, mailbox content, or real provider data
 
 review_contract:
+  required_review: satisfied by T202C3_A006_PACKET_REVIEW_PASS at governance HEAD 3533054
   pass_1_spec_compliance:
     - exact transcripts, explicit cleanup-only historical-before binding exception, transition-bound legacy, ready eligibility, and no core/schema change
   pass_2_engineering:
@@ -242,23 +249,23 @@ review_contract:
   pass_3_qa:
     - golden/mutation, malformed reservation/prepare, active/removed/later-history, blocked/recovery, NULL transition, corruption, clock-only reuse, expired replacement, concurrent issuance/restart, response loss, and zero-external-call coverage
   packet_pass_condition:
-    - no unresolved Critical, High, or Medium finding
+    - no unresolved Critical, High, Medium, or Low finding
     - independent reviewer explicitly authorizes production and test execution in a governance follow-up
   production_acceptance:
     - TDD, every validation command, sanitized evidence, and all three reviews pass
     - orchestrator may then record delegated acceptance without claiming user personal review
 
 handoff:
-  current_state: revised amendment ready_for_review after failed first review; production and test permission none
-  after_packet_review: A006 Ready only if an independent review explicitly changes both permissions
+  current_state: A006 Ready after T202C3_A006_PACKET_REVIEW_PASS at governance HEAD 3533054; exact production/test scopes authorized
+  after_packet_review: satisfied; do not broaden the authorized scopes
   after_execution: A006 review_complete or delegated Accepted from evidence; A007 may then be packetized just in time
   commit_policy:
     - local commits only
     - no push, merge, tag, publish, GitHub Release, live provider, mailbox, credential, or external destructive operation
 
 stop_conditions:
-  - Independent packet review finds any unresolved Critical, High, or Medium issue.
-  - Production or test work is requested while permission remains none.
+  - A later review revokes T202C3_A006_PACKET_REVIEW_PASS or finds a new unresolved Critical, High, or Medium issue.
+  - Production or test work is requested outside the exact permission lists.
   - A required change touches schema, core transcripts/types, dependencies, runtime, keyring, protocol, CLI, MCP, network, or external calls.
   - Locator material or private origin values would enter output, events, logs, fixtures, evidence, Debug, serialization, cloning, or byte export.
   - Synthetic locator transcript bytes would appear outside authority_registry.rs, or any real/private locator bytes would enter a committed file.

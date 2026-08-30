@@ -39,8 +39,8 @@ No parser dependency or AST test is implemented by this governance attempt.
 - T204 reruns these controls and may not weaken, remove, or bypass them. It
   continues to own only high-level runtime/CLI integration and legacy
   `SecretStore` path removal.
-- A006 remains `ready_for_review` with production and test permissions closed.
-  A007 and A008 remain non-executable.
+- A006's final packet gate is recorded separately in
+  `T202C3-A006-packet-review.md`. A007 and A008 remain non-executable.
 
 ## Validation
 
@@ -50,6 +50,7 @@ No parser dependency or AST test is implemented by this governance attempt.
 
 ## Result
 
-`M-A006-R3-001` is proposed fixed in canonical governance artifacts but remains
-open until independent review. This attempt claims no implementation or user
+Final independent review at governance HEAD `3533054` closed
+`M-A006-R3-001` with zero finding and issued
+`T202C3_A006_PACKET_REVIEW_PASS`. This attempt claims no implementation or user
 review of unseen work.

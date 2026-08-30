@@ -648,5 +648,7 @@ capability implementable. That decision specifies one unpublished low-level
 crate with `kirje-store` as its only direct dependent and supersedes any shared
 store/runtime or pluggable deletion formulation. This is an architecture decision, not an
 implementation claim and not a claim that the user personally reviewed the
-resulting artifact. Production remains closed until the applicable packet and
-evidence gates pass.
+resulting artifact. `T202C3_A006_PACKET_REVIEW_PASS` authorizes only A006's exact
+production/test scopes at governance HEAD `3533054`; later attempts remain
+closed, and production acceptance still requires TDD, validation, evidence, and
+three implementation reviews.

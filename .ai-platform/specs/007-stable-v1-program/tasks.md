@@ -147,9 +147,12 @@ the shared public deletion surface; the focused repair makes the unpublished
 crate a direct dependency of store only and the combined store apply method its
 sole production call site. Final QA found one Medium because a literal call-site
 scan could be bypassed; the A008 outline now owns an exhaustive store-production
-AST allowlist. `T202C3-A006` remains
-`ready_for_review` with production permission `none`; A007 claim and A008 delete
-completion remain non-executable just-in-time outlines.
+AST allowlist. Final independent spec, engineering, and QA reviews at governance
+HEAD `3533054` each passed with zero finding and issued
+`T202C3_A006_PACKET_REVIEW_PASS`. `T202C3-A006` is Ready with production scope
+limited to `authority.rs` and test scope limited to `authority_registry.rs` plus
+its cleanup fixture subtree. A007 claim and A008 delete completion remain
+non-executable just-in-time outlines.
 Priority: P0
 Depends on: T109 Accepted
 Blocks: T111
@@ -226,9 +229,10 @@ Evidence required:
    immutable account/store versioning, and the no-cleanup/no-keyring boundary
    at commit `316dae0`; the user explicitly accepted A005 on 2026-08-30.
    The revised cleanup contract addresses the nine original findings plus the
-   three High findings from the first A006 review. `T202C3-A006` owns locator
-   reservation/prepare hardening and effect-free challenge issuance and is ready
-   for repeat independent packet review with production permission `none`.
+   three High findings from the first A006 review, the later capability High,
+   and the AST-proof Medium. `T202C3-A006` owns locator reservation/prepare
+   hardening and effect-free challenge issuance and is Ready under
+   `T202C3_A006_PACKET_REVIEW_PASS` with only its packet-listed source/test paths.
    A007 owns the unpublished credential crate/opaque locator, store-only direct
    dependency, store-private fake deletion hook, permit, claim, and event 16.
    A008 owns the real low-level keyring delete, exact private adapter method,
@@ -236,7 +240,7 @@ Evidence required:
    dependency/lock change, dependency boundary checks, delete completion, and
    event 17. T204 owns only
    high-level runtime/CLI integration and legacy `SecretStore` path removal.
-   Both remain non-executable JIT outlines until their serial predecessor passes.
+   Both remain non-executable JIT outlines until A006 execution and review pass.
 2. `T202C4`: remote challenge registry binding and planner-owned effect row.
 3. `T202D`: effect claim, invocation permit, observation, and ambiguity.
 4. `T202E`: owner rotation/recovery, audit, and aggregate authority acceptance.
