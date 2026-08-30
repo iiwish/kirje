@@ -3,7 +3,7 @@
 ## Metadata
 
 - Feature ID: `008-security-baseline`
-- Status: T202C3_A006_F001_Ready_For_Fix_Packet_Review
+- Status: T202C3_A006_F001_Blocked_Needs_Contract_Clarification
 - Updated: 2026-08-31
 - Inputs: `spec.md`, `checklists/requirements.md`, `plan.md`, `research.md`,
   `data-model.md`, `contracts/**`, `tasks.md`, project constitution and AGENTS
@@ -18,8 +18,12 @@
   target plus blocked/recovery state returns `credential_cleanup_invalid`
   instead of `account_update_conflict` or `owner_recovery_required` and leaks
   target validity. Candidate `2241a946` remains Returned/Needs Fix. The user
-  explicitly resumed A006 repair on 2026-08-31; F001 is ready for independent
-  fix-packet review with every code/fixture permission closed. The first A006 packet
+  explicitly resumed A006 repair on 2026-08-31, but F001 failed spec review
+  C0/H1/M2/L0 while engineering and QA each passed C0/H0/M0/L0. The packet
+  wrongly treated caller-supplied common IDs as signed and did not close absent,
+  pair-mismatched, or unrelated-row classification. It is blocked for contract
+  clarification; no implementation started, permissions remain closed, and the
+  heartbeat is paused. The first A006 packet
   review rejected the current-binding contradiction, incomplete clock-only
   recovery rule, and non-implementable cross-crate delete capability. The
   revised amendment makes cleanup the explicit historical-before exception,
@@ -54,12 +58,13 @@
   expired-replacement rollback; incomplete immutable projection/clock/entropy/
   concurrency/response-loss assertions; missing historical later-state and
   durable restart-corruption matrices; and incomplete effect observation,
-  external-call, and privacy proof. F001 maps these to correct-kind legacy full
-  flow and complete locator boundaries/mutations; invalid and valid replacement
-  rollback/freshness; complete immutable projection, paired-clock, entropy,
-  concurrency, restart, and cleanup response-loss checks; later update/remove/
-  recreation non-rebinding plus durable corruption; and zero `grant_uses` plus
-  every effect-table row, external call, and private disclosure. The earlier literal
+  external-call, and privacy proof. F001 additionally failed on two Medium
+  packet defects: its same-context invalid-target expired-replacement case is
+  unreachable except as step-2 persisted corruption, and closed locator shapes
+  cannot prove generic parser bounds at the integration surface. Future
+  clarification must split the three reachable replacement branches and approve
+  either a safe isolated parser seam or source/negative-control proof without
+  exposing locator bytes outside `authority_registry.rs`. The earlier literal
   sole-call scan can be bypassed by aliases, wildcards, re-exports, macros,
   function pointers, or indirect bindings. A008 now owns a dedicated exhaustive
   AST allowlist over every production store Rust file, composed with Cargo
@@ -103,9 +108,9 @@ must preserve that placement or add an explicit counter before loop expansion.
   delegated authority on 2026-08-31, superseding the flawed shared formulation.
   T202C3-A006 candidate `2241a946` is Returned/Needs Fix. The user explicitly
   resumed A006 repair on 2026-08-31 and fixed the path as A006 repair/re-review,
-  A007 claim, A008 delete, then T202C3/T110 closure. F001 is ready for
-  independent fix-packet review, not execution; production, test, and fixture
-  permissions remain none, and A007/A008 remain closed.
+  A007 claim, A008 delete, then T202C3/T110 closure. F001 failed spec review and
+  is blocked for contract clarification; production, test, and fixture
+  permissions remain none, the heartbeat is paused, and A007/A008 remain closed.
   T202C4, T202D-T202E, and T203-T212 remain dependency-gated Draft work. T204
   and every later task directly require the T202 umbrella to be Accepted.
 
@@ -642,5 +647,6 @@ terminal current row with no successor. Independent A006 review replayed the
 prior findings, reported zero Critical, High, Medium, or Low, and issued
 `T202C2_A006_PACKET_REVIEW_PASS`. T202C2 is Accepted. Returned candidate
 `T202C3-A006` retains one High and five Medium findings. The user resumed repair,
-and F001 is ready only for independent fix-packet review with no current
-execution permission; the T202C and T202 umbrellas remain non-Accepted.
+but F001 failed spec review C0/H1/M2/L0 and is blocked pending contract
+clarification with no execution permission; the T202C and T202 umbrellas remain
+non-Accepted.

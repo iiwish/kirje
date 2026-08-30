@@ -7,9 +7,10 @@
 failed with 1 High/1 Medium and QA failed with 4 Medium findings. Autonomous
 execution stopped and the heartbeat was paused under the user's High-stop
 condition. The user explicitly resumed A006 repair on 2026-08-31. Fix candidate
-packet `T202C3-A006-F001` is ready for independent packet review with no
-production, test, or fixture permission; A006, T202C3, and T110 remain
-unaccepted. `T202C3-A001` challenge issuance is reviewed
+packet `T202C3-A006-F001` then failed spec review C0/H1/M2/L0 while engineering
+and QA passed C0/H0/M0/L0. It is blocked for contract clarification; no
+implementation started, permissions remain none, and the heartbeat is paused.
+A006, T202C3, and T110 remain unaccepted. `T202C3-A001` challenge issuance is reviewed
 at production commit
 `daf22a0`. `T202C3-A002` account-update transition execution is accepted at
 production commit `2c00f32` by explicit user decision on 2026-08-30.
@@ -101,7 +102,7 @@ e5613c2fef5f0181dfe06ededec939b4e132fc4bbf1cd656dbdfbfe26f076608  crates/kirje-s
 - Attempt: `.ai-platform/evidence/T202C3/attempts/T202C3-A004.md`
 - Attempt: `.ai-platform/evidence/T202C3/attempts/T202C3-A005.md`
 - Returned attempt: `.ai-platform/evidence/T202C3/attempts/T202C3-A006.md`
-- Pending fix-packet review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F001-packet-review.md`
+- Failed fix-packet review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F001-packet-review.md`
 - Contract amendment: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract.md`
 - Contract fix: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract-A002.md`
 - Contract fix: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract-A003.md`
@@ -126,8 +127,10 @@ call site. A008 must prove this with an exhaustive AST allowlist across every
 production store Rust file, plus Cargo direct-dependency, no-re-export, and
 runtime compile-fail controls; no AST test exists yet. Returned candidate
 `T202C3-A006` retains one High and five Medium findings. The user resumed repair,
-and F001 encodes each as a discriminating TDD obligation, beginning with mixed
-blocked/recovery plus invalid-target precedence, but is not executable before
-independent packet review. A007 claim and A008 delete completion remain
-non-executable just-in-time outlines. T202C3 and T110 are not Accepted; the
-authority umbrella remains Draft.
+but F001 failed because it treated caller-supplied common IDs as signed and left
+absent/pair-mismatch/unrelated-row public classification undefined. Its two
+Mediums require reachable replacement cases and a safe isolated-parser or
+source/negative-control proof to be clarified. No implementation started and no
+user choice is inferred. A007 claim and A008 delete completion remain non-
+executable just-in-time outlines. T202C3 and T110 are not Accepted; the authority
+umbrella remains Draft.

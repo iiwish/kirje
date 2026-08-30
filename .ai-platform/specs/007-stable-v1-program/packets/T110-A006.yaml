@@ -4,7 +4,7 @@ task_id: T110
 feature_id: 007-stable-v1-program
 mode: delegated_test_first_execution
 adapter: codex_worker
-status: ready_for_fix_packet_review
+status: blocked_needs_contract_clarification
 
 governance_inputs:
   constitution: .ai-platform/memory/constitution.md
@@ -56,7 +56,10 @@ governance_inputs:
       delete, then closure of T202C3/T110. This clears only the prior resume
       gate; it does not authorize production, test, or fixture edits before
       this F001 fix packet passes independent review.
-    fix_packet_review: pending; no pass token or execution authorization exists
+    fix_packet_review: >-
+      FAILED at governance HEAD c5732acb78409e20ba8f74a8a0c1f31dcbd19f69:
+      engineering PASS C0/H0/M0/L0; QA PASS C0/H0/M0/L0; spec FAIL
+      C0/H1/M2/L0. No pass token or execution authorization exists.
 
 work_unit:
   title: Issue an exact effect-free credential-cleanup challenge
@@ -116,7 +119,7 @@ execution_result:
     - historical later update/remove/recreation and durable restart-corruption matrices are incomplete
     - effect_observations, external-call cardinality, and privacy proof are incomplete
   resume_gate: satisfied by explicit user resume on 2026-08-31
-  next_gate: independent F001 fix-packet review with zero findings and explicit scope authorization
+  next_gate: contract clarification and a new independently reviewed fix packet; no implementation attempt started
 
 contract_snapshot:
   locator:
@@ -167,12 +170,11 @@ contract_snapshot:
       NULL transition, and returns owner_recovery_required without a private
       target distinction.
     - >-
-      For otherwise structurally valid state, mutable blocked/recovery
-      eligibility is classified from the request's signed common subject plus
-      current public authority projections before origin, locator, or tombstone
-      target-validity distinctions. Blocked store/account therefore returns
-      account_update_conflict and recovery store returns
-      owner_recovery_required even when the submitted private target is wrong.
+      ActionManifest is caller-supplied and unproved at challenge creation.
+      Common store/account IDs are untrusted typed request values, not a signed
+      subject. F001 therefore defines no executable mutable-eligibility
+      algorithm until the absent-projection, store/account pair-mismatch, and
+      unrelated-row behavior is clarified in the canonical contract.
   reservation_prepare:
     - CredentialCleanupReservation::new parses one complete bounded canonical locator transcript, checks caller kind, and derives its digest.
     - Before row insertion, prepare rederives exact kind/service/username/digest from authority realm and signed historical-before origin.
@@ -182,22 +184,31 @@ contract_snapshot:
     - Issuance and exact pending reuse create zero grant uses, cleanup mutations, effects, invocations, keyring calls, or external calls.
     - Exact pending reuse consumes no entropy, returns the same challenge, appends no event, changes no lifecycle/event timestamp, and may advance only the paired authority clock.
     - Valid expired-pending replacement records one predecessor event 5 before one successor event 3 and creates exactly one fresh grant UUID and nonce.
-    - Invalid-target replacement rolls back expiry, successor, events, clock, and entropy; concurrent exact issuance has one creator and clock-only losers.
+    - Same-context replacement can fail after later blocked/recovery eligibility and rolls back expiry, successor, events, clock, and entropy; a different-context invalid target has zero predecessor interaction.
     - Public projection, errors, logs, events, fixtures, and evidence omit locator material and private fields.
 
-fix_contract:
-  precedence_first_red:
+contract_clarification_required:
+  public_projection_precedence:
     - >-
-      Before any production edit, one focused RED combines blocked store,
-      blocked account, and recovery store cases with independently invalid
-      origin, locator, and tombstone targets. It proves precedence step 6 over
-      step 7: account_update_conflict for blocked store/account and
-      owner_recovery_required for recovery store, with zero durable mutation
-      and zero entropy consumption.
+      A future contract must run complete global schema, anchor, history,
+      transcript, and event validation first. Persisted corruption remains
+      precedence step 2 and returns owner_recovery_required.
     - >-
-      A paired persisted-corruption control proves precedence step 2 still
-      wins and returns owner_recovery_required; mutable eligibility
-      classification must neither trust nor disclose private target validity.
+      It must then treat common store/account IDs only as bounded untrusted typed
+      request data and document one closed public projection classification that
+      consults no cleanup row, origin transition, locator, tombstone, or other
+      private target-validity signal.
+    - >-
+      The contract must define exact closed behavior for absent store/account
+      projections, store/account pair mismatch, and unrelated blocked or
+      recovery rows before permitting private step-7 target validation. F001
+      makes no choice among those unresolved behaviors and does not attribute a
+      choice to the user.
+    - >-
+      A future first RED must cover known, absent, pair-mismatched, and unrelated
+      blocked/recovery public rows crossed with invalid private targets. Every
+      case must prove no target-validity distinction, durable mutation, or
+      entropy consumption.
   locator_and_legacy:
     - >-
       Every legacy negative invokes the legacy_v1 caller kind, so a rejection
@@ -206,24 +217,23 @@ fix_contract:
       unrecognized/duplicate/out-of-order tags, trailing bytes, declared-length
       mismatch, malformed or noncanonical UTF-8, and embedded NUL.
     - >-
-      Boundary cases cover service byte and character lengths 0, 1, 128, and
-      129; username byte and character lengths 0, 1, 1024, and 1025; the exact
-      greatest constructible canonical transcript; and raw complete-transcript
-      total-bound gates at 0, 1, 4096, and 4097 bytes. Canonical locator and
-      exact 14-tag tombstone byte/digest goldens each have closed-form one-field
-      mutations; the locator matrix changes only kind, service, username, or
-      digest, and the tombstone matrix changes only one tag value. Every
-      negative proves the expected closed error with zero mutation and entropy.
+      Closed active_v2 and legacy_v1 integration shapes cannot independently
+      prove generic parser length gates. A future contract must explicitly
+      choose and authorize either a safe isolated parser-classification test
+      seam or a source plus negative-control proof. Neither choice may expose
+      locator bytes outside authority_registry.rs, and F001 authorizes neither.
     - >-
       One transition-bound legacy_v1 flow succeeds through reservation,
       prepare, finalize, and exact cleanup challenge issuance from the
       historical origin-before display ID.
   replacement_reuse_and_races:
     - >-
-      Invalid-target expired-pending replacement snapshots and proves rollback
-      of predecessor challenge state and terminal event, successor row, grant
-      UUID, nonce, authority_meta.last_observed_at, authority_meta.updated_at,
-      entropy count, and cleanup projection.
+      The future matrix must separate three reachable branches: same-context
+      expired pending followed by later blocked/recovery eligibility;
+      different-context invalid target with zero predecessor interaction; and
+      persisted target/history corruption returning precedence-step-2
+      owner_recovery_required. It must not describe an unreachable
+      same-context invalid-target mutation as an executable test.
     - >-
       Valid expired replacement proves fresh grant and nonce, exactly one
       predecessor event 5 followed by exactly one successor event 3, unchanged
@@ -294,8 +304,8 @@ later_attempt_outlines:
     kirje-credential or locator material.
 
 execution_constraints:
-  production_permission: none_pending_independent_fix_packet_review
-  test_permission: none_pending_independent_fix_packet_review
+  production_permission: none_blocked_contract_clarification
+  test_permission: none_blocked_contract_clarification
   future_allowed_files:
     - crates/kirje-store/src/authority.rs
     - crates/kirje-store/tests/authority_registry.rs
@@ -305,7 +315,7 @@ execution_constraints:
     - cleanup claim/delete, permit, deletion backend, runtime, config, keyring, protocol, CLI, MCP, network, or remote-effect behavior
     - transition state-machine behavior outside locator input hardening before cleanup insertion
   write_rules:
-    - No production, test, or fixture edit may begin until independent review passes this exact F001 packet and a governance follow-up opens its exact permissions.
+    - No production, test, or fixture edit may begin until a clarified successor packet passes fresh independent review and a governance follow-up opens its exact permissions.
     - The returned attempt scope is historical evidence, not current write permission.
     - Evidence, SSOT, packet, and status files remain orchestrator-owned.
     - Deterministic synthetic non-real locator transcript bytes may appear only in authority_registry.rs for canonical byte goldens.
@@ -315,16 +325,14 @@ execution_constraints:
 
 tdd_plan:
   ordering: >-
-    The precedence RED is first. Each currently unproven review category then
-    receives a discriminating pre-change test. Where existing behavior is
-    wrong or absent, the worker must capture a real RED before the corresponding
-    production edit. If a category is already behaviorally correct, record the
-    pre-change characterization pass and add test-only proof; do not fabricate a
-    RED and do not change production for that category.
+    Non-executable while contract clarification is unresolved. A successor
+    packet must replace, not silently reinterpret, the public-projection,
+    replacement-reachability, and parser-proof obligations below and pass
+    independent review before any test or production edit.
   red:
-    - Run precedence_first_red before every production edit and retain its exact failing assertions and zero-mutation/entropy snapshot.
-    - Run the correct-kind legacy and complete locator bound/tag/domain/UTF-8/NUL/closed-form mutation matrix, including the successful transition-bound legacy flow.
-    - Run invalid expired-replacement rollback and valid replacement freshness/event-cardinality matrices.
+    - After clarification, run the known/absent/pair-mismatch/unrelated-row public-projection matrix before every production edit and retain exact zero-mutation/entropy snapshots.
+    - After a parser-proof choice is approved, run correct-kind legacy and the authorized locator proof, plus the successful transition-bound legacy flow.
+    - Run the three reachable replacement branches and valid replacement freshness/event-cardinality matrices.
     - Run complete immutable-projection, paired-clock-only reuse/loser, concurrent issuance, restart, and cleanup response-loss matrices.
     - Run later-history non-rebinding plus descriptor/origin/tuple/timestamp/ready-state durable restart-corruption matrices.
     - Run all-effect-table/grant-use/external-call cardinality and privacy/capability source scans.
@@ -358,9 +366,9 @@ evidence_contract:
   test_results_path: .ai-platform/evidence/T202C3/test-results.md
   required:
     - exact RED/GREEN commands and results
-    - first mixed blocked/recovery plus invalid-target precedence RED, persisted-corruption control, and zero-mutation/entropy snapshots
-    - correct-kind legacy success/negatives and complete locator/tombstone bounds, tags, domains, UTF-8, NUL, length, golden, and closed-form mutation matrix
-    - invalid and valid expired replacement, complete immutable projection, paired-clock-only reuse/loser, concurrency, restart, entropy/event, and cleanup response-loss matrices
+    - clarified known/absent/pair-mismatch/unrelated-row public-projection RED, persisted-corruption control, and zero-target-distinction/mutation/entropy snapshots
+    - correct-kind legacy success/negatives and the approved isolated-parser or source/negative-control locator proof, with bytes confined to authority_registry.rs
+    - three reachable replacement branches plus valid replacement, complete immutable projection, paired-clock-only reuse/loser, concurrency, restart, entropy/event, and cleanup response-loss matrices
     - historical later-update/remove/recreation non-rebinding and descriptor/origin/tuple/timestamp/ready-state restart-corruption matrices
     - zero grant-use and zero row delta for every effect table including effect_observations, plus zero cleanup/external-call and privacy/capability source proof
     - schema and Cargo.lock unchanged hashes
@@ -371,14 +379,14 @@ evidence_contract:
 
 review_contract:
   historical_review: T202C3_A006_PACKET_REVIEW_PASS at governance HEAD 3533054 authorized only the returned candidate
-  required_fix_packet_review: pending for T202C3-A006-F001; production and test permissions remain none
+  required_fix_packet_review: failed for T202C3-A006-F001 at c5732acb78409e20ba8f74a8a0c1f31dcbd19f69; engineering and QA passed, spec failed C0/H1/M2/L0
   production_review: failed at candidate commit 2241a946c399ba9c61e67e808a85f777c0d2b402
   pass_1_spec_compliance:
-    - step-2 corruption and step-6-before-step-7 mutable eligibility precedence, exact transcripts, cleanup-only historical-before binding, transition-bound legacy, and no core/schema change
+    - global corruption first; untrusted common IDs; exact absent/pair-mismatch/unrelated-row public classification before private step 7; reachable replacement branches; approved parser proof; and no core/schema change
   pass_2_engineering:
-    - strict complete bounds/mutations, reservation/prepare canonicality, streaming restart derivation, non-disclosing eligibility classification, clock-only pending reuse/losers, replacement/concurrency rollback, zero-effect transaction, and privacy/capability closure
+    - implementable non-disclosing public classification, safe parser proof, reservation/prepare canonicality, streaming restart derivation, clock-only pending reuse/losers, reachable replacement/concurrency rollback, zero-effect transaction, and privacy/capability closure
   pass_3_qa:
-    - mixed invalid-target precedence, correct-kind legacy full flow, golden/mutation, active/removed/later-history, durable corruption, complete clock/projection/entropy rollback, concurrent issuance/restart, cleanup response loss, all-effect-table zero counts, and zero-external-call/privacy coverage
+    - known/absent/pair-mismatch/unrelated public projection crossed with private mismatch, correct-kind legacy full flow, approved parser proof, reachable replacement, later-history/durable corruption, complete clock/projection/entropy rollback, concurrency/restart/response loss, all-effect-table zero counts, and privacy coverage
   packet_pass_condition:
     - no unresolved Critical, High, Medium, or Low finding
     - independent reviewer explicitly authorizes production and test execution in a governance follow-up
@@ -387,15 +395,15 @@ review_contract:
     - orchestrator may then record delegated acceptance without claiming user personal review
 
 handoff:
-  current_state: user resumed A006 repair; F001 is ready for independent fix-packet review with permissions closed
-  after_packet_review: only a zero-finding independent review plus governance authorization may open the exact future scopes
-  after_execution: F001 still requires TDD, full validation, evidence, and three implementation reviews; A007/A008 remain non-executable
+  current_state: F001 packet review failed and is blocked pending contract clarification; no implementation attempt started and heartbeat is paused
+  after_packet_review: a clarified successor packet requires a fresh zero-finding independent review and explicit scope authorization
+  after_execution: no execution is authorized; A007/A008 remain non-executable and T202C3/T110 remain unaccepted
   commit_policy:
     - local commits only
     - no push, merge, tag, publish, GitHub Release, live provider, mailbox, credential, or external destructive operation
 
 stop_conditions:
-  - Independent F001 packet review finds any unresolved issue or has not explicitly authorized the exact production/test scopes.
+  - The public-projection, replacement-reachability, or parser-proof contract remains unresolved.
   - Production, test, or fixture work is requested while permissions remain none.
   - A required change touches schema, core transcripts/types, dependencies, runtime, keyring, protocol, CLI, MCP, network, or external calls.
   - Locator material or private origin values would enter output, events, logs, fixtures, evidence, Debug, serialization, cloning, or byte export.

@@ -314,6 +314,9 @@ privacy proof.
 A006 is Returned/Needs Fix at
 `2241a946c399ba9c61e67e808a85f777c0d2b402`; passing commands do not override
 the failed reviews. Autonomous execution stopped at that gate. The user
-explicitly resumed A006 repair on 2026-08-31; F001 is ready for independent
-fix-packet review only, has no code or fixture permission, and has no new
-production test result yet.
+explicitly resumed A006 repair on 2026-08-31; F001 was submitted for independent
+fix-packet review without code or fixture permission and has no new production
+test result. That packet review returned engineering PASS
+C0/H0/M0/L0, QA PASS C0/H0/M0/L0, and spec FAIL C0/H1/M2/L0. No implementation
+attempt or production test followed; F001 is blocked for contract clarification
+and the heartbeat is paused.
