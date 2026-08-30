@@ -161,19 +161,23 @@ predecessor receipt, while unsafe observation remains fail-closed recovery.
 Review covers direct removal, create-update-remove history, display reuse only
 with fresh account and credential identities, fault rollback, expiry, restart,
 and tamper recovery. No unresolved Critical, High, or Medium finding remains.
-The user explicitly accepted A003 on 2026-08-30. Credential set is the active
-bounded attempt; credential delete, cleanup claim/delete, config, keyring,
-runtime, protocol, CLI, MCP, and network behavior remain excluded.
+The user explicitly accepted A003 on 2026-08-30. Credential set is reviewed at
+production commit `1c6d7cb`; credential delete, cleanup claim/delete, config,
+keyring, runtime, protocol, CLI, MCP, and network behavior remain excluded.
 
-`T202C3-A004` is Ready with no blocking packet finding. The credential-targeted
-grant binds the complete signed before/after account mutation and
-`active_locator_sha256`, while authority stores no credential bytes or locator
-material. Prepare advances only the account generation/receipt projection and
-blocks account/store without inserting a credential or cleanup row. Config
-commit creates the next store and account versions with the existing credential
-identity; finalize activates the authorized/bound after projection. Abort
-restores the predecessor receipt and tuple, and unsafe observation remains
-fail-closed recovery. Credential delete and cleanup remain excluded.
+`T202C3-A004` completed test-first implementation and three-pass review at
+production commit `1c6d7cb`. The credential-targeted grant binds the complete
+signed before/after account mutation and `active_locator_sha256`, while
+authority stores no credential bytes or locator material. Prepare advances only
+the account generation/receipt projection and blocks account/store without
+inserting a credential or cleanup row. Config commit creates the next store and
+account versions with the existing credential identity; finalize activates the
+authorized/bound after projection. Abort restores the predecessor receipt and
+tuple, while unsafe observation remains fail-closed recovery. Fault rollback,
+expiry, replay, restart, target mismatch, and kind corruption are covered. No
+unresolved Critical, High, or Medium finding remains. A004 awaits explicit user
+acceptance; credential delete and cleanup remain excluded and no later attempt
+is Ready.
 
 ## Current Implementation Evidence Check
 

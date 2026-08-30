@@ -7,6 +7,8 @@ Running. `T202C3-A001` challenge issuance is reviewed at production commit
 production commit `2c00f32` by explicit user decision on 2026-08-30.
 `T202C3-A003` account-remove transition execution is accepted at production
 commit `703b5a1` by explicit user decision on 2026-08-30.
+`T202C3-A004` credential-set transition execution is reviewed at production
+commit `1c6d7cb` and awaits explicit user acceptance.
 
 ## Delivered
 
@@ -31,24 +33,31 @@ commit `703b5a1` by explicit user decision on 2026-08-30.
   historical account and credential identity remains reserved.
 - Valid create-update-remove history with generation and predecessor receipt
   preservation.
+- Exact credential-set prepare, config commit, finalize, abort, unsafe recovery,
+  retry, expiry, and restart behavior.
+- Credential-targeted grant binding with the existing credential identity and
+  immutable generation-two account/store versions.
+- No credential identity, cleanup row, credential bytes, locator material, or
+  keyring/config/runtime capability added by credential set.
 
-No credential transition, cleanup claim/delete, remote effect, runtime, config,
-keyring, protocol, CLI, MCP, network, schema, dependency, or core transcript
-behavior is included.
+No credential-delete transition, cleanup claim/delete, remote effect, runtime,
+config, keyring, protocol, CLI, MCP, network, schema, dependency, or core
+transcript behavior is included.
 
 ## Review Result
 
-No unresolved Critical, High, or Medium finding. A003 review added an exact
-create-update-remove chain and historical credential-reuse negative. The
-implementation remains within the packet-authorized authority source, registry
-test, and synthetic public-signature fixture.
+No unresolved Critical, High, or Medium finding. A004 review covers terminal
+abort/recovery replay, target mismatch, injected prepare/commit/finalize faults,
+expiry, restart, and transition-kind corruption. The implementation remains
+within the packet-authorized authority source, registry test, and synthetic
+public-signature fixture.
 
 ## Final Content Hashes
 
 ```text
-386b40cef1263a0531929d7c876808f261f9dcd65f552dd8e5a2ec84a552aa1c  crates/kirje-store/src/authority.rs
-bf0fda3157f7c3d34797a0597a875b8d9fb4a91ce2f974c4b3077a5b779dc993  crates/kirje-store/tests/authority_registry.rs
-dc436366e7ea00b294d5640328a48e5a9de077be83cba836420fdd7fa87aee5c  crates/kirje-store/tests/fixtures/authority/registry/account_credential_cleanup/signatures.txt
+d4c4441c5edd2471b935eb37dd27be1c4ee059145bbe8a8eef2aafe786d51927  crates/kirje-store/src/authority.rs
+5295983330486f8b48c5cf75bada42183c28e196620bab3a5501b3074e4dbd0a  crates/kirje-store/tests/authority_registry.rs
+dcd04d612653ee5dc03c64e504cbb243d6909ba772b5b92c3eed9bbf03105740  crates/kirje-store/tests/fixtures/authority/registry/account_credential_cleanup/signatures.txt
 5d01739b89246a5f495a965e57e416eee9fd0b5016995add41c6edee7f3e970d  crates/kirje-store/src/authority/schema_v1.sql
 596ddb0071ecb38b0b9429c5d91cdbb83abe6a25bc760cf9588b2764274ff850  Cargo.lock
 ```
@@ -58,11 +67,13 @@ dc436366e7ea00b294d5640328a48e5a9de077be83cba836420fdd7fa87aee5c  crates/kirje-s
 - Attempt: `.ai-platform/evidence/T202C3/attempts/T202C3-A001.md`
 - Attempt: `.ai-platform/evidence/T202C3/attempts/T202C3-A002.md`
 - Attempt: `.ai-platform/evidence/T202C3/attempts/T202C3-A003.md`
+- Attempt: `.ai-platform/evidence/T202C3/attempts/T202C3-A004.md`
 - Test results: `.ai-platform/evidence/T202C3/test-results.md`
-- Production commits: `daf22a0`, `2c00f32`, `703b5a1`
+- Production commits: `daf22a0`, `2c00f32`, `703b5a1`, `1c6d7cb`
 
 ## Residual Scope
 
-Credential set/delete transitions remain fail-closed unsupported. Cleanup
-challenge, claim, and delete remain unimplemented. Credential set is the active
-serial T202C3 attempt; T202C3, T110, and the authority umbrella remain Running.
+Credential delete remains fail-closed unsupported. Cleanup challenge, claim,
+and delete remain unimplemented. A004 awaits explicit acceptance before a
+credential-delete packet can become Ready. T202C3, T110, and the authority
+umbrella remain Running.
