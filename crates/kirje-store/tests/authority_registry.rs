@@ -10,11 +10,12 @@ use std::{
 use kirje_core::{
     AccountBinding, AccountId, AccountSnapshot, AccountStateReason, ActionManifest,
     AuthorizationGrantId, AuthorizationProof, AuthorizationReceiptProjection,
-    AuthorizationReceiptState, BindingState, ConfigCas, CredentialId, CredentialKind, Endpoint,
-    EndpointSnapshot, HostKind, MailAccountConfig, MailError, MailErrorCode, ManifestContext,
-    ManifestPayload, ManifestTarget, OwnerPublicKey, PlatformLocationMaterial, Protocol,
-    SensitiveAction, Sha256Digest, StoreEnrollManifest, StoreEnrollmentState, StoreId,
-    StoredCredentialState, TargetKind, TransitionId, TransportSecurity,
+    AuthorizationReceiptState, BindingState, CleanupDescriptor, CleanupId, CleanupState, ConfigCas,
+    CredentialId, CredentialKind, CredentialMutationManifest, Endpoint, EndpointSnapshot, HostKind,
+    LocatorKind, MailAccountConfig, MailError, MailErrorCode, ManifestContext, ManifestPayload,
+    ManifestTarget, OwnerPublicKey, PlatformLocationMaterial, Protocol, SensitiveAction,
+    Sha256Digest, StoreEnrollManifest, StoreEnrollmentState, StoreId, StoredCredentialState,
+    TargetKind, TransitionId, TransportSecurity,
 };
 use kirje_store::{
     AccountTransitionKind, AccountTransitionObservationRequest, AccountTransitionProjection,
@@ -289,37 +290,7 @@ fn account_manifest() -> ActionManifest {
 fn account_manifest_with_state_reason(state_reason: Option<AccountStateReason>) -> ActionManifest {
     let account_id = account_id();
     let binding_sha256 = account_binding().sha256();
-    let after = AccountSnapshot {
-        display_id: account_vector("display_id").to_owned(),
-        account_id,
-        generation: NonZeroU64::new(1).unwrap(),
-        email: account_vector("email").to_owned(),
-        username: account_vector("username").to_owned(),
-        credential_kind: CredentialKind::AppPassword,
-        credential_id: credential_id(),
-        binding_version: 1,
-        binding_sha256,
-        binding_state: BindingState::Proposed,
-        credential_state: StoredCredentialState::ReentryRequired,
-        state_reason,
-        incoming: EndpointSnapshot {
-            protocol: Protocol::Imap,
-            exact_host: account_vector("incoming_host").to_owned(),
-            host_kind: HostKind::Dns,
-            canonical_host: account_vector("incoming_host").to_owned(),
-            port: 993,
-            security: TransportSecurity::ImplicitTls,
-        },
-        outgoing: Some(EndpointSnapshot {
-            protocol: Protocol::Smtp,
-            exact_host: account_vector("outgoing_host").to_owned(),
-            host_kind: HostKind::Dns,
-            canonical_host: account_vector("outgoing_host").to_owned(),
-            port: 465,
-            security: TransportSecurity::ImplicitTls,
-        }),
-        cleanup_ids: Vec::new(),
-    };
+    let after = initial_account_snapshot(state_reason);
     ActionManifest::new(
         ManifestContext {
             target: ManifestTarget::Account(account_id),
@@ -343,6 +314,243 @@ fn account_manifest_with_state_reason(state_reason: Option<AccountStateReason>) 
             after_config_sha256: account_after_config_sha256(),
             cleanup: Vec::new(),
         }),
+    )
+    .unwrap()
+}
+
+fn initial_account_snapshot(state_reason: Option<AccountStateReason>) -> AccountSnapshot {
+    AccountSnapshot {
+        display_id: account_vector("display_id").to_owned(),
+        account_id: account_id(),
+        generation: NonZeroU64::new(1).unwrap(),
+        email: account_vector("email").to_owned(),
+        username: account_vector("username").to_owned(),
+        credential_kind: CredentialKind::AppPassword,
+        credential_id: credential_id(),
+        binding_version: 1,
+        binding_sha256: account_binding().sha256(),
+        binding_state: BindingState::Proposed,
+        credential_state: StoredCredentialState::ReentryRequired,
+        state_reason,
+        incoming: EndpointSnapshot {
+            protocol: Protocol::Imap,
+            exact_host: account_vector("incoming_host").to_owned(),
+            host_kind: HostKind::Dns,
+            canonical_host: account_vector("incoming_host").to_owned(),
+            port: 993,
+            security: TransportSecurity::ImplicitTls,
+        },
+        outgoing: Some(EndpointSnapshot {
+            protocol: Protocol::Smtp,
+            exact_host: account_vector("outgoing_host").to_owned(),
+            host_kind: HostKind::Dns,
+            canonical_host: account_vector("outgoing_host").to_owned(),
+            port: 465,
+            security: TransportSecurity::ImplicitTls,
+        }),
+        cleanup_ids: Vec::new(),
+    }
+}
+
+fn active_account_fixture() -> ReadyFixture {
+    let fixture = account_ready_fixture();
+    let (authorized, _) = authorize_account_create(&fixture);
+    open_ready(&fixture, deterministic(Vec::new()))
+        .prepare_account_transition(prepare_account_request(&authorized, 501_200))
+        .unwrap();
+    open_ready(&fixture, deterministic(Vec::new()))
+        .mark_config_committed(observe_account(
+            AccountTransitionState::Prepared,
+            2,
+            account_after_config_sha256(),
+            501_300,
+        ))
+        .unwrap();
+    open_ready(&fixture, deterministic(Vec::new()))
+        .finalize_account_transition(observe_account(
+            AccountTransitionState::ConfigCommitted,
+            2,
+            account_after_config_sha256(),
+            501_400,
+        ))
+        .unwrap();
+    fixture
+}
+
+fn t202c3_uuid<T: FromStr>(namespace: u32, index: usize) -> T
+where
+    <T as FromStr>::Err: std::fmt::Debug,
+{
+    T::from_str(&synthetic_uuid(index, namespace)).unwrap()
+}
+
+fn account_control_manifest(action: SensitiveAction, index: usize) -> ActionManifest {
+    account_control_manifest_with_generation(action, index, 1)
+}
+
+fn account_control_manifest_with_generation(
+    action: SensitiveAction,
+    index: usize,
+    account_generation: u64,
+) -> ActionManifest {
+    account_control_manifest_with_shape(action, index, account_generation, true)
+}
+
+#[allow(clippy::too_many_lines)]
+fn account_control_manifest_with_shape(
+    action: SensitiveAction,
+    index: usize,
+    account_generation: u64,
+    intrinsic_shape_is_valid: bool,
+) -> ActionManifest {
+    let mut before = initial_account_snapshot(Some(AccountStateReason::CredentialReentryRequired));
+    before.generation = NonZeroU64::new(account_generation).unwrap();
+    let next_account_generation = NonZeroU64::new(account_generation + 1).unwrap();
+    let transition_id = t202c3_uuid::<TransitionId>(0x5300_0000, index);
+    let after_config_sha256 =
+        Sha256Digest::digest(format!("synthetic-t202c3-after-config-{index}").as_bytes());
+    let config_cas = ConfigCas {
+        store_id: store_id(0),
+        generation: NonZeroU64::new(2).unwrap(),
+        exact_content_sha256: account_after_config_sha256(),
+        location_sha256: location_sha256(0),
+    };
+    let mutation = match action {
+        SensitiveAction::AccountUpdate => {
+            let cleanup_id = t202c3_uuid::<CleanupId>(0x5400_0000, index);
+            let new_credential_id = t202c3_uuid::<CredentialId>(0x5500_0000, index);
+            let updated_config = MailAccountConfig {
+                id: before.display_id.clone(),
+                email: before.email.clone(),
+                username: before.username.clone(),
+                incoming: Endpoint {
+                    protocol: Protocol::Imap,
+                    host: before.incoming.exact_host.clone(),
+                    port: 993,
+                    security: TransportSecurity::ImplicitTls,
+                },
+                outgoing: Some(Endpoint {
+                    protocol: Protocol::Smtp,
+                    host: before.outgoing.as_ref().unwrap().exact_host.clone(),
+                    port: 465,
+                    security: TransportSecurity::ImplicitTls,
+                }),
+                credential_kind: CredentialKind::Password,
+            };
+            let mut after = before.clone();
+            after.generation = next_account_generation;
+            after.credential_kind = CredentialKind::Password;
+            after.credential_id = new_credential_id;
+            after.binding_sha256 = AccountBinding::from_config(&updated_config)
+                .unwrap()
+                .sha256();
+            after.binding_state = BindingState::Authorized;
+            after.credential_state = StoredCredentialState::ReentryRequired;
+            after.state_reason = Some(AccountStateReason::CredentialReentryRequired);
+            let cleanup = if intrinsic_shape_is_valid {
+                after.cleanup_ids.push(cleanup_id);
+                vec![CleanupDescriptor {
+                    cleanup_id,
+                    locator_kind: LocatorKind::ActiveV2,
+                    locator_sha256: Sha256Digest::digest(b"synthetic-old-active-locator"),
+                    expected_state: CleanupState::Provisional,
+                }]
+            } else {
+                Vec::new()
+            };
+            (
+                ManifestPayload::AccountUpdate(kirje_core::AccountMutationManifest {
+                    transition_id,
+                    config_cas,
+                    before: Some(before),
+                    after: Some(after.clone()),
+                    next_config_generation: NonZeroU64::new(3).unwrap(),
+                    after_config_sha256,
+                    cleanup,
+                }),
+                ManifestTarget::Account(account_id()),
+                after.binding_sha256,
+            )
+        }
+        SensitiveAction::AccountRemove => {
+            let cleanup_id = t202c3_uuid::<CleanupId>(0x5400_0000, index);
+            let cleanup = intrinsic_shape_is_valid
+                .then_some(CleanupDescriptor {
+                    cleanup_id,
+                    locator_kind: LocatorKind::ActiveV2,
+                    locator_sha256: Sha256Digest::digest(b"synthetic-current-active-locator"),
+                    expected_state: CleanupState::Provisional,
+                })
+                .into_iter()
+                .collect();
+            (
+                ManifestPayload::AccountRemove(kirje_core::AccountMutationManifest {
+                    transition_id,
+                    config_cas,
+                    before: Some(before.clone()),
+                    after: None,
+                    next_config_generation: NonZeroU64::new(3).unwrap(),
+                    after_config_sha256,
+                    cleanup,
+                }),
+                ManifestTarget::Account(account_id()),
+                before.binding_sha256,
+            )
+        }
+        SensitiveAction::CredentialSet | SensitiveAction::CredentialDelete => {
+            let mut before = before;
+            let mut after = before.clone();
+            after.generation = next_account_generation;
+            if action == SensitiveAction::CredentialSet {
+                after.binding_state = BindingState::Authorized;
+                after.credential_state = StoredCredentialState::Bound;
+                after.state_reason = (!intrinsic_shape_is_valid)
+                    .then_some(AccountStateReason::CredentialReentryRequired);
+            } else {
+                before.binding_state = BindingState::Authorized;
+                before.credential_state = StoredCredentialState::Bound;
+                before.state_reason = None;
+                after = before.clone();
+                after.generation = next_account_generation;
+                after.credential_state = StoredCredentialState::Missing;
+                after.state_reason = (!intrinsic_shape_is_valid)
+                    .then_some(AccountStateReason::CredentialReentryRequired);
+            }
+            let credential = CredentialMutationManifest {
+                account: kirje_core::AccountMutationManifest {
+                    transition_id,
+                    config_cas,
+                    before: Some(before.clone()),
+                    after: Some(after.clone()),
+                    next_config_generation: NonZeroU64::new(3).unwrap(),
+                    after_config_sha256,
+                    cleanup: Vec::new(),
+                },
+                active_locator_sha256: Sha256Digest::digest(b"synthetic-active-locator"),
+            };
+            let payload = if action == SensitiveAction::CredentialSet {
+                ManifestPayload::CredentialSet(credential)
+            } else {
+                ManifestPayload::CredentialDelete(credential)
+            };
+            (
+                payload,
+                ManifestTarget::Credential(credential_id()),
+                after.binding_sha256,
+            )
+        }
+        _ => unreachable!(),
+    };
+    ActionManifest::new(
+        ManifestContext {
+            target: mutation.1,
+            store_id: Some(store_id(0)),
+            account_id: Some(account_id()),
+            account_binding_sha256: Some(mutation.2),
+            policy_sha256: None,
+            effect_id: None,
+        },
+        mutation.0,
     )
     .unwrap()
 }
@@ -2782,6 +2990,129 @@ fn account_create_challenge_requires_the_reentry_state_reason() {
     assert_eq!(
         issuance_fingerprint(&Connection::open(fixture.home.database_path()).unwrap()),
         before
+    );
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn remaining_account_and_credential_challenges_are_exact() {
+    let fixture = active_account_fixture();
+    let actions = [
+        SensitiveAction::AccountUpdate,
+        SensitiveAction::AccountRemove,
+        SensitiveAction::CredentialSet,
+        SensitiveAction::CredentialDelete,
+    ];
+    let before = issuance_fingerprint(&Connection::open(fixture.home.database_path()).unwrap());
+
+    for (index, action) in actions.into_iter().enumerate() {
+        let manifest = account_control_manifest(action, index + 1);
+        let entropy = deterministic(vec![u8::try_from(index + 1).unwrap(); 48]);
+        let request = CreateChallengeRequest {
+            manifest: manifest.clone(),
+            observed_at_unix_ms: 502_000 + i64::try_from(index).unwrap() * 100,
+            expires_at_unix_ms: 502_900 + i64::try_from(index).unwrap() * 100,
+        };
+        let first = open_ready(&fixture, entropy.clone())
+            .create_challenge(request.clone())
+            .unwrap();
+        assert_eq!(entropy.consumed_bytes(), 48);
+        assert_eq!(first.action, action);
+        assert_eq!(first.manifest_sha256, manifest.sha256());
+
+        let retry_entropy = deterministic(Vec::new());
+        let retry = open_ready(&fixture, retry_entropy.clone())
+            .create_challenge(request)
+            .unwrap();
+        assert_eq!(retry.challenge_id, first.challenge_id);
+        assert_eq!(retry_entropy.consumed_bytes(), 0);
+    }
+
+    let connection = Connection::open(fixture.home.database_path()).unwrap();
+    let after = issuance_fingerprint(&connection);
+    assert_eq!(after.0, before.0 + 4);
+    assert_eq!(after.1, before.1 + before.2 * 4 + 10);
+    assert_eq!(after.2, before.2 + 4);
+    assert_eq!(after.3, before.3);
+    assert_eq!(after.4, before.4);
+    assert_eq!(
+        scalar(&connection, "SELECT COUNT(*) FROM challenge_effects"),
+        0
+    );
+    assert_eq!(
+        scalar(&connection, "SELECT COUNT(*) FROM account_transitions"),
+        1
+    );
+    assert_eq!(
+        scalar(&connection, "SELECT COUNT(*) FROM credential_cleanup"),
+        0
+    );
+    assert_eq!(
+        scalar(&connection, "SELECT COUNT(*) FROM remote_effects"),
+        0
+    );
+    drop(connection);
+
+    let intrinsic_before =
+        issuance_fingerprint(&Connection::open(fixture.home.database_path()).unwrap());
+    for (index, action) in actions.into_iter().enumerate() {
+        let entropy = deterministic(vec![0xc7; 48]);
+        let error = exact_error(open_ready(&fixture, entropy.clone()).create_challenge(
+            CreateChallengeRequest {
+                manifest: account_control_manifest_with_shape(action, index + 30, 1, false),
+                observed_at_unix_ms: 502_500 + i64::try_from(index).unwrap() * 100,
+                expires_at_unix_ms: 503_400 + i64::try_from(index).unwrap() * 100,
+            },
+        ));
+        assert_eq!(error.code, MailErrorCode::AuthorizationContextStale);
+        assert_eq!(entropy.consumed_bytes(), 0);
+    }
+    assert_eq!(
+        issuance_fingerprint(&Connection::open(fixture.home.database_path()).unwrap()),
+        intrinsic_before
+    );
+
+    let stale_before =
+        issuance_fingerprint(&Connection::open(fixture.home.database_path()).unwrap());
+    let stale_entropy = deterministic(vec![0xa5; 48]);
+    let stale = exact_error(
+        open_ready(&fixture, stale_entropy.clone()).create_challenge(CreateChallengeRequest {
+            manifest: account_control_manifest_with_generation(
+                SensitiveAction::AccountRemove,
+                20,
+                2,
+            ),
+            observed_at_unix_ms: 502_500,
+            expires_at_unix_ms: 503_400,
+        }),
+    );
+    assert_eq!(stale.code, MailErrorCode::AuthorizationContextStale);
+    assert_eq!(stale_entropy.consumed_bytes(), 0);
+    assert_eq!(
+        issuance_fingerprint(&Connection::open(fixture.home.database_path()).unwrap()),
+        stale_before
+    );
+
+    let busy_fixture = active_account_fixture();
+    let busy_transition = authorize_second_account_create(&busy_fixture);
+    open_ready(&busy_fixture, deterministic(Vec::new()))
+        .prepare_account_transition(prepare_second_account_request(&busy_transition, 501_700))
+        .unwrap();
+    let busy_before =
+        issuance_fingerprint(&Connection::open(busy_fixture.home.database_path()).unwrap());
+    let busy_entropy = deterministic(vec![0xb6; 48]);
+    let busy = exact_error(
+        open_ready(&busy_fixture, busy_entropy.clone()).create_challenge(CreateChallengeRequest {
+            manifest: account_control_manifest(SensitiveAction::AccountUpdate, 21),
+            observed_at_unix_ms: 501_800,
+            expires_at_unix_ms: 502_700,
+        }),
+    );
+    assert_eq!(busy.code, MailErrorCode::AccountUpdateConflict);
+    assert_eq!(busy_entropy.consumed_bytes(), 0);
+    assert_eq!(
+        issuance_fingerprint(&Connection::open(busy_fixture.home.database_path()).unwrap()),
+        busy_before
     );
 }
 

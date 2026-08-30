@@ -1343,7 +1343,7 @@ impl AuthorityStore {
         if reparsed != request.manifest || reparsed.sha256() != request.manifest.sha256() {
             return Err(recovery_error());
         }
-        ensure_t202b_action(request.manifest.action())?;
+        ensure_supported_challenge_action(request.manifest.action())?;
 
         let _apply_lock = acquire_apply_lock(&self.home)?;
         if !authority_database_exists(&self.home.database)? {
@@ -3603,10 +3603,14 @@ fn validate_proof_request(request: &VerifyProofRequest) -> Result<(), MailError>
     Ok(())
 }
 
-fn ensure_t202b_action(action: SensitiveAction) -> Result<(), MailError> {
+fn ensure_supported_challenge_action(action: SensitiveAction) -> Result<(), MailError> {
     match action {
         SensitiveAction::StoreEnroll
         | SensitiveAction::AccountCreate
+        | SensitiveAction::AccountUpdate
+        | SensitiveAction::AccountRemove
+        | SensitiveAction::CredentialSet
+        | SensitiveAction::CredentialDelete
         | SensitiveAction::OwnerRotate
         | SensitiveAction::RecoveryRotate
         | SensitiveAction::OwnerRecover => Ok(()),
@@ -3642,7 +3646,113 @@ fn validate_fresh_manifest_context(
         ManifestPayload::AccountCreate(value) => {
             validate_fresh_account_create_context(connection, value)?;
         }
+        ManifestPayload::AccountUpdate(value) | ManifestPayload::AccountRemove(value) => {
+            validate_fresh_account_mutation_context(connection, value)?;
+        }
+        ManifestPayload::CredentialSet(value) | ManifestPayload::CredentialDelete(value) => {
+            validate_fresh_account_mutation_context(connection, &value.account)?;
+        }
         _ => {}
+    }
+    Ok(())
+}
+
+fn validate_fresh_account_mutation_context(
+    connection: &Connection,
+    value: &kirje_core::AccountMutationManifest,
+) -> Result<(), MailError> {
+    let before = value
+        .before
+        .as_ref()
+        .ok_or_else(authorization_context_stale_error)?;
+    let store = load_registered_store_by_id(connection, value.config_cas.store_id)?
+        .ok_or_else(authorization_context_stale_error)?;
+    if store.location_sha256 != value.config_cas.location_sha256 {
+        return Err(config_store_identity_conflict_error());
+    }
+    match store.state.as_str() {
+        "recovery_required" => return Err(recovery_error()),
+        "blocked" => return Err(account_update_conflict_error()),
+        "active" => {}
+        _ => return Err(authorization_context_stale_error()),
+    }
+    if store.config_generation != value.config_cas.generation
+        || store.config_sha256 != value.config_cas.exact_content_sha256
+    {
+        return Err(authorization_context_stale_error());
+    }
+    let active: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM account_transitions
+             WHERE store_id=?1 AND state IN ('prepared','config_committed')",
+            [value.config_cas.store_id.as_bytes()],
+            |row| row.get(0),
+        )
+        .map_err(|_| store_read_error())?;
+    if active != 0 {
+        return Err(account_update_conflict_error());
+    }
+    let account = load_registered_account(connection, before.account_id)?
+        .ok_or_else(authorization_context_stale_error)?;
+    match account.state {
+        RegisteredAccountState::Active if account.active_transition_id.is_none() => {}
+        RegisteredAccountState::Proposed | RegisteredAccountState::Blocked => {
+            return Err(account_update_conflict_error());
+        }
+        RegisteredAccountState::Removed | RegisteredAccountState::Active => {
+            return Err(authorization_context_stale_error());
+        }
+    }
+    if account.store_id != value.config_cas.store_id
+        || account.account_id != before.account_id
+        || account.display_id_sha256 != display_id_digest(&before.display_id)
+        || account.account_generation != before.generation
+        || account.credential_id != before.credential_id
+        || account.binding_sha256 != before.binding_sha256
+    {
+        return Err(authorization_context_stale_error());
+    }
+    let mut collisions: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM account_transitions WHERE transition_id=?1",
+            [value.transition_id.as_bytes()],
+            |row| row.get(0),
+        )
+        .map_err(|_| store_read_error())?;
+    if let Some(after) = &value.after
+        && after.credential_id != before.credential_id
+    {
+        collisions = collisions
+            .checked_add(
+                connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM registered_credentials WHERE credential_id=?1",
+                        [after.credential_id.as_bytes()],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .map_err(|_| store_read_error())?,
+            )
+            .ok_or_else(recovery_error)?;
+    }
+    for cleanup in &value.cleanup {
+        collisions = collisions
+            .checked_add(
+                connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM credential_cleanup
+                         WHERE cleanup_id=?1 OR locator_sha256=?2",
+                        params![
+                            cleanup.cleanup_id.as_bytes(),
+                            cleanup.locator_sha256.as_bytes()
+                        ],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .map_err(|_| store_read_error())?,
+            )
+            .ok_or_else(recovery_error)?;
+    }
+    if collisions != 0 {
+        return Err(account_identity_conflict_error());
     }
     Ok(())
 }
@@ -3746,6 +3856,11 @@ fn validate_intrinsic_manifest(
                 return Err(authorization_context_stale_error());
             }
         }
+        ManifestPayload::AccountUpdate(value) => validate_account_update_intrinsic(value)?,
+        ManifestPayload::AccountRemove(value) => validate_account_remove_intrinsic(value)?,
+        ManifestPayload::CredentialSet(value) | ManifestPayload::CredentialDelete(value) => {
+            validate_credential_mutation_intrinsic(value)?;
+        }
         ManifestPayload::OwnerRotate(value) => {
             validate_rotation_manifest(authority, value, OwnerKeyRole::Owner)?;
         }
@@ -3795,6 +3910,62 @@ fn validate_intrinsic_manifest(
         _ => return Err(authorization_context_stale_error()),
     }
     Ok(())
+}
+
+fn validate_account_update_intrinsic(
+    value: &kirje_core::AccountMutationManifest,
+) -> Result<(), MailError> {
+    let (Some(before), Some(after)) = (&value.before, &value.after) else {
+        return Err(authorization_context_stale_error());
+    };
+    let mut expected_cleanup_ids = before.cleanup_ids.clone();
+    expected_cleanup_ids.extend(value.cleanup.iter().map(|item| item.cleanup_id));
+    if value.config_cas.exact_content_sha256 == value.after_config_sha256
+        || !provisional_cleanup_is_unique(&value.cleanup)
+        || expected_cleanup_ids != after.cleanup_ids
+        || after.state_reason != Some(kirje_core::AccountStateReason::CredentialReentryRequired)
+    {
+        return Err(authorization_context_stale_error());
+    }
+    Ok(())
+}
+
+fn validate_account_remove_intrinsic(
+    value: &kirje_core::AccountMutationManifest,
+) -> Result<(), MailError> {
+    if value.config_cas.exact_content_sha256 == value.after_config_sha256
+        || !provisional_cleanup_is_unique(&value.cleanup)
+    {
+        return Err(authorization_context_stale_error());
+    }
+    Ok(())
+}
+
+fn validate_credential_mutation_intrinsic(
+    value: &kirje_core::CredentialMutationManifest,
+) -> Result<(), MailError> {
+    let Some(after) = &value.account.after else {
+        return Err(authorization_context_stale_error());
+    };
+    if value.account.config_cas.exact_content_sha256 == value.account.after_config_sha256
+        || !value.account.cleanup.is_empty()
+        || after.state_reason.is_some()
+    {
+        return Err(authorization_context_stale_error());
+    }
+    Ok(())
+}
+
+fn provisional_cleanup_is_unique(items: &[kirje_core::CleanupDescriptor]) -> bool {
+    !items.is_empty()
+        && items.len() <= 100
+        && items.iter().enumerate().all(|(index, item)| {
+            item.expected_state == kirje_core::CleanupState::Provisional
+                && items[..index].iter().all(|prior| {
+                    prior.cleanup_id != item.cleanup_id
+                        && prior.locator_sha256 != item.locator_sha256
+                })
+        })
 }
 
 fn validate_rotation_manifest(
@@ -5546,7 +5717,7 @@ fn validate_stored_challenge(
     {
         return Err(recovery_error());
     }
-    ensure_t202b_action(challenge.action).map_err(|_| recovery_error())?;
+    ensure_supported_challenge_action(challenge.action).map_err(|_| recovery_error())?;
     let manifest = ActionManifest::parse(&challenge.manifest).map_err(|_| recovery_error())?;
     let payload =
         AuthorizationPayload::parse(&challenge.signing_payload).map_err(|_| recovery_error())?;
