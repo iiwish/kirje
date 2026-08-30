@@ -5,8 +5,8 @@
 Running. `T202C3-A001` challenge issuance is reviewed at production commit
 `daf22a0`. `T202C3-A002` account-update transition execution is accepted at
 production commit `2c00f32` by explicit user decision on 2026-08-30.
-`T202C3-A003` account-remove transition execution has passed review at
-production commit `703b5a1` and awaits explicit user acceptance.
+`T202C3-A003` account-remove transition execution is accepted at production
+commit `703b5a1` by explicit user decision on 2026-08-30.
 
 ## Delivered
 
@@ -64,6 +64,5 @@ dc436366e7ea00b294d5640328a48e5a9de077be83cba836420fdd7fa87aee5c  crates/kirje-s
 ## Residual Scope
 
 Credential set/delete transitions remain fail-closed unsupported. Cleanup
-challenge, claim, and delete remain unimplemented. Credential set is the next
-serial T202C3 attempt after explicit A003 acceptance; T202C3, T110, and the
-authority umbrella remain Running.
+challenge, claim, and delete remain unimplemented. Credential set is the active
+serial T202C3 attempt; T202C3, T110, and the authority umbrella remain Running.

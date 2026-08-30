@@ -706,10 +706,11 @@ Execution state: `T202C3-A001` completed review at production commit `daf22a0`.
 It owns effect-free challenge issuance for account update/remove and credential
 set/delete. `T202C3-A002` is accepted at production commit `2c00f32` and owns
 the exact account-update transition plus provisional-to-ready cleanup rows.
-`T202C3-A003` is reviewed at production commit `703b5a1` and owns the exact
+`T202C3-A003` is accepted at production commit `703b5a1` and owns the exact
 account-remove transition, preserved removed history, store-only after
-versioning, and cleanup readiness. It awaits explicit user acceptance.
-Credential transitions and cleanup claim/delete remain later serial attempts.
+versioning, and cleanup readiness. Credential set is the active bounded
+attempt. Credential delete and cleanup claim/delete remain later serial
+attempts.
 Priority: P0
 Story / Requirement: US-001, US-003; FR-003-FR-009, FR-016; NFR-001-NFR-003,
 NFR-006, NFR-007

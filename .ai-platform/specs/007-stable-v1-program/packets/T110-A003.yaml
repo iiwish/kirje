@@ -4,7 +4,7 @@ task_id: T110
 feature_id: 007-stable-v1-program
 mode: direct_test_first_execution
 adapter: direct_executor
-status: review_complete
+status: accepted
 
 governance_inputs:
   constitution: .ai-platform/memory/constitution.md
@@ -177,8 +177,8 @@ result:
   production_commit: 703b5a1
   evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A003.md
   review: no unresolved Critical, High, or Medium finding
-  acceptance: pending explicit user decision
-  next_gate: user acceptance of T202C3-A003
+  acceptance: explicitly accepted by the user on 2026-08-30
+  next_gate: credential-set packet review
 
 stop_conditions:
   - A required change touches schema, core, runtime, keyring, local I/O, protocol, CLI, MCP, network, or dependency files.
