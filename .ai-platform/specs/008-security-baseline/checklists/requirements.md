@@ -90,6 +90,9 @@
 - [x] The pinned authority store issues idempotent immutable receipts and owns
   grant expiry plus a global apply claim for every remote-effect identity before
   credential or network access. [Reliability]
+- [x] Historical remote effects reference immutable store/account version
+  parents, so advancing a current registry projection cannot rewrite or
+  foreign-key-block accepted history. [Integrity]
 - [x] The authority store and trust root cannot be redirected through ordinary
   config, index, outbox, environment, or MCP inputs. [Security]
 - [x] Apply rechecks grant expiry, trust epoch/key status, trust bundle,

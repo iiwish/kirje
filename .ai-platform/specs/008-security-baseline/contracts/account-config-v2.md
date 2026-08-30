@@ -184,10 +184,11 @@ These use the authorization contract's TLV/list/optional primitives. Fixed
 codes are: binding state `1 quarantined`, `2 proposed`, `3 authorized`,
 `4 invalidated`, `5 mismatch`; credential state `1 legacy_quarantined`,
 `2 reentry_required`, `3 missing`, `4 bound`, `5 invalidated`; cleanup locator
-kind `1 active_v2`, `2 legacy_v1`. Create requires no before snapshot and an
-after account generation of one. Update requires the same account/display ID
-and exactly increments account generation. Remove requires no after snapshot.
-Every config mutation exactly increments document generation.
+kind `1 active_v2`, `2 legacy_v1`. Every mutation with an after account snapshot
+advances account generation exactly once: create starts at one; account update,
+credential set, and credential delete increment it. Account ID and display ID
+remain unchanged after create. Remove has no after snapshot or account-version
+row. Every config mutation exactly increments document generation.
 
 `AccountStateReason:u8` is closed: `1 legacy_unbound`,
 `2 credential_reentry_required`, `3 binding_changed`, `4 owner_recovery`,
@@ -415,10 +416,30 @@ delete-only tombstone material after owner authorization.
 1. Build/validate a proposed complete account and random account/credential IDs.
 2. Build a control manifest with expected config generation/digest.
 3. Obtain owner receipt and claim the grant.
-4. Prepare authority transition.
+4. Prepare the authority transition, which reserves all identities and blocks
+   the store before config access.
 5. Create only if display ID and IDs remain absent under config lock/CAS.
-6. Finalize registry account in `proposed/reentry_required`.
-7. Credential set is a separate owner-authorized action.
+6. Report the exact committed after generation/digest to authority and mark the
+   transition config-committed.
+7. Finalize the registry account as active while its config binding remains
+   `proposed/reentry_required`, then unblock the store.
+8. Credential set is a separate owner-authorized action.
+
+The authority admits one config transition per store. Before the config replace,
+an abort marks the proposed registry account `removed` and preserves that row
+plus every account, credential, receipt, grant, and transition identity
+permanently; supported paths never physically delete it. After the replace,
+recovery marks config committed and finalizes
+without repeating config work. Any pair other than the exact before/after pair
+leaves the store recovery-required and the reserved account blocked; it never
+probes a credential or connects.
+
+Prepare also reserves the credential ID in the immutable credential registry.
+Marking the after config committed inserts immutable store and account version
+rows before the current projections advance. Historical remote effects refer to
+those version rows rather than mutable current registry tuples, so later account
+or config updates cannot invalidate old audit relationships or be blocked by
+them.
 
 ### Update
 

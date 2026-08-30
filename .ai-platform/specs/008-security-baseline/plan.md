@@ -122,8 +122,8 @@ digest.
 ### D-002 Config V2 Is Locked, Bounded, And Compare-And-Swap
 
 `accounts.toml` schema v2 contains `store_id`, `generation`, and typed stored
-accounts with immutable `account_id`, `credential_id`, `display_id`,
-`account_generation`, binding digest, and credential readiness. The whole file
+accounts with stable `account_id` and `display_id` plus versioned
+`credential_id`, `account_generation`, binding digest, and credential readiness. The whole file
 is limited to 1 MiB and 100 accounts. Duplicate or malformed identities and
 invalid state combinations fail closed.
 
@@ -478,22 +478,24 @@ matching resolved authority claim becomes `ambiguous`.
 3. Typed core payload projection, challenges, proofs, receipts, nonce use, and
    replay (T202B).
 4. Grant use and exact store enrollment (T202C1).
-5. Account-create challenge and transition lifecycle (T202C2).
-6. Remaining account/credential transitions and delete-only cleanup (T202C3).
-7. Registry-bound remote challenge effects and T202C aggregate acceptance
+5. Pre-release Authority SQLite v1 immutable registry-version correction and
+   initial store-version enrollment (T202C1S).
+6. Account-create challenge and transition lifecycle (T202C2).
+7. Remaining account/credential transitions and delete-only cleanup (T202C3).
+8. Registry-bound remote challenge effects and T202C aggregate acceptance
    (T202C4/T202C).
-8. Remote-effect claim, invocation permit, and observation (T202D).
-9. Verified staged-finalize classification, rotation, recovery, audit, and T202
+9. Remote-effect claim, invocation permit, and observation (T202D).
+10. Verified staged-finalize classification, rotation, recovery, audit, and T202
    umbrella acceptance gates (T202E).
-10. Same-handle bounded local I/O and cross-platform recoverable replacement.
-11. Config v2, conservative migration, account identity, and bound keyring
+11. Same-handle bounded local I/O and cross-platform recoverable replacement.
+12. Config v2, conservative migration, account identity, and bound keyring
    lifecycle.
-12. Operation-ledger v3 migration and authorization/effect integration.
-13. Shared authorization and crash-recovery runtime.
-14. CLI owner, store, account, credential, and operation workflow.
-15. Bounded MCP transport and lifecycle budgets.
-16. Bounded protocol responses and complete capability model.
-17. Canonical documentation, cross-platform QA, controlled live verification,
+13. Operation-ledger v3 migration and authorization/effect integration.
+14. Shared authorization and crash-recovery runtime.
+15. CLI owner, store, account, credential, and operation workflow.
+16. Bounded MCP transport and lifecycle budgets.
+17. Bounded protocol responses and complete capability model.
+18. Canonical documentation, cross-platform QA, controlled live verification,
    release commit, PR, CI, merge, tag, and post-merge evidence.
 
 Each numbered implementation task has its own packet and RED/GREEN evidence.
@@ -588,9 +590,11 @@ Additional security gates include:
 
 Confirmed on 2026-08-28 under the user's delegated project-owner authority.
 T202 is a serial umbrella. T202A and T202B are Accepted. T202C is a Draft
-acceptance umbrella split into strict serial T202C1-T202C4. T202C1 is Accepted
+acceptance umbrella split into strict serial T202C1, T202C1S, and T202C2-T202C4. T202C1 is Accepted
 at production commit `aa53efb` after `T202C1_A003_CODE_REVIEW_PASS` and fresh
-packet/workspace gates. T202C2 is Draft pending packetization; T202C3-T202C4 and
+packet/workspace gates. T202C1S is Ready after
+`T202C1S_A002_PACKET_REVIEW_PASS`; it is the required pre-release schema
+correction. T202C2 is blocked until it is Accepted. T202C3-T202C4 and
 T202D-E remain Draft until their predecessor is Accepted. T204 and every
 later production task additionally require the T202 umbrella to be Accepted.
 Execution still requires one self-contained packet per ready task, verified RED

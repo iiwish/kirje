@@ -423,7 +423,7 @@ Status: Draft
 Priority: P0
 Story / Requirement: US-001, US-003; FR-003-FR-009, FR-016; NFR-001-NFR-003,
 NFR-006, NFR-007
-Depends on: T202B Accepted; T202C1-T202C4 Accepted
+Depends on: T202B Accepted; T202C1, T202C1S, and T202C2-T202C4 Accepted
 Blocks: T202D; T202 umbrella acceptance
 Parallel: No
 Conflicts with: T202A-T202B/T202D-T202E and every registry, transition, cleanup,
@@ -431,10 +431,11 @@ location, generation, credential, display-identity, or registry-backed challenge
 rule
 
 Goal:
-Accept the complete T202C security slice only after four strict serial production
-tasks prove grant consumption and store enrollment, account creation, remaining
+Accept the complete T202C security slice only after five strict serial production
+tasks prove grant consumption and store enrollment, immutable registry-version
+parentage, account creation, remaining
 account/credential/cleanup transitions, and remote challenge issuance against
-the unchanged canonical T202B schema.
+the corrected pre-release canonical Authority SQLite v1 schema.
 
 Acceptance criteria:
 - Store/location/account/credential/display mappings cannot alias or be replaced
@@ -443,8 +444,9 @@ Acceptance criteria:
   recovery; removed history and cleanup evidence remain immutable.
 - Every T202C control action has registry-backed challenge issuance and every
   remote action has exactly one planner-owned ordinal-zero challenge effect.
-- T202C1-T202C4 evidence, independent reviews, aggregate registry/event restart
-  validation, privacy review, canonical DDL hash, and package gates are green.
+- T202C1, T202C1S, and T202C2-T202C4 evidence, independent reviews, aggregate
+  registry/event restart validation, privacy review, canonical DDL hash, and
+  package gates are green.
 
 Packet path:
 - None; T202C is an acceptance umbrella and has no production packet.
@@ -462,7 +464,7 @@ Story / Requirement: US-003; FR-003, FR-016, FR-018; NFR-001-NFR-003,
 NFR-006, NFR-007
 Depends on: T202B Accepted at production commit `43f0788`
 Accepted at: production commit `aa53efb`; evidence in `.ai-platform/evidence/T202C1/`
-Blocks: T202C2; T202C umbrella acceptance
+Blocks: T202C1S; T202C umbrella acceptance
 Parallel: No
 Conflicts with: T202C2-T202C4/T202D-T202E and every grant-use, store registry,
 authority clock, authority event, or restart-validator rule
@@ -545,16 +547,96 @@ Evidence required:
 - RED/GREEN logs, byte golden, replay/expiry/uniqueness/fault/concurrency/event/
   restart matrices, privacy scan, and residual risk
 
+### T202C1S: Immutable Registry Version Schema Correction
+
+Status: Ready
+Priority: P0
+Story / Requirement: US-001, US-003; FR-003-FR-006, FR-016, FR-018;
+NFR-001-NFR-003, NFR-006, NFR-007
+Depends on: T202C1 Accepted at production commit `aa53efb`
+Blocks: T202C2; T202C umbrella acceptance; T202D
+Parallel: No
+Conflicts with: T202C2-T202E and every authority schema, store enrollment,
+registry identity, remote-effect relationship, or restart-validator rule
+
+Goal:
+Correct the unreleased canonical Authority SQLite v1 before account mutations
+exist. Add immutable credential, store-version, and account-version parents;
+point historical remote effects at immutable versions rather than mutable
+current projections; and evolve accepted store enrollment to create and recover
+its initial store version atomically. Keep the application ID and user version
+at v1 and fail closed on every earlier developer-only inventory.
+
+Allowed files:
+- `crates/kirje-store/src/authority/schema_v1.sql`
+- `crates/kirje-store/src/authority.rs`
+- `crates/kirje-store/tests/authority_schema.rs`
+- `crates/kirje-store/tests/authority_registry.rs`
+
+Test targets:
+- RED demonstrating that a remote effect linked to immutable version parents
+  remains valid while legal current store/account tuples advance, whereas the
+  old current-parent shape would reject those updates
+- Exact 20-table canonical object inventory, unchanged explicit index/trigger,
+  application-ID/user-version/bootstrap semantics, and noncanonical old-shape
+  fail-closed behavior with no migration or repair
+- Credential global identity/account/store/creating-transition linkage;
+  store-version exact receipt-or-transition origin and generation order;
+  account-version exact credential/account/transition linkage
+- Missing, duplicate, cross-store, cross-account, cross-credential,
+  cross-transition, and mutable-current-only remote-effect parent rejection
+- Initial store version inserted in the enrollment transaction, every fault and
+  response-loss boundary, exact retry after restart/concurrency, and no second
+  immutable row/event/clock timestamp
+- T202A/T202B empty-stage regressions and T202C1 store/version/grant/event
+  restart validation, bounded row loading, affine query count, and query plans
+  using store-version primary-key order with no temporary B-tree
+- Public/API/privacy scan proving no new authority mutation surface, output,
+  migration, secret, address, endpoint, mailbox, or signing material
+
+Validation commands:
+```bash
+cargo test -p kirje-store --test authority_schema --all-features --locked
+cargo test -p kirje-store --test authority_registry --all-features --locked
+cargo test -p kirje-store --test authority_authorization --all-features --locked
+cargo test -p kirje-store --all-features --locked
+cargo test -p kirje-store --no-default-features --locked
+cargo +1.88.0 test -p kirje-store --all-features --locked
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo test --workspace --all-features --locked
+cargo build --workspace --all-features --locked
+test "$(shasum -a 256 crates/kirje-store/src/authority/schema_v1.sql | cut -d ' ' -f1)" = "5d01739b89246a5f495a965e57e416eee9fd0b5016995add41c6edee7f3e970d"
+```
+
+Definition of Done:
+- Historical remote-effect FKs terminate only at immutable version rows and no
+  longer block current registry evolution.
+- Accepted enrollment atomically creates and exactly recovers one initial store
+  version; restart validates all new parents and preserves T202A-T202C1 behavior.
+- Canonical DDL bytes, object inventory, query plans, RED/GREEN evidence, full
+  gates, independent zero-finding review, and the pre-release no-migration
+  boundary are recorded.
+
+Packet path:
+- `.ai-platform/specs/008-security-baseline/packets/T202C1S.yaml`
+
+Evidence required:
+- `.ai-platform/evidence/T202C1S/summary.md`
+- RED/GREEN logs, canonical DDL digest/inventory, relationship and current-row
+  evolution matrix, enrollment crash/retry matrix, query plans, privacy review,
+  and residual risk
+
 ### T202C2: Account Creation Transition
 
 Status: Draft
 Priority: P0
 Story / Requirement: US-001, US-003; FR-003-FR-006, FR-016; NFR-001-NFR-003,
 NFR-006, NFR-007
-Depends on: T202C1 Accepted
+Depends on: T202C1S Accepted
 Blocks: T202C3; T202C umbrella acceptance
 Parallel: No
-Conflicts with: T202C1/T202C3-T202C4/T202D-T202E and every account-create,
+Conflicts with: T202C1-T202C1S/T202C3-T202C4/T202D-T202E and every account-create,
 account registry, display identity, transition, or registry challenge rule
 
 Goal:
@@ -573,16 +655,27 @@ Test targets:
 - Registry-backed create challenge exact context, pending reuse/restart/
   concurrency, stale store/config/binding rejection, and zero challenge effects
 - Global account/credential uniqueness, active display partial-index behavior,
-  exact next generation, transition digest, one active transition, and exact retry
+  exact display/transition/intent/recovery bytes and digests, exact next
+  generation, one active store transition, and exact retry
 - Prepare-before-config blocking, config-committed/finalize/abort/recovery fault
   boundaries, before/after/third digest restart matrix, and no external calls
-- Event graph, corruption, streaming bounded restart validation, and privacy
+- Deferred cyclic-FK closure, expiry response loss, event graph, corruption,
+  immutable enrollment retry after current-state evolution, 128-history
+  affine-query streaming restart validation, query plans, and privacy
 
 Validation commands:
 ```bash
 cargo test -p kirje-store --test authority_registry --all-features --locked
+cargo test -p kirje-store --test authority_authorization --all-features --locked
+cargo test -p kirje-store --test authority_schema --all-features --locked
 cargo test -p kirje-store --all-features --locked
+cargo test -p kirje-store --no-default-features --locked
 cargo clippy -p kirje-store --all-targets --all-features --locked -- -D warnings
+cargo fmt --all --check
+cargo test --workspace --all-features --locked
+cargo +1.88.0 test -p kirje-store --all-features --locked
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo build --workspace --all-features --locked
 ```
 
 Definition of Done:
@@ -594,8 +687,9 @@ Packet path:
 
 Evidence required:
 - `.ai-platform/evidence/T202C2/summary.md`
-- RED/GREEN logs, identity/concurrency and transition fault matrices, restart/
-  event/privacy review, and residual risk
+- RED/GREEN logs, canonical byte goldens, identity/concurrency/expiry and
+  transition fault matrices, schema/hash and no-default/MSRV regressions,
+  restart/query-plan/event/privacy review, and residual risk
 
 ### T202C3: Account Credential And Cleanup Lifecycles
 
@@ -780,8 +874,8 @@ Definition of Done:
 - All six durable transcript domains, typed rechecks, exact recovery, global
   uniqueness, permit ownership, result bounds, crash ambiguity, and projection
   privacy are executable and reviewed.
-- The canonical T202B schema remains unchanged and no adapter implementation
-  enters store.
+- The canonical T202C1S Authority SQLite v1 schema remains unchanged and no
+  adapter implementation enters store.
 
 Packet path:
 - `.ai-platform/specs/008-security-baseline/packets/T202D.yaml`
@@ -873,7 +967,8 @@ cargo clippy -p kirje-core -p kirje-store --all-targets --all-features --locked 
 
 Definition of Done:
 - Rotation/recovery/audit behavior and the combined authority suite pass against
-  the unchanged canonical T202B schema with private history retained.
+  the unchanged canonical T202C1S Authority SQLite v1 schema with private
+  history retained.
 - Independent spec/security/engineering/QA reviews find no blocking issue.
 - T202 remains non-Accepted until its aggregate evidence receives recorded
   acceptance from the delegated project owner.

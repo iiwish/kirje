@@ -423,7 +423,8 @@ CREATE TABLE registered_stores (
           (typeof(removed_at) = 'integer' AND removed_at >= created_at)),
     CHECK((state = 'removed' AND removed_at IS NOT NULL)
        OR (state != 'removed' AND removed_at IS NULL)),
-    UNIQUE(store_id, location_sha256, config_generation, config_sha256),
+    UNIQUE(store_id, location_sha256),
+    UNIQUE(store_id, location_sha256, enrolled_receipt_id),
     FOREIGN KEY(enrolled_receipt_id) REFERENCES authorization_receipts(receipt_id) ON DELETE RESTRICT
 ) STRICT;
 
@@ -461,6 +462,9 @@ CREATE TABLE registered_accounts (
     UNIQUE(account_id, store_id, account_generation, credential_id, binding_sha256),
     FOREIGN KEY(store_id) REFERENCES registered_stores(store_id) ON DELETE RESTRICT,
     FOREIGN KEY(authorized_receipt_id) REFERENCES authorization_receipts(receipt_id) ON DELETE RESTRICT,
+    FOREIGN KEY(credential_id, account_id, store_id)
+        REFERENCES registered_credentials(credential_id, account_id, store_id)
+        ON DELETE RESTRICT,
     FOREIGN KEY(active_transition_id) REFERENCES account_transitions(transition_id) ON DELETE RESTRICT
 ) STRICT;
 
@@ -730,6 +734,8 @@ CREATE TABLE account_transitions (
            AND finalized_at IS NULL AND resolved_at IS NOT NULL)
        OR (state = 'recovery_required' AND finalized_at IS NULL
            AND resolved_at IS NOT NULL)),
+    UNIQUE(transition_id, store_id),
+    UNIQUE(transition_id, account_id, store_id),
     FOREIGN KEY(grant_id) REFERENCES grant_uses(grant_id) ON DELETE RESTRICT,
     FOREIGN KEY(store_id) REFERENCES registered_stores(store_id) ON DELETE RESTRICT,
     FOREIGN KEY(account_id, store_id)
@@ -740,6 +746,88 @@ CREATE INDEX account_transitions_store_state
 ON account_transitions(store_id, state);
 CREATE INDEX account_transitions_account_state
 ON account_transitions(account_id, state);
+
+CREATE TABLE registered_credentials (
+    credential_id BLOB PRIMARY KEY
+        CHECK(typeof(credential_id) = 'blob' AND length(credential_id) = 16),
+    account_id BLOB NOT NULL
+        CHECK(typeof(account_id) = 'blob' AND length(account_id) = 16),
+    store_id BLOB NOT NULL
+        CHECK(typeof(store_id) = 'blob' AND length(store_id) = 16),
+    created_transition_id BLOB NOT NULL UNIQUE
+        CHECK(typeof(created_transition_id) = 'blob'
+          AND length(created_transition_id) = 16),
+    created_at INTEGER NOT NULL
+        CHECK(typeof(created_at) = 'integer' AND created_at >= 0),
+    UNIQUE(credential_id, account_id, store_id),
+    FOREIGN KEY(account_id, store_id)
+        REFERENCES registered_accounts(account_id, store_id) ON DELETE RESTRICT,
+    FOREIGN KEY(created_transition_id, account_id, store_id)
+        REFERENCES account_transitions(transition_id, account_id, store_id)
+        ON DELETE RESTRICT
+) STRICT;
+
+CREATE TABLE registered_store_versions (
+    store_id BLOB NOT NULL
+        CHECK(typeof(store_id) = 'blob' AND length(store_id) = 16),
+    location_sha256 BLOB NOT NULL
+        CHECK(typeof(location_sha256) = 'blob' AND length(location_sha256) = 32),
+    config_generation INTEGER NOT NULL
+        CHECK(typeof(config_generation) = 'integer' AND config_generation > 0),
+    config_sha256 BLOB NOT NULL
+        CHECK(typeof(config_sha256) = 'blob' AND length(config_sha256) = 32),
+    enrolled_receipt_id BLOB UNIQUE
+        CHECK(enrolled_receipt_id IS NULL OR
+          (typeof(enrolled_receipt_id) = 'blob' AND length(enrolled_receipt_id) = 16)),
+    committed_transition_id BLOB UNIQUE
+        CHECK(committed_transition_id IS NULL OR
+          (typeof(committed_transition_id) = 'blob'
+           AND length(committed_transition_id) = 16)),
+    created_at INTEGER NOT NULL
+        CHECK(typeof(created_at) = 'integer' AND created_at >= 0),
+    PRIMARY KEY(store_id, config_generation),
+    CHECK((enrolled_receipt_id IS NOT NULL AND committed_transition_id IS NULL)
+       OR (enrolled_receipt_id IS NULL AND committed_transition_id IS NOT NULL)),
+    UNIQUE(store_id, config_generation, config_sha256),
+    UNIQUE(store_id, location_sha256, config_generation, config_sha256),
+    FOREIGN KEY(store_id, location_sha256)
+        REFERENCES registered_stores(store_id, location_sha256) ON DELETE RESTRICT,
+    FOREIGN KEY(store_id, location_sha256, enrolled_receipt_id)
+        REFERENCES registered_stores(store_id, location_sha256, enrolled_receipt_id)
+        ON DELETE RESTRICT,
+    FOREIGN KEY(enrolled_receipt_id)
+        REFERENCES authorization_receipts(receipt_id) ON DELETE RESTRICT,
+    FOREIGN KEY(committed_transition_id, store_id)
+        REFERENCES account_transitions(transition_id, store_id) ON DELETE RESTRICT
+) STRICT;
+
+CREATE TABLE registered_account_versions (
+    account_id BLOB NOT NULL
+        CHECK(typeof(account_id) = 'blob' AND length(account_id) = 16),
+    store_id BLOB NOT NULL
+        CHECK(typeof(store_id) = 'blob' AND length(store_id) = 16),
+    account_generation INTEGER NOT NULL
+        CHECK(typeof(account_generation) = 'integer' AND account_generation > 0),
+    credential_id BLOB NOT NULL
+        CHECK(typeof(credential_id) = 'blob' AND length(credential_id) = 16),
+    binding_sha256 BLOB NOT NULL
+        CHECK(typeof(binding_sha256) = 'blob' AND length(binding_sha256) = 32),
+    committed_transition_id BLOB NOT NULL UNIQUE
+        CHECK(typeof(committed_transition_id) = 'blob'
+          AND length(committed_transition_id) = 16),
+    created_at INTEGER NOT NULL
+        CHECK(typeof(created_at) = 'integer' AND created_at >= 0),
+    PRIMARY KEY(account_id, account_generation),
+    UNIQUE(account_id, store_id, account_generation, credential_id, binding_sha256),
+    FOREIGN KEY(account_id, store_id)
+        REFERENCES registered_accounts(account_id, store_id) ON DELETE RESTRICT,
+    FOREIGN KEY(credential_id, account_id, store_id)
+        REFERENCES registered_credentials(credential_id, account_id, store_id)
+        ON DELETE RESTRICT,
+    FOREIGN KEY(committed_transition_id, account_id, store_id)
+        REFERENCES account_transitions(transition_id, account_id, store_id)
+        ON DELETE RESTRICT
+) STRICT;
 
 CREATE TABLE credential_cleanup (
     cleanup_id BLOB PRIMARY KEY
@@ -831,11 +919,11 @@ CREATE TABLE remote_effects (
         ) ON DELETE RESTRICT,
     FOREIGN KEY(grant_id) REFERENCES grant_uses(grant_id) ON DELETE RESTRICT,
     FOREIGN KEY(store_id, store_location_sha256, config_generation, config_sha256)
-        REFERENCES registered_stores(
+        REFERENCES registered_store_versions(
             store_id, location_sha256, config_generation, config_sha256
         ) ON DELETE RESTRICT,
     FOREIGN KEY(account_id, store_id, account_generation, credential_id, binding_sha256)
-        REFERENCES registered_accounts(
+        REFERENCES registered_account_versions(
             account_id, store_id, account_generation, credential_id, binding_sha256
         ) ON DELETE RESTRICT,
     FOREIGN KEY(trust_epoch) REFERENCES trust_epochs(epoch) ON DELETE RESTRICT,
@@ -1209,26 +1297,134 @@ display account maps uniquely to config v2. Any missing or ambiguous mapping is
 `replan_required`. Migration follows v1 to v2 to v3 inside one SQLite
 transaction and is idempotent after restart.
 
+## Immutable Registry Versions
+
+The mutable `registered_stores` and `registered_accounts` rows are current
+projections. Historical remote effects never reference those mutable tuples.
+Authority SQLite v1 retains three application-immutable parent sets:
+
+- `registered_credentials` reserves each credential identity globally and binds
+  it permanently to the account, store, and transition that created it.
+- `registered_store_versions` records the initial enrolled config version and
+  every later authority-observed committed config version. Exactly one immutable
+  enrollment receipt or committed account transition originates each row.
+- `registered_account_versions` records each account tuple that reached a
+  committed config version and binds it to the credential identity and exact
+  transition that committed it.
+
+Store enrollment inserts the current store and its initial store-version row in
+the same transaction. Account prepare reserves a new credential identity before
+external config or keyring work. `mark_config_committed` inserts the after
+store-version row and, when an after account exists, its account-version row in
+the same transaction that advances the current projections. Create uses account
+generation one; account update, credential set, and credential delete each
+advance it exactly once. Remove has no after account/version. Abort before config
+commit retains the credential reservation but creates no committed account or
+store version. A recovery observation may place an unsafe third config pair only
+in the blocked current store projection; it does not bless that pair as a
+committed version.
+
+`remote_effects` references the immutable store and account version parents.
+Advancing either current projection therefore cannot invalidate a historical
+effect or be blocked by `ON UPDATE RESTRICT`. Fresh challenge issuance still
+requires the exact active current store/account pair and the corresponding
+immutable versions, so a historical version cannot authorize a new effect.
+
+These tables are immutable through supported application paths and validated
+from their receipt/transition origins on every restart. Their primary and unique
+keys provide deterministic keyed or per-store generation order without a
+temporary sort. The corrected schema is the sole pre-release canonical
+Authority SQLite v1. A developer database created from an earlier branch shape
+has a noncanonical object inventory and fails closed; Kirje does not migrate,
+rewrite, or delete it, and `application_id`/`user_version` remain unchanged.
+
 ## Account Mutation Protocol
 
 Every account or credential mutation follows:
 
 ```text
 verified owner grant
--> authority account_transition PREPARE (account blocked)
+-> authority account_transition PREPARE (store blocked and identity reserved)
 -> acquire config lock and verify generation/content CAS
 -> keyring mutation in the action-specific crash-safe order
 -> atomic config replacement
+-> authority transition CONFIG_COMMITTED
 -> authority transition FINALIZE
 ```
 
-Recovery:
+Every mutation replaces one store-level config document, so the authority admits
+at most one `prepared` or `config_committed` transition per store even though
+`registered_accounts.active_transition_id` also enforces one per account. A
+prepared store is `blocked`; all unrelated account work fails closed until the
+transition finalizes or aborts. A recovery-required store admits no transition.
 
-- config has `before_config_sha256`: retry or owner-authorized abort
-- config has `after_config_sha256`: finalize without replaying completed keyring
-  work
-- config has neither: set store/account `recovery_required`; do not probe a
-  credential or connect
+Account create reserves a new account row before config access. The row is
+`proposed`, carries the proposed account generation, credential identity,
+display-ID digest, binding digest, authorizing receipt, and active transition.
+The transition and account rows have an intentional FK cycle. The prepare
+transaction alone enables `defer_foreign_keys`, inserts both rows, runs
+`foreign_key_check`, and commits only when the complete cycle is valid. Deferral
+is neither a connection default nor permitted for any incomplete committed
+shape.
+
+For account create, lifecycle state and current registry projection are exact:
+
+| Transition | Account | Store | Registered config pair |
+|---|---|---|---|
+| `prepared` | `proposed`, active transition | `blocked` | before |
+| `config_committed` | `proposed`, active transition | `blocked` | after |
+| `finalized` | `active`, no active transition | `active` | after |
+| `aborted` | `removed`, no active transition | `active` | before |
+| `recovery_required` | `blocked`, active transition | `recovery_required` | exact observed unsafe pair |
+
+The config observation classifier compares generation and digest together:
+
+```text
+before = (expected_generation, before_config_sha256)
+after  = (next_generation, after_config_sha256)
+third  = every other pair
+```
+
+Before permits retry or owner-authorized abort only while prepared. After permits
+mark-config-committed and finalize without replaying completed keyring work.
+Third from prepared, and before or third after config-committed, atomically move
+the transition, store, and account to the fail-closed recovery shape. Recovery
+stores the exact observed pair on the store row, retains the active transition,
+does not probe a credential, and does not connect. T202E owns reconciliation;
+T202C2 cannot clear recovery.
+
+Prepare changes the store `active -> blocked` and creates the account/transition
+graph in the same transaction as grant use. Config-committed advances the store
+config pair but leaves it blocked. Finalize activates the account and unblocks
+the store. Abort marks the proposed registry account `removed`, physically
+deletes nothing, preserves every historical identity, and unblocks the
+unchanged-before store. A removed account
+releases only the active display partial-index slot; its account, credential,
+receipt, grant, and transition identities remain reserved globally.
+
+`registered_stores.config_generation`, `config_sha256`, `state`, and
+`updated_at` are the current registry projection once account transitions exist;
+they are not immutable enrollment-result fields. Exact store-enrollment retry
+rederives its original generation and timestamps from the sealed enrollment
+manifest/event while validating the complete current transition chain. It never
+rewinds or rewrites current store state.
+
+`display_id_sha256` is SHA-256 of the authority transcript domain
+`KIRJE-ACCOUNT-DISPLAY-ID-V1\0` with tag `0x0001` containing exact validated
+display-ID UTF-8. It is not case-folded or normalized. The raw display ID remains
+only in the sealed private manifest/config; ordinary registry projection and
+events omit it.
+
+The transition transcript, no-grant expiry intent, exact method matrix, event
+order, error precedence, response-loss behavior, and restart validator are
+normative in `contracts/authority-store.md`. Restart derives each store's config
+chain from its immutable enrollment manifest and prepared-event order, then
+requires the final derived pair/state and every account lifecycle shape to match
+the current rows. A recovery event carries a domain-separated digest over the
+transition digest, exact prior state, and actual generation/digest pair, so an
+out-of-bound replacement of one unsafe pair by another is corruption rather
+than another admissible recovery state. Validation is streaming with O(1)
+additional Rust history memory and affine query-count growth.
 
 Credential set writes the new active locator before config commit. Credential
 delete removes the active locator before config commit and treats absence as

@@ -75,16 +75,14 @@ zero/unsupported schema version or noncanonical inventory, and any version newer
 than 1 fail closed. A zero-ID pristine database with no user objects is the only
 existing file that may enter v1 initialization.
 
-The T202A-only development fence at commit `f292132` is not a supported database
-version. At the 2026-08-30 A003 governance freeze it had never entered `main`, a
-remote branch, or a release tag, and no runtime, CLI, MCP, or protocol authority
-entry point referenced it. The durable product rule is that this old fence was
-never released or integrated. It can contain only bootstrap trust rows, not
-registered accounts, credentials, remote effects, or mail operations. A
-manually created developer database with that inventory fails closed and must
-be removed together with its paired developer anchor before re-bootstrap.
-Production code never auto-migrates, silently repairs, or deletes such a
-database. Authority SQLite v1 begins at the canonical T202B fence.
+Authority SQLite v1 is only the complete canonical object inventory in the
+normative schema. No earlier developer-only inventory is a supported database
+version. A database carrying the `KIRJ` application ID and version 1 but missing
+the immutable registry-version parents or any other canonical object fails
+closed and must be removed with its paired developer anchor before re-bootstrap.
+No such shape entered `main`, a remote branch, or a release, and no runtime,
+CLI, MCP, or protocol authority entry point used it. Production code never
+auto-migrates, silently repairs, or deletes a noncanonical authority database.
 
 ## Authority Home
 
@@ -684,19 +682,470 @@ T202B and rejects every account, transition, cleanup, effect, invocation,
 observation, rotation, or recovery row. It streams bounded rows with O(1)
 additional history memory and indexed primary/unique/event lookups.
 
-`PrepareAccountTransitionRequest` contains an exact grant-use request,
-transition UUID, store/account identities, closed transition kind, complete
-before/after config digests, expected/next generations, proposed registry values,
-and observed time. `next_generation = expected_generation + 1`. Exact retry
-compares every request column and transcript digest. Prepare blocks the affected
-account before config/keyring access.
+### Immutable Registry Version Parents
 
-`mark_config_committed`, `finalize_account_transition`, `abort_transition`, and
-`mark_transition_recovery_required` accept the transition ID, exact expected
-state, actual config digest/generation, and observed time. Before digest permits
-retry/authorized abort, after digest permits finalize, and every third digest
-enters `recovery_required`. Finalization clears the active transition; remove
-retains historical account and credential identities.
+`registered_stores` and `registered_accounts` are current mutable projections.
+They are not foreign-key parents for historical remote-effect snapshots.
+Authority SQLite v1 has three application-immutable registries:
+
+```text
+registered_credentials
+  credential_id -> exact account/store + creating transition
+
+registered_store_versions
+  store/location + config generation/digest
+  -> exactly one enrollment receipt or committed account transition
+
+registered_account_versions
+  account/store + account generation/credential/binding
+  -> exact credential identity + committed account transition
+```
+
+Store enrollment atomically inserts the initial `registered_store_versions` row
+with the same receipt, config pair, and effective timestamp as the current store
+row. Exact enrollment recovery validates and returns that immutable initial
+version even after the current store projection advances; T202C1S proves the
+initial state and T202C2 first proves legal-successor recovery. Each later
+config-committed transition inserts one new store version. A transition with an
+after account snapshot also inserts one account version. Create uses account
+generation one; account update, credential set, and credential delete advance
+it exactly once. Account removal does not invent an after account version. A new
+credential identity is reserved in `registered_credentials` during prepare and
+remains reserved after abort.
+
+Transition origin is an exact composite relationship, not a UUID-only link.
+Credentials and account versions reference
+`(transition_id, account_id, store_id)`; transition-origin store versions
+reference `(transition_id, store_id)`. Receipt-origin store versions reference
+the enrolled `(store_id, location_sha256, receipt_id)` tuple. Cross-account,
+cross-store, or cross-receipt origin substitution therefore fails SQLite
+foreign-key enforcement before restart validation.
+
+`remote_effects` has exact composite foreign keys to the store-version and
+account-version tables. Current store or account updates therefore neither
+rewrite historical effect context nor encounter an `ON UPDATE RESTRICT` child
+from an old effect. Fresh challenge issuance still validates the active current
+rows and requires their immutable version parents. It never treats any
+historical parent as current authority.
+
+The current account row has a composite foreign key to its credential identity.
+Account-create prepare uses transaction-local deferred foreign keys because the
+new account, credential, and transition rows form one intentional closed cycle.
+Deferral ends at commit and an explicit `foreign_key_check` must be empty.
+
+The store-version primary key `(store_id, config_generation)` defines exact
+per-store generation order. Restart streams that index directly, validates each
+origin and generation successor, and uses keyed transition/event loads; the
+query plan must contain no temporary B-tree. Version and credential rows are
+never updated or deleted by production APIs. Restart validation recomputes their
+origins and treats mutation, cross-linkage, missing parents, duplicate identity,
+or an effect referencing a non-version row as `owner_recovery_required`.
+
+### Account-Create Challenge Context
+
+T202C2 adds only `account_create` to challenge issuance. Account update/remove,
+credential, cleanup, remote-effect, policy, assurance, rotation-finalization,
+and recovery-finalization operations remain unsupported at this stage. An
+account-create challenge has no `challenge_effects` row. Its target is the
+proposed `AccountId`, and its context contains the enrolled `StoreId`, the same
+account identity, the proposed binding digest, no policy digest, and the exact
+sealed `AccountCreate` manifest.
+
+The sealed create manifest has exactly this lifecycle shape in addition to the
+core manifest checks:
+
+- `before` is absent; `after` is present with account generation 1, binding
+  `proposed`, credential `reentry_required`, reason
+  `credential_reentry_required`, and no cleanup IDs.
+- The mutation cleanup list is empty. The after config digest differs from the
+  before config digest, and config generation increments exactly once.
+- The config CAS store/location/generation/digest equals the active registered
+  store. The after account ID equals the target/context account ID, and the
+  context binding equals the after binding.
+
+`display_id_sha256` never means a normalized or case-folded alias. It is
+SHA-256 of `KIRJE-ACCOUNT-DISPLAY-ID-V1\0` encoded by the authority transcript
+primitive with one tag, `0x0001`, containing the exact validated display-ID
+UTF-8 bytes. The authority database stores only this digest outside the sealed
+private manifest.
+
+Pending-context recovery runs before fresh registry checks. An exact unexpired
+pending challenge is returned unchanged even if a later transaction has made
+its proposed context stale. Fresh issuance requires an active store with the
+exact config CAS, no active store transition, globally absent account,
+credential, and transition-ID identities, and no active proposed/active/blocked
+display digest for that store. Historical validation is intrinsic and never
+reapplies those fresh absence checks. A stable-ID collision is
+`account_identity_conflict`; an active display collision is
+`account_already_exists`; a busy store is `account_update_conflict`; an exact
+store ID at another sealed location is `config_store_identity_conflict`; and
+a store already in recovery is `owner_recovery_required`. Other stale
+store/config/binding context is `authorization_context_stale`. All are
+non-retryable and consume no entropy or row.
+
+### Account-Create Transition API
+
+```rust
+enum AccountTransitionKind {
+    AccountCreate,
+    AccountUpdate,
+    AccountRemove,
+    CredentialSet,
+    CredentialDelete,
+}
+
+enum AccountTransitionState {
+    Prepared,
+    ConfigCommitted,
+    Finalized,
+    Aborted,
+    RecoveryRequired,
+}
+
+struct PrepareAccountTransitionRequest {
+    grant_use: GrantUseRequest,
+    transition_id: TransitionId,
+    store_id: StoreId,
+    account_id: AccountId,
+    kind: AccountTransitionKind,
+    before_config_sha256: Sha256Digest,
+    after_config_sha256: Sha256Digest,
+    expected_generation: NonZeroU64,
+    next_generation: NonZeroU64,
+    display_id_sha256: Sha256Digest,
+    account_generation: NonZeroU64,
+    credential_id: CredentialId,
+    binding_sha256: Sha256Digest,
+    observed_at_unix_ms: i64,
+}
+
+struct AccountTransitionObservationRequest {
+    transition_id: TransitionId,
+    expected_state: AccountTransitionState,
+    actual_config_generation: NonZeroU64,
+    actual_config_sha256: Sha256Digest,
+    observed_at_unix_ms: i64,
+}
+```
+
+T202C2 accepts only kind `AccountCreate`, account generation 1, and the exact
+create manifest values above. Request construction checks closed values,
+nonnegative representable UTC milliseconds, SQLite-representable generations,
+`next_generation = expected_generation + 1`, distinct before/after digests,
+and target shape before database access. The transaction reparses the immutable
+manifest and compares every request value. It does not trust a caller-supplied
+state boolean, config-current assertion, display string, event source, or
+receipt state.
+
+The bounded transition projection contains only transition ID, account ID,
+closed transition/account/store states, config generation, account generation,
+and prepared timestamp. It omits store and credential IDs, display and binding
+digests, config digests, grant/receipt identities, manifest, proof, signature,
+nonce, key, endpoint, and event detail. Request and projection types implement
+neither `Debug`, `Display`, serde, `JsonSchema`, nor logging helpers.
+
+`prepare_account_transition` consumes the grant only inside this transition
+transaction. Grant use is not separately callable. The four observation
+methods are `mark_config_committed`, `finalize_account_transition`,
+`abort_transition`, and `mark_transition_recovery_required`. They use the fixed
+apply lock, a fresh `BEGIN IMMEDIATE`, complete ready/history validation, and
+store-derived effective authority time. They never open config, keyring,
+runtime, protocol, or network resources. Runtime T206 supplies a typed snapshot
+read under the config capability/lock; it cannot select an authority path or
+event source.
+
+T202C2 also evolves T202C1 store-enrollment recovery without changing its
+operation identity. A registered store row carries the current config pair,
+state, and update time derived from its transition chain. Exact `enroll_store`
+retry validates the original grant/receipt/enrollment manifest, location
+material, store identity, enrollment event, and complete legal transition chain,
+then returns the original immutable enrollment projection: initial config
+generation from the sealed enrollment manifest, state `active`, and both
+projection timestamps equal to the store's enrollment `created_at`. It never
+requires mutable current pair/state/update time to equal the initial pair. A
+changed enrollment request retains the accepted T202C1 precedence. This is
+operation-receipt recovery, not current store status.
+
+### Account Transition Transcripts
+
+Transition kind codes are fixed: `1 account_create`, `2 account_update`,
+`3 account_remove`, `4 credential_set`, and `5 credential_delete`.
+`KIRJE-ACCOUNT-TRANSITION-V1\0` has exactly:
+
+```text
+0x0001 transition UUID16          0x0002 grant UUID16
+0x0003 store UUID16               0x0004 account UUID16
+0x0005 transition-kind u8         0x0006 before-config SHA-256
+0x0007 after-config SHA-256       0x0008 expected generation u64be
+0x0009 next generation u64be      0x000a prepared-at i64be
+```
+
+The exact bytes are retained only in memory; `transition_sha256` stores their
+SHA-256. The immutable grant/manifest graph and registry row bind the proposed
+account fields omitted from this compact transition transcript.
+
+The no-grant expiry/recovery identity is
+`KIRJE-ACCOUNT-TRANSITION-INTENT-V1\0` with these exact tags:
+
+```text
+0x0001 grant UUID16               0x0002 receipt UUID16
+0x0003 action u16be               0x0004 target-kind u16be
+0x0005 canonical target bytes     0x0006 manifest SHA-256
+0x0007 transition UUID16          0x0008 store UUID16
+0x0009 account UUID16             0x000a transition-kind u8
+0x000b before-config SHA-256      0x000c after-config SHA-256
+0x000d expected generation u64be  0x000e next generation u64be
+0x000f display-ID SHA-256         0x0010 account generation u64be
+0x0011 credential UUID16          0x0012 binding SHA-256
+```
+
+Raw observed time is absent. Immutable challenge/receipt/manifest rows plus a
+bounded request recompute the exact intent after an expiry response loss.
+
+Unsafe config observation is durably bound by
+`KIRJE-ACCOUNT-TRANSITION-RECOVERY-V1\0`:
+
+```text
+0x0001 transition SHA-256
+0x0002 prior transition state u16be
+0x0003 actual config generation u64be
+0x0004 actual config SHA-256
+```
+
+The event context is SHA-256 of these exact bytes. The raw pair remains in the
+private registered-store row while the event exposes only the domain-separated
+recovery digest. Restart validation recomputes it; changing one unsafe pair to
+another therefore cannot remain a valid recovery graph.
+
+### Prepare Transaction
+
+One store has at most one transition in `prepared` or `config_committed`, and a
+store in `recovery_required` admits none. This store-wide rule is stricter than
+the schema's per-account `active_transition_id`: every mutation replaces the
+same config document and therefore shares one generation chain.
+
+First prepare requires the store to be `active` at the exact before config
+pair, no active store transition, and all proposed global identities plus the
+effective-time transition digest to be absent. The same transaction performs
+these operations in order:
+
+1. insert the canonical grant use and `grant_used` event;
+2. update the store `active -> blocked` without changing its config pair;
+3. enable transaction-local `PRAGMA defer_foreign_keys=ON`, verify it is active,
+   insert the proposed account with its transition ID, insert the prepared
+   transition referring back to that account, and reserve the credential
+   identity against both;
+4. run `PRAGMA foreign_key_check` after the cyclic account/transition/credential
+   graph exists and require an empty result;
+5. append `store_state_changed` and `account_transition_prepared`, update the
+   paired authority clock, and commit.
+
+Transaction-local deferral is required only for the schema's intentional new
+account/transition/credential cycle. It is never a connection default or a
+substitute for final FK checking.
+A fault before commit rolls back the grant, store block, account reservation,
+transition, events, and clock. A post-commit response loss exactly recovers all
+of them.
+
+The prepared account row is `proposed`, has `active_transition_id` set, retains
+the exact receipt, account generation 1, credential identity, display digest,
+and binding digest, and is not usable for authentication or operations. The
+store is `blocked`, so unrelated account work cannot cross the config/authority
+gap. This reservation occurs before config or keyring access.
+
+Error precedence is closed. Pure request validation runs first. Transactional
+schema/anchor/history/event corruption is `owner_recovery_required`. A present
+grant row is compared next: changed bounded prepare identity is
+`grant_already_used`; an exact grant with a missing or mismatched immutable
+prepare graph or an illegal later lifecycle is corruption. An exact grant whose
+transition legally advanced returns the current transition projection instead
+of a stale prepared snapshot. Checked clock may advance, but no lifecycle row,
+timestamp, or event changes. With no grant, exact receipt/challenge/transition
+intent is checked; mismatch is `authorization_context_stale`. Expiry commits
+before current store and occupancy checks. Current store/config mismatch is
+`authorization_context_stale`, store/location conflict is
+`config_store_identity_conflict`, a store transition conflict is
+`account_update_conflict`, a store already in recovery is
+`owner_recovery_required`, global account/credential/transition identity
+collision is `account_identity_conflict`, and active display collision is
+`account_already_exists`. A racing loser inserts no grant, reservation,
+transition, event, or clock update.
+
+An authorized unclaimed receipt that expires at prepare changes only its
+challenge state, paired clock, and one authorized-to-expired event whose context
+is the transition-intent digest. Exact response-loss/restart/concurrent retry
+returns `authorization_expired` with no second event; changed intent is
+`authorization_context_stale`. No registry occupancy check occurs before this
+durable expiry.
+
+### Config Observation And Terminal Transitions
+
+For one transition, the observed config pair is classified exactly:
+
+```text
+before = (expected_generation, before_config_sha256)
+after  = (next_generation, after_config_sha256)
+third  = every other generation/digest pair
+```
+
+After complete history validation and terminal exact-retry lookup, unsafe
+physical state takes precedence over the requested safe transition: prepared
+plus third, or config-committed plus before/third, enters the common recovery
+transaction from any observation method. This prevents a stale method choice
+from leaving a newly observed unsafe pair represented as merely prepared or
+config-committed. Safe pairs then apply the method-specific rules below.
+
+The remaining matrix is closed. Prepared+before is a no-op for
+`mark_config_committed`, aborts for `abort_transition`, and is
+`account_update_conflict` for finalize or explicit recovery. Prepared+after
+commits only through `mark_config_committed`; every other method returns that
+conflict. Config-committed+after is an exact mark recovery, finalizes through
+`finalize_account_transition`, and conflicts for abort or explicit recovery.
+Finalized+after recovers only finalize; aborted+before recovers only abort.
+Recovery-required plus the exact stored actual pair and recomputed recovery
+event identity returns the recovery projection from every observation method;
+a changed terminal pair conflicts. Every other terminal/method/pair combination
+is `account_update_conflict` with no write.
+
+`mark_config_committed` requires request expected state `prepared`. Observing
+before is an exact no-op and returns the prepared projection. Observing after
+atomically changes the transition to `config_committed`, records
+`config_committed_at`, changes the registered store config pair to after while
+leaving it blocked, inserts the immutable after store and account version rows,
+appends `account_config_committed`, and updates the clock.
+An exact retry in `config_committed` returns unchanged. A third pair enters
+recovery.
+
+`finalize_account_transition` requires request expected state
+`config_committed` and the after pair. It changes the account
+`proposed -> active`, clears `active_transition_id`, changes the transition to
+`finalized`, then changes the store `blocked -> active`. The store retains the
+after config pair. It appends transition-finalized before the store-unblocked
+event. Exact finalized retry returns unchanged. Before after config-committed,
+or any third pair, enters recovery rather than reopening or replaying config.
+
+`abort_transition` requires request expected state `prepared` and the before
+pair. It changes the proposed account to `removed`, sets `removed_at`, clears
+`active_transition_id`, changes the transition to `aborted` with `resolved_at`,
+then changes the unchanged-before store `blocked -> active`. It appends the
+transition-aborted event before the store-unblocked event. The historical
+account, credential, grant, receipt, and transition identities remain reserved;
+the partial display index permits a later new account identity to reuse that
+display ID. An after pair is not abortable and returns
+`account_update_conflict`; a third pair enters recovery. Exact aborted retry
+returns unchanged.
+
+`mark_transition_recovery_required` accepts expected state `prepared` or
+`config_committed`. It accepts only a pair inconsistent with safe continuation:
+third from prepared; before or third from config-committed. The same recovery
+path is mandatory when another observation method sees such a pair. It stores
+the actual observed config pair on the registered store, changes that store
+`blocked -> recovery_required`, changes the account to `blocked` while retaining
+`active_transition_id`, and changes the transition to `recovery_required` with
+`resolved_at`. It appends store-state-changed before
+account-transition-recovery-required. No later C2 method can finalize, abort,
+or clear this state. T202E owns owner reconciliation.
+
+For finalized and aborted lifecycle methods, terminal exact retry compares the
+event-defined terminal operation, declared source state, transition identity,
+canonical actual config pair, and immutable graph. Recovery-required derives
+its prior source state from the event and all observation methods converge on
+the one recovery identity above. Observed time is only a clock sample. A changed
+terminal retry returns
+`account_update_conflict` and changes nothing. Exact recovery appends no event,
+does not change registry or lifecycle timestamps, and may advance only the
+paired authority clock.
+
+### Account-Create Event Graph
+
+All event detail uses the existing canonical event transcript. Context is the
+transition digest and receipt is the consumed create receipt unless the recovery
+shape below requires the recovery-observation digest. The exact new event shapes
+and order are:
+
+```text
+prepare:
+  grant_used (existing shape)
+  store_state_changed: entity store, source runtime, related transition,
+    store_active -> store_blocked
+  account_transition_prepared: entity transition, source runtime,
+    related account, none -> transition_prepared
+
+config committed:
+  account_config_committed: entity transition, source runtime,
+    related account, transition_prepared -> transition_config_committed
+
+finalize:
+  account_transition_finalized: entity transition, source runtime,
+    related account, transition_config_committed -> transition_finalized
+  store_state_changed: entity store, source runtime, related transition,
+    store_blocked -> store_active
+
+abort:
+  account_transition_aborted: entity transition, source owner_reconciliation,
+    related account, transition_prepared -> transition_aborted
+  store_state_changed: entity store, source owner_reconciliation,
+    related transition, store_blocked -> store_active
+
+recovery required:
+  store_state_changed: entity store, source crash_recovery,
+    related transition, store_blocked -> store_recovery_required,
+    context recovery-observation digest
+  account_transition_recovery_required: entity transition,
+    source crash_recovery, related account, exact prior transition state ->
+    transition_recovery_required, context recovery-observation digest
+```
+
+Events in one step share the store-derived effective timestamp and are adjacent.
+No account event code is invented; the account row shape is proven by the
+transition event and atomic graph. Event detail contains no display/binding/
+config digest, credential identity, manifest, location, endpoint, or secret.
+
+### T202C2 Restart Validation
+
+Restart validation admits only account-create challenges, create transitions,
+their account rows, and the lifecycle/event shapes above in addition to the
+accepted T202C1 history. Every other account-transition kind and every cleanup,
+effect, invocation, observation, rotation, or recovery row remains rejected.
+
+The T202C1 store row is current mutable registry state after C2. Its immutable
+enrollment identity and exact-retry projection are rederived from the original
+store-enroll challenge, receipt, grant, and event. Validation replaces the
+T202C1 stage fence that equates current store config with initial enrollment
+config; it never rewrites enrollment history.
+
+The validator streams bounded rows and retains at most one store, version,
+transition, account, manifest, transcript, and event at a time in Rust. For each
+store it streams `registered_store_versions` by the composite primary key's
+config-generation order and validates the initial enrollment origin followed by
+exact successor generations whose transition origins reached config committed.
+It separately streams that store's entity-kind-4 authority events through
+`authority_events_entity_sequence`; each state-change detail yields one keyed
+transition load and establishes prepare/terminal order without parsing a
+caller-supplied order or sorting transitions. Aborted transitions leave the
+current pair unchanged; finalized and config-committed transitions advance it;
+prepared leaves it before; recovery ends the chain at the stored actual pair.
+Only the last transition may be prepared, config-committed, or
+recovery-required. The derived final pair/state must equal the registered store
+row.
+
+Every account row has exactly one create transition and one exact create receipt.
+Its state/timestamps/active-transition shape must be exactly active/finalized,
+removed/aborted, proposed/prepared-or-config-committed, or
+blocked/recovery-required. Account/credential IDs remain globally unique;
+display uniqueness applies only to proposed/active/blocked rows. Transition,
+grant, account, store, receipt, manifest, transcript, timestamp, FK, and event
+graphs are rederived rather than trusted.
+
+The complete history validator has affine query-count growth, O(1) additional
+Rust history memory, no per-history collection, and no unindexed repeated full
+scan. `EXPLAIN QUERY PLAN` must show the store-version primary-key lookup and
+`authority_events_entity_sequence` with no `USE TEMP B-TREE`; tests also require
+the keyed account-version/credential/transition plans plus at least 128 complete
+sequential create histories. Corruption, read faults,
+unknown enum/state codes, duplicate/missing/swapped events, broken transition
+chains, dangling cyclic references, impossible current config, and timestamp
+drift all fail the entire open as `owner_recovery_required`.
 
 ### Grant Use, Claim, Invocation, And Observation
 

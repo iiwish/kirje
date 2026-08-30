@@ -3,7 +3,7 @@
 ## Metadata
 
 - Feature ID: `008-security-baseline`
-- Status: T202A_T202B_T202C1_Accepted_T202C2_Packetization
+- Status: T202C1S_Ready_For_Delegated_Execution
 - Updated: 2026-08-30
 - Inputs: `spec.md`, `checklists/requirements.md`, `plan.md`, `research.md`,
   `data-model.md`, `contracts/**`, `tasks.md`, project constitution and AGENTS
@@ -13,7 +13,7 @@
 ## Gate Result
 
 - Critical findings: 0 unresolved
-- High findings: 0 unresolved. The 3 A001 T202C1 findings are closed by A002
+- High findings: 0 unresolved in the confirmed requirement contract. The 3 A001 T202C1 findings are closed by A002
   and `T202C1_A002_PACKET_REVIEW_PASS`. Historical challenge validation is now
   intrinsic, lifecycle replacement and final-state terminals are distinct, and
   durable grant/event time is store-derived effective authority time with a
@@ -22,18 +22,23 @@
   canonical authority-store contract, transaction-body DDL, composite SQLite
   relationships, minimal validated core public-key prerequisite, fail-closed
   staged ownership, exact durable transcripts/replay tables, closed transaction
-  requests, and rotation/recovery state machine.
-- Medium findings: 0 unresolved. The 1 A001 T202C1 finding is closed by A002
+  requests, and rotation/recovery state machine. The first independent T202C2
+  packet review found a blocking schema relationship: remote effects referenced
+  mutable current store/account tuples, so historical rows would prevent later
+  config/account updates through `ON UPDATE RESTRICT`. T202C1S owns the
+  pre-release canonical-v1 correction; the original T202C2 packet has no pass
+  and remains blocked.
+- Medium findings: 0 unresolved in the confirmed requirement contract. The 1 A001 T202C1 finding is closed by A002
   and `T202C1_A002_PACKET_REVIEW_PASS`. A 128-or-more complete legal-history RED
   plus indexed EXPLAIN plans and O(1) memory review is now mandatory. Canonical schema ownership
   is assigned to T202B and propagated through T202C-T202E, the unreleased T202A
   development fence has an explicit fail-closed disposal boundary, and the
-  schema target/hash gates are present at task and packet level.
-- Low findings: 4 accepted watch items: future policy/assurance snapshot schemas
+  schema target/hash gates are present at task and packet level. T202C2 retry,
+  synthetic-signature-fixture wording, and restart-order findings remain packet
+  amendment items after T202C1S acceptance and cannot be waived by this task.
+- Low findings: 3 accepted watch items: future policy/assurance snapshot schemas
   remain executable fail-closed unsupported; the generic artifact validator
-  cannot select letter-suffixed child IDs independently; and the frozen
-  canonical DDL includes one final blank line that `git diff HEAD --check`
-reports even though its exact byte hash is required. The generated unified-diff
+  cannot select letter-suffixed child IDs independently. The generated unified-diff
 evidence is excluded from whitespace lint because its context lines use the
 standard single-space patch marker. The T202C1 test-only token scanner may
 false-positive on a future raw string containing code-like text; current
@@ -42,16 +47,19 @@ prohibited trait implementation.
 - Execution decision: T201 and T202A are Accepted. T202 remains a Draft
   acceptance umbrella split into strict serial T202A-T202E. T202B is Accepted
   at production commit `43f0788`; T202C is a Draft acceptance umbrella split
-  into strict serial T202C1-T202C4. T202C1 is Accepted at production commit
-  `aa53efb`; T202C2-T202C4, T202D-T202E, and T203-T212 remain Draft, so no
-  production task is Ready. T204 and every
+  into strict serial T202C1, T202C1S, and T202C2-T202C4. T202C1 is Accepted at
+  production commit `aa53efb`; T202C1S is Ready after
+  `T202C1S_A002_PACKET_REVIEW_PASS`. T202C2-T202C4, T202D-T202E, and T203-T212
+  remain Draft, so T202C1S is the sole production task that may execute. T204 and every
   later task directly require the T202 umbrella to be Accepted.
 
 The product requirements remain confirmed and do not add a remote mailbox
-effect or broaden authentication/protocol scope. T202A owns the accepted
-bootstrap behavior and relationship structure; T202B owns the sole pre-release
-lifecycle column/index amendment. T202C-T202E reuse the canonical T202B schema
-and cannot invent a second authority format.
+effect or broaden authentication/protocol scope. T202A owns accepted bootstrap
+behavior, T202B owns authorization receipts, and T202C1 owns enrollment.
+T202C1S owns the sole remaining pre-release Authority SQLite v1 correction:
+immutable credential/store-version/account-version parents and initial
+store-version enrollment. Later tasks reuse that one canonical v1 format and
+cannot invent a second authority database.
 
 ## Artifact Consistency
 
@@ -210,6 +218,10 @@ The spec, plan, data model, and contracts all state the same guarantee:
   lengths, ranges, closed enums, action/target shapes, foreign keys, ordinal
   bounds, composite cross-chain relationships, and partial uniqueness.
   `context_sha256` closes pending NULL semantics.
+- Immutable credential, store-version, and account-version rows preserve exact
+  registry history. Remote effects reference those version rows rather than
+  mutable current projections, so later legal registry transitions remain
+  possible without weakening historical foreign keys.
 - Bootstrap meta has exact `pending_anchor`/`ready` shapes and a complete
   database/anchor matrix; every staged state is recovery-required in T202A.
 - Proof, receipt, grant use, effect claim, invocation start, observation,
@@ -365,7 +377,7 @@ receipt/POP verification, and adds T202A's minimal core `OwnerPublicKey` plus
 SQLite key/role/epoch constraints. T202A does not acquire the full T202B payload
 snapshot or any staged mutation API.
 
-Executable SQLite validation of the canonical fence reports SHA-256
+Executable SQLite validation of the accepted T202B fence reported SHA-256
 `572a73ba5fa83c763188d804ce9767a3c21373410d8b170f6d97b49be0a86454`, 17 user
 tables, 15 declared indexes, and 3 triggers. The body parses with foreign keys
 enabled; valid receipt/nonce/grant and two complete remote-effect through
@@ -375,6 +387,14 @@ grant use, challenge-effect/remote-effect, effect claim, invocation, and
 observation inserts each fail with `FOREIGN KEY constraint failed` and leave zero
 invalid child rows. Equal public keys fail the unique constraint, swapped roles
 fail the role trigger, and initial-staged plus epoch-gap rows fail checks.
+
+The later T202C2 preflight proved that this fence's remote-effect parent choice
+was not mutation-safe: exact effects referenced current store/account tuples.
+T202C1S replaces only that unreleased relationship shape with three immutable
+version parents, evolves T202C1 enrollment to insert the initial store version,
+and records the resulting canonical digest after GREEN. Application ID and user
+version remain unchanged; older developer inventories fail exact schema
+classification and are not migrated.
 
 The challenge table carries the exact created-event sequence and a declared
 `(context_sha256, created_event_sequence, challenge_id)` lifecycle index. The
@@ -403,8 +423,9 @@ and `git diff --check` passes.
   owner/recovery values, no serde/default/private/signing surface in T202A.
 - Fixed authority: platform anchor/journal/apply-lock paths, no normal override.
 - Authority DB identity: `application_id=0x4B49524A` (`KIRJ`), user version 1;
-  T202A owns bootstrap structure and T202B owns the sole pre-release lifecycle
-  column/index amendment. T202C-T202E reuse the canonical T202B fence unchanged.
+  T202A owns bootstrap structure, T202B owns authorization lifecycle, and
+  T202C1S owns the final pre-release immutable registry-version correction.
+  T202C2-T202E reuse that exact canonical fence unchanged.
 - Bootstrap: one outer transaction owns schema body, initial rows, application
   ID/version, and commit; create-only external anchor write then exact confirm.
   Anchor-present/DB-missing, every third-state mismatch, and every T202A staged
@@ -451,13 +472,22 @@ and O(1) validation lacked executable high-cardinality/query-plan proof. The
 A002 amendment resolves these in the canonical authority-store contract and
 packet, and `T202C1_A002_PACKET_REVIEW_PASS` closes the execution-packet gate.
 T202C is an acceptance umbrella rather than a single production patch:
-T202C1 owns generic grant consumption plus store enrollment; T202C2 owns
-account-create issuance and transitions; T202C3 owns remaining account,
+T202C1 owns generic grant consumption plus store enrollment; T202C1S owns the
+unreleased immutable-version schema correction and initial store-version row;
+T202C2 owns account-create issuance and transitions; T202C3 owns remaining account,
 credential, and delete-only cleanup lifecycles; T202C4 owns six remote challenge
 effects and aggregate T202C validation. These tasks are strict serial because
 they share the authority transaction, validator, event stream, and fixture
-surface. T202C1-T202C4 and T202D-T202E remain dependency-gated Draft tasks, and
-T202 remains a Draft acceptance umbrella.
+surface. T202C1S and T202C2-T202C4 plus T202D-T202E remain dependency-gated
+Draft tasks, and T202 remains a Draft acceptance umbrella.
+
+The first T202C2 packet review issued no pass. Its blocking High finding is the
+mutable-parent remote-effect relationship assigned to T202C1S. The T202C2
+packet remains non-executable until T202C1S is Accepted and a later amendment
+closes monotonic exact retry across legal successor states, explicitly permits
+only synthetic detached-signature fixtures while forbidding signer/private
+material, and binds restart ordering to the immutable store-version/event
+indexes with no temporary sort.
 
 ## Watch Items
 
@@ -479,27 +509,16 @@ not an accepted fallback.
 ### L-003 Suffixed Task Validator Selection
 
 The shared artifact validator recognizes numeric `T###` headings but cannot
-select `T202A`-`T202E` or `T202C1`-`T202C4` through `--task-id`. Feature-wide
+select `T202A`-`T202E`, `T202C1S`, or `T202C1`-`T202C4` through `--task-id`. Feature-wide
 validation still checks the confirmed work graph and scans every packet file
 once present. Child packet review must therefore use feature-wide validation
 plus the declared packet and evidence paths until the validator is extended in
 a separately allowed tooling task. This is a smoke-tool limitation, not
 permission to merge child evidence or relax the strict serial gates.
 
-### L-004 Canonical DDL Diff Lint
-
-The accepted authority v1 DDL ends with one empty line and its exact SHA-256 is
-part of the reviewed contract. `git diff HEAD --check` therefore reports a new
-blank line at EOF when the schema first enters Git. All source and governance
-diffs other than that canonical file pass the same check; generated
-`evidence/T202A/diff.patch` is excluded because unified-diff context markers are
-not source whitespace. The fixed v1 bytes take precedence over normalization; a
-future schema version may normalize its own canonical source before freezing
-its digest.
-
 ## Execution Gate
 
-`APPROVED_FOR_T202C2_PACKETIZATION`
+`APPROVED_FOR_T202C1S_DELEGATED_EXECUTION`
 
 T202A is accepted from four test-first attempts, independent security and QA
 review, its bootstrap-schema digest, and fresh packet/workspace gates. A003
@@ -512,6 +531,19 @@ pass (`0 Critical / 3 High / 1 Medium`); A002 closes those findings and received
 `T202C1_A002_PACKET_REVIEW_PASS` with zero Critical, High, Medium, or Low
 findings. Three test-first implementation attempts, fresh packet/workspace
 gates, and `T202C1_A003_CODE_REVIEW_PASS` support evidence-based T202C1
-acceptance at production commit `aa53efb`. T202C2 is the next serial task and
-remains Draft until its packet receives independent review. The T202C and T202
+acceptance at production commit `aa53efb`. T202C2 received no packet pass
+because its schema parent relationship was not executable. T202C1S is the next
+serial task. Its A001 packet review received no pass (`1 High / 3 Medium / 1
+Low`): transition origins lacked exact composite FKs, abort wording conflicted,
+credential mutations did not freeze account-generation advancement, legal-
+successor enrollment retry was assigned to a stage that could not construct it,
+and the target DDL hash was not pinned. A002 closes those findings with exact
+transition/account/store parents, remove-not-delete semantics, one-step account
+generation rules, T202C2 ownership of successor retry, and target digest
+`5d01739b89246a5f495a965e57e416eee9fd0b5016995add41c6edee7f3e970d`.
+Independent A002 re-review verified every prior finding fixed, reproduced the
+exact FK/cycle/current-evolution/query-plan properties, reported zero Critical,
+High, Medium, or Low, and issued `T202C1S_A002_PACKET_REVIEW_PASS`. T202C1S is
+Ready for one delegated test-first attempt. T202C2 remains blocked
+until T202C1S acceptance and a fresh amended packet review. The T202C and T202
 umbrellas remain non-Accepted.

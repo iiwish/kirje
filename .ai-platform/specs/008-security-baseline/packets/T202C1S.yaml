@@ -1,0 +1,459 @@
+schema_version: 1
+packet_id: 008-T202C1S-A002
+task_id: T202C1S
+feature_id: 008-security-baseline
+mode: execute_one_task
+adapter: codex_worker
+status: ready_for_delegated_execution
+
+governance_inputs:
+  constitution: .ai-platform/memory/constitution.md
+  product_contract: .ai-platform/docs/product-design.md
+  program_spec: .ai-platform/specs/007-stable-v1-program/spec.md
+  program_plan: .ai-platform/specs/007-stable-v1-program/plan.md
+  feature_spec: .ai-platform/specs/008-security-baseline/spec.md
+  requirements_checklist: .ai-platform/specs/008-security-baseline/checklists/requirements.md
+  feature_plan: .ai-platform/specs/008-security-baseline/plan.md
+  research: .ai-platform/specs/008-security-baseline/research.md
+  data_model: .ai-platform/specs/008-security-baseline/data-model.md
+  contracts:
+    - .ai-platform/specs/008-security-baseline/contracts/authorization.md
+    - .ai-platform/specs/008-security-baseline/contracts/account-config-v2.md
+    - .ai-platform/specs/008-security-baseline/contracts/authority-store.md
+  work_graph: .ai-platform/specs/008-security-baseline/tasks.md
+  analysis: .ai-platform/specs/008-security-baseline/analysis.md
+  predecessor_packet: .ai-platform/specs/008-security-baseline/packets/T202C1.yaml
+  predecessor_evidence: .ai-platform/evidence/T202C1/summary.md
+  approval_gates:
+    constitution: confirmed project contract
+    program_spec_plan_work_graph: confirmed under delegated project-owner authority
+    feature_spec_and_plan: confirmed after independent security reviews
+    requirements_checklist: complete, including immutable historical registry parents
+    predecessor: T202C1 Accepted at production commit aa53efb and evidence commit 801ad30
+    decomposition: T202C1S is one strict serial prerequisite between accepted T202C1 and blocked T202C2
+    analysis: APPROVED_FOR_T202C1S_DELEGATED_EXECUTION after T202C1S_A002_PACKET_REVIEW_PASS
+    execution_authority: explicit standing user instruction to continue without per-step approval; failed or missing gates still stop execution
+
+work_unit:
+  title: Immutable registry version parents in canonical Authority SQLite v1
+  goal: >-
+    Correct the unreleased Authority SQLite v1 relationship graph before any
+    account mutation or remote-effect writer exists. Add immutable credential,
+    store-version, and account-version parents; redirect remote effects away
+    from mutable current projections; and evolve accepted store enrollment to
+    insert and exactly recover its initial store version in the same
+    transaction. Preserve application ID, user version, public APIs, event
+    semantics, and all accepted T202A through T202C1 behavior.
+  epic: T101
+  stories:
+    - US-001
+    - US-003
+  requirements:
+    - FR-003
+    - FR-004
+    - FR-005
+    - FR-006
+    - FR-016
+    - FR-018
+    - NFR-001
+    - NFR-002
+    - NFR-003
+    - NFR-006
+    - NFR-007
+  priority: P0
+  depends_on:
+    - T202C1 Accepted at production commit aa53efb
+    - T201 Accepted at production commit 89cc706
+    - old accepted fence digest 572a73ba5fa83c763188d804ce9767a3c21373410d8b170f6d97b49be0a86454 is the exact RED baseline, not the target digest
+    - confirmed immutable registry-version DDL and lifecycle contract in data-model.md and authority-store.md
+  blocks:
+    - T202C2
+    - T202C umbrella acceptance
+    - T202D
+  parallel: false
+  conflicts_with:
+    - any concurrent authority schema, enrollment, registry, remote-effect relationship, event, clock, or restart-validator change
+    - T202C2 through T202E
+
+governance_amendment:
+  trigger: first independent read-only T202C2 packet review
+  blocking_counterexample: >-
+    remote_effects currently has composite foreign keys to mutable
+    registered_stores and registered_accounts current tuples. After an effect
+    exists, ON UPDATE RESTRICT prevents the store config pair or account
+    generation/credential/binding tuple from advancing. Deferred foreign keys
+    cannot repair the missing historical parent at commit.
+  decision:
+    - correct the single unreleased canonical v1 rather than introduce or migrate to a second schema version
+    - retain mutable registered_stores and registered_accounts as current projections
+    - add immutable registered_credentials, registered_store_versions, and registered_account_versions parents
+    - redirect only remote_effect snapshot FKs to immutable version parents
+    - add a current-account composite FK to the immutable credential identity
+    - make accepted store enrollment insert the initial store version atomically
+    - leave account/credential/version transition writers to T202C2 and T202C3
+  scope_reason: >-
+    No authority schema has entered main, a remote branch, a release, CLI, MCP,
+    runtime, or protocol use. Exact schema classification already rejects any
+    noncanonical developer database, so preserving the broken developer shape
+    would add risk rather than compatibility.
+  required_review: satisfied by T202C1S_A002_PACKET_REVIEW_PASS with zero Critical, High, Medium, or Low finding
+  A001_result:
+    pass: false
+    findings: 1 High, 3 Medium, 1 Low
+    resolutions:
+      - transition origins use exact transition/account/store or transition/store composite FKs with corresponding UNIQUE parents
+      - account-create abort marks the current account removed and never physically deletes registry identity
+      - create starts account generation one; account update, credential set, and credential delete advance it exactly once; remove has no after version
+      - T202C1S proves ordinary enrollment exact retry only; T202C2 owns the first legal-successor enrollment-retry RED
+      - the reviewed normative DDL target digest is frozen before execution
+  A002_result:
+    token: T202C1S_A002_PACKET_REVIEW_PASS
+    findings: 0 Critical, 0 High, 0 Medium, 0 Low
+    verification:
+      - exact composite parent counterexamples fail with FOREIGN KEY constraint failed
+      - DDL parses as 20 tables, 15 explicit indexes, and 3 triggers with empty foreign_key_check
+      - deferred account/transition/credential cycle commits and current tuples no longer parent historical effects
+      - store-version and keyed parent plans use PK/UNIQUE autoindexes without USE TEMP B-TREE
+      - target digest, trailing bytes, YAML, artifact validator, diff check, and implementation baselines match
+
+stage_boundary:
+  supported_behavior_delta:
+    - enroll_store inserts one initial registered_store_versions row atomically with the accepted grant/store/event/clock graph
+    - exact enrollment retry validates and returns the immutable initial enrollment projection in the T202C1 stage
+    - T202C2 owns the first production-path RED for exact enrollment retry after a legal current-state successor
+    - schema and restart validation recognize the three immutable parent tables
+  unchanged_operations:
+    - T202A bootstrap and anchor confirmation
+    - T202B challenge, proof, receipt, nonce, replay, expiry, and event behavior
+    - T202C1 grant use, store enrollment request/projection, stable errors, events, faults, and concurrency
+  unsupported_operations:
+    - account_create, account_update, account_remove, credential_set, credential_delete, and credential_cleanup
+    - send_submit, seen_set, starred_set, move, archive, safe_delete, and ambiguous_close
+    - remote-effect registration, claim, invocation, observation, rotation-finalization, recovery-finalization, invalidation, policy, assurance, or audit mutation
+  no_interface_delta:
+    - no new public store API, command, MCP tool, runtime service, adapter call, migration API, repair API, or output field
+
+codebase_context:
+  local_instructions:
+    - AGENTS.md
+  relevant_files:
+    - crates/kirje-store/src/authority/schema_v1.sql
+    - crates/kirje-store/src/authority.rs
+    - crates/kirje-store/tests/authority_schema.rs
+    - crates/kirje-store/tests/authority_registry.rs
+    - crates/kirje-store/tests/authority_authorization.rs
+  existing_patterns:
+    - schema_v1.sql is a pure transaction body; prepare_bootstrap owns the sole outer BEGIN IMMEDIATE and commit
+    - authority.rs exact-classifies object names and sqlite_schema SQL before reading authority rows
+    - T202C1 enroll_store commits grant, events, current store, paired clock, and response-loss recovery under the fixed apply lock
+    - validators preflight broad SQL storage classes, then stream primary/unique order with bounded keyed event loads and O(1) additional history memory
+    - authority_schema.rs owns exact inventory, column/check/FK relationship, bootstrap rollback, and raw complete-chain probes
+    - authority_registry.rs owns T202C1 API-level enrollment, event, fault, concurrency, restart, complexity, and privacy proofs
+  implementation_preferences:
+    - use exact composite SQL keys and foreign keys rather than application-only joins
+    - factor one bounded stored-version loader/validator only when it removes real duplicate checks
+    - preserve existing stable error mapping and event transcripts; the initial version row has no event
+    - keep schema and test data deterministic, synthetic, bounded, and independent of any live mailbox
+
+canonical_schema_target:
+  identity:
+    application_id: 1263096394
+    user_version: 1
+    schema_source: crates/kirje-store/src/authority/schema_v1.sql
+    normative_ddl: .ai-platform/specs/008-security-baseline/data-model.md#authority-sqlite-v1
+    target_digest: 5d01739b89246a5f495a965e57e416eee9fd0b5016995add41c6edee7f3e970d
+    byte_rule: exact normative DDL block followed by one additional LF, so schema_v1.sql ends with exactly two LF bytes
+  inventory:
+    user_tables: 20
+    explicit_indexes: 15
+    triggers: 3
+    added_tables:
+      - registered_credentials
+      - registered_store_versions
+      - registered_account_versions
+    added_explicit_indexes: []
+    added_triggers: []
+  pre_release_compatibility:
+    - classify only the exact new 20-table canonical SQL inventory as AuthorityV1
+    - a KIRJ/version-1 database with the old 17-table inventory is recovery_required
+    - do not migrate, alter, repair, delete, rename, attach, export, or copy an old developer database
+    - pristine bootstrap creates only the reviewed new inventory in its existing outer transaction
+
+table_contracts:
+  account_transitions_parent_keys:
+    - retain transition_id primary key and add unique transition_id/store_id
+    - add unique transition_id/account_id/store_id
+    - these are immutable origin parents; they do not add a writer or change transition state semantics
+  registered_credentials:
+    columns:
+      - credential_id BLOB16 primary key
+      - account_id BLOB16
+      - store_id BLOB16
+      - created_transition_id BLOB16 unique
+      - created_at nonnegative INTEGER
+    relationships:
+      - unique credential_id/account_id/store_id parent tuple
+      - account_id/store_id references the stable registered account identity
+      - created_transition_id/account_id/store_id references the exact composite account transition that created the credential identity
+    lifecycle:
+      - inserted only when account create or binding-changing update reserves a new credential; those writers remain T202C2/T202C3-owned
+      - never updated or deleted by supported application paths
+      - a credential reserved by a later-aborted transition remains permanently unavailable
+  registered_store_versions:
+    key: primary key store_id/config_generation
+    columns:
+      - store_id BLOB16
+      - location_sha256 BLOB32
+      - positive SQLite-representable config_generation
+      - config_sha256 BLOB32
+      - nullable unique enrolled_receipt_id BLOB16
+      - nullable unique committed_transition_id BLOB16
+      - created_at nonnegative INTEGER
+    invariants:
+      - exactly one of enrolled_receipt_id or committed_transition_id is present
+      - store_id/location_sha256 references the immutable identity pair in registered_stores
+      - receipt origin references authorization_receipts and the exact enrolled store/location/receipt tuple
+      - transition origin references the exact transition_id/store_id composite
+      - unique store/config-generation/config-digest and exact remote-effect parent composite
+      - generation order for one store is the composite primary-key order
+      - never updated or deleted by supported application paths
+  registered_account_versions:
+    key: primary key account_id/account_generation
+    columns:
+      - account_id BLOB16
+      - store_id BLOB16
+      - positive SQLite-representable account_generation
+      - credential_id BLOB16
+      - binding_sha256 BLOB32
+      - committed_transition_id BLOB16 unique
+      - created_at nonnegative INTEGER
+    relationships:
+      - account_id/store_id references the stable registered account identity
+      - credential_id/account_id/store_id references the immutable credential identity
+      - committed_transition_id/account_id/store_id references the exact composite transition that committed this account tuple
+      - exact account/store/generation/credential/binding tuple is unique and is the remote-effect account parent
+    lifecycle:
+      - inserted only when an after account snapshot reaches config_committed; writer remains T202C2/T202C3-owned
+      - create uses generation one; account update, credential set, and credential delete advance generation exactly once
+      - account removal has no synthetic after account version
+      - never updated or deleted by supported application paths
+  mutable_projection_adjustments:
+    registered_stores:
+      - retain store_id primary key and globally unique location_sha256
+      - expose unique store_id/location_sha256 and store_id/location_sha256/enrolled_receipt_id parents
+      - current config generation/digest/state/update fields remain mutable and are not remote-effect parents
+    registered_accounts:
+      - retain stable account identity, current tuple, active display partial uniqueness, and transition cycle
+      - current credential/account/store tuple must reference registered_credentials
+      - current generation/credential/binding tuple is not a remote-effect parent
+  remote_effects:
+    - store/location/config-generation/config-digest FK references registered_store_versions
+    - account/store/account-generation/credential/binding FK references registered_account_versions
+    - all challenge, grant, trust, effect, claim, invocation, and observation relationships remain unchanged
+    - an effect referencing only a current projection and no immutable version is rejected
+
+enrollment_delta:
+  first_success:
+    - after the registered_stores insert, insert exactly one registered_store_versions row before store_enrolled event and commit
+    - version store/location/config pair equals the sealed enrollment manifest and current store row
+    - enrolled_receipt_id equals the consumed immutable receipt; committed_transition_id is NULL
+    - version created_at equals the effective grant/store/event time
+    - the version insert consumes no entropy and emits no new event
+  exact_recovery:
+    - validate the immutable version row before returning the accepted store projection
+    - projection generation/state/timestamps remain the original enrollment result, not a mutable current projection
+    - a missing, duplicate, cross-linked, mutated, or transition-origin initial version is owner_recovery_required
+    - exact retry appends no row or event and may advance only the accepted paired clock high-water
+  fault_atomicity:
+    - add a deterministic fault immediately after initial version insertion
+    - every fault before commit rolls back grant, grant event, current store, initial version, store event, and clock together
+    - after-commit response loss leaves exactly one recoverable initial version
+
+restart_validator:
+  stage_rules:
+    - T202A pending/ready bootstrap and T202B history require all three new tables empty
+    - T202C1 requires registered_credentials and registered_account_versions empty
+    - T202C1 requires exactly one receipt-origin initial store version per registered store and no transition-origin store version
+    - account, transition, cleanup, remote-effect, claim, invocation, observation, rotation, and recovery stage fences otherwise remain accepted T202C1 behavior
+  validation:
+    - preflight storage class, exact lengths, ranges, nullable-origin XOR, and bounded values before Rust row construction
+    - stream store versions by store_id/config_generation primary-key order with O(1) additional Rust history memory
+    - recompute each initial version from sealed enrollment manifest, receipt, grant, current stable store identity, events, and timestamps
+    - schema-level tests raw-insert complete synthetic later version/credential/account graphs to prove every FK and current-projection evolution relationship
+    - no production validator accepts account or transition rows in this stage merely because schema-level fixtures can construct them
+  query_plan:
+    - EXPLAIN QUERY PLAN for one-store ordered version stream uses the composite primary-key autoindex
+    - plans contain no USE TEMP B-TREE and no repeated unindexed full scan
+    - remote-effect parent and credential/account/version keyed checks use primary or unique indexes
+  corruption:
+    - old inventory, malformed row, missing origin, both origins, wrong receipt, wrong transition, cross-store location, cross-account credential, duplicate generation, missing initial version, or effect without exact version parent fails closed
+
+execution_constraints:
+  branch_or_worktree: codex/v1-roadmap-governance in /Users/iiwish/self/kirje
+  allowed_files:
+    - crates/kirje-store/src/authority/schema_v1.sql
+    - crates/kirje-store/src/authority.rs
+    - crates/kirje-store/tests/authority_schema.rs
+    - crates/kirje-store/tests/authority_registry.rs
+  forbidden_files:
+    - crates/kirje-store/src/lib.rs
+    - crates/kirje-core/**
+    - crates/kirje-runtime/**
+    - crates/kirje-protocol/**
+    - crates/kirje-cli/**
+    - crates/kirje-mcp/**
+    - Cargo.toml
+    - Cargo.lock
+    - AGENTS.md
+    - .ai-platform/**
+    - docs/**
+    - skills/**
+  baseline_hashes:
+    crates/kirje-store/src/authority/schema_v1.sql: 572a73ba5fa83c763188d804ce9767a3c21373410d8b170f6d97b49be0a86454
+    crates/kirje-store/src/authority.rs: 9a65ba82503bf8b085ce361a2b7f18bbb5686525a14624f0c2746266972d9546
+    crates/kirje-store/tests/authority_schema.rs: 9d020925c5cfd11b735f80ff33e7902028089585600cdcc6f68ff5eef0fab59f
+    crates/kirje-store/tests/authority_registry.rs: 11feb89bedceae8589c0490fcafca65e5d372b0d5eb2374c95fb43de772a8e2d
+  dependency_constraints:
+    - no Cargo, dependency, feature, MSRV, unsafe-code, ORM, or migration-framework change
+    - use only existing rusqlite transactions, schema classifier, preflights, fixed lock, events, stable errors, and test-support facilities
+    - no application_id or user_version change and no ALTER, migration, repair, or compatibility fallback
+  forbidden_changes:
+    - no file outside allowed_files and no worker edit to governance, evidence, task state, branch, commit, PR, or release
+    - no public API, account transition writer, remote-effect writer, challenge action, output, event code/detail, transcript, error code, config, keyring, runtime, protocol, CLI, MCP, provider, or network change
+    - no independent grant-use method, caller path/authority/entropy/current-state override, silent repair, unbounded collection, test skip, weaker assertion, or predecessor behavior change
+    - no secret, real account/address, endpoint, UID, mailbox content, subject, body, attachment, private signing seed/key, signer source/API, real proof/signature/nonce, token, password, or authorization password in source, tests, output, evidence, or commits
+    - accepted clearly synthetic public keys, detached signatures, proofs, nonces, UUIDs, and digest bytes already used by tests may be reused; no new signer or private material is permitted
+  ownership_notes:
+    - worker must not delegate further, commit, write evidence, or accept the task
+    - worker verifies every baseline hash before RED and stops on mismatch
+    - preserve all user/orchestrator governance changes and stop if an allowed implementation file changes concurrently
+
+tdd_plan:
+  required: true
+  exception: null
+  red:
+    allowed_test_files:
+      - crates/kirje-store/tests/authority_schema.rs
+      - crates/kirje-store/tests/authority_registry.rs
+    targets:
+      - canonical inventory expects 20 tables and exact new columns/checks/foreign-key parents while the old schema still has 17
+      - complete synthetic remote-effect chain remains valid after current store and account tuples advance to already-inserted successor identities; old current-parent FKs reject this update
+      - missing/cross-linked version and credential parents plus mutable-current-only effect insertion are rejected
+      - cross-account or cross-store transition origins that otherwise leave foreign_key_check empty are rejected by the exact composite parent FKs
+      - accepted enrollment creates and exactly recovers one initial version, including a new post-version-insert rollback fault and after-commit response loss
+      - restart rejects a missing/mutated/cross-linked initial store version and old developer inventory
+      - EXPLAIN ordered store-version and keyed relationship plans have no temporary B-tree
+    command: cargo test -p kirje-store --test authority_schema --test authority_registry --all-features --locked
+    expected_failure: >-
+      New targets fail because immutable registry tables/FKs, initial-version
+      enrollment, fault point, and validator support are absent. Existing-test,
+      syntax, dependency, toolchain, or environment failures are invalid RED.
+  green:
+    implementation_order:
+      - implement the exact reviewed DDL and object inventories
+      - minimally evolve enrollment transaction/fault recovery
+      - minimally evolve preflight and restart validation
+    command: cargo test -p kirje-store --test authority_schema --test authority_registry --all-features --locked
+    expected_signal: all schema relationship, enrollment version, restart, fault, and query-plan targets pass
+  refactor:
+    command: cargo test -p kirje-store --all-features --locked
+    expected_signal: T202A through T202C1 remain green against the corrected canonical v1 without duplicate policy or migration logic
+
+validation_loop:
+  commands:
+    - cargo fmt --all --check
+    - cargo test -p kirje-store --test authority_schema --all-features --locked
+    - cargo test -p kirje-store --test authority_registry --all-features --locked
+    - cargo test -p kirje-store --test authority_authorization --all-features --locked
+    - cargo test -p kirje-store --all-features --locked
+    - cargo test -p kirje-store --no-default-features --locked
+    - cargo +1.88.0 test -p kirje-store --all-features --locked
+    - cargo clippy -p kirje-store --all-targets --all-features --locked -- -D warnings
+    - cargo test --workspace --all-features --locked
+    - cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+    - cargo build --workspace --all-features --locked
+    - cargo deny check licenses bans sources
+    - sh -c 'test "$(shasum -a 256 crates/kirje-store/src/authority/schema_v1.sql | cut -d " " -f1)" = "5d01739b89246a5f495a965e57e416eee9fd0b5016995add41c6edee7f3e970d"'
+    - python3 /Users/iiwish/.codex/skills/ai-delivery-governor/scripts/validate_delivery_artifacts.py --root /Users/iiwish/self/kirje --feature-id 008-security-baseline
+  required_captures:
+    - new schema_v1.sql SHA-256 and exact 20-table/15-explicit-index/3-trigger inventory
+    - application_id 1263096394 and user_version 1 after bootstrap
+    - PRAGMA foreign_key_check empty and PRAGMA integrity_check exactly ok
+    - old 17-table KIRJ/version-1 developer database classified recovery_required without write
+    - EXPLAIN plans with no USE TEMP B-TREE
+  retry_budget: 2
+  failure_policy:
+    first_failure: fix only a T202C1S contract defect inside allowed files and rerun the narrowest failing command
+    second_failure: classify packet, schema, dependency, MSRV, test, or environment blocker and stop if scope must change
+    beyond_budget: return blocked attempt output without weakening immutability, exact parentage, enrollment atomicity, restart validation, or no-migration behavior
+  no_downgrade:
+    - do not delete, ignore, serialize around, or relax a RED or predecessor assertion
+    - do not point an effect back to a mutable parent or preserve a compatibility path to the broken inventory
+    - do not replace exact FKs with application-only string/digest comparisons
+    - do not skip no-default, MSRV, package/workspace, schema, query-plan, or artifact gates
+  known_external_advisory:
+    command: cargo deny check advisories
+    expected_signal: only the pre-existing yanked chacha20 0.10.1 chain through io-imap; any additional advisory or dependency drift blocks acceptance
+
+definition_of_done:
+  - one canonical Authority SQLite v1 has 20 exact tables, 15 explicit indexes, 3 triggers, unchanged application ID/user version, and a recorded new SHA-256
+  - remote effects reference only immutable store/account version parents, while current store/account projections can advance without FK failure and history remains valid
+  - credential identity is globally reserved and permanently bound to one account/store/creating transition; every malformed or cross-linked parent graph fails closed
+  - accepted store enrollment atomically inserts and exactly recovers one initial receipt-origin store version with no new event, entropy, output, or public API
+  - bootstrap, authorization, grant/enrollment, restart, event, fault, concurrency, boundedness, query-plan, no-default, MSRV, full workspace, and privacy gates pass
+  - old developer inventory is rejected without migration/repair, worker scope is exact, and independent review has zero Critical, High, or Medium finding
+
+evidence_contract:
+  owner: delivery_orchestrator
+  worker_output_only: true
+  orchestrator_owned_path: .ai-platform/evidence/T202C1S
+  required_files:
+    - summary.md
+    - diff.patch
+    - test-results.md
+    - attempts/T202C1S-A001.md
+  required:
+    - baseline hashes, changed-file scope, RED command/exit/contract failure, GREEN/refactor commands, and full validation results
+    - old/new canonical digest and exact object/application/version inventory
+    - remote-effect current-projection evolution proof and immutable parent FK negative matrix
+    - credential/store-version/account-version shape, origin, uniqueness, cross-link, and corruption matrix
+    - enrollment first/ordinary-retry/restart/concurrency/fault/response-loss/clock/event matrix with exact initial-version cardinality; legal-successor retry remains explicitly T202C2-owned
+    - T202A/T202B/T202C1 restart-stage regressions, query plans, affine/O(1) review, foreign-key/integrity results, and old-inventory rejection
+    - API/diff/privacy/secret/material scans, cargo-deny inventory, residual risk, and exact T202C2 follow-up boundary
+
+review_contract:
+  required_passes:
+    - spec and data-model compliance for FR-003 through FR-006, FR-016, FR-018, and mapped NFRs
+    - SQLite key, nullable-origin, forward-reference, cycle, parent-cardinality, ON UPDATE/DELETE, and raw relationship review
+    - enrollment transaction, exact retry, fault, response-loss, event, clock, restart, and stage-fence review
+    - immutable-history/current-projection evolution, query-plan, boundedness, corruption, privacy, and pre-release compatibility review
+    - independent bug/code-quality review plus QA acceptance of the complete matrix
+  blocking_findings:
+    - any remote-effect FK still targets registered_stores or registered_accounts current tuples
+    - a current tuple cannot legally advance after an effect, or an effect can reference a tuple with no immutable version parent
+    - credential identity can alias another account/store, a version lacks exact origin, or aborted credential reservation can be reused
+    - initial store version is outside enrollment transaction, emits a new event, changes timestamps, duplicates on retry, or is not restart-validated
+    - old developer inventory is accepted/migrated/repaired, application ID/user version changes, or a second schema/version/API is introduced
+    - schema object SQL, FK check, integrity, query plan, T202A-T202C1 stage behavior, RED, full gate, privacy, or allowed-file scope is incomplete
+  acceptance_rule: >-
+    The worker never accepts the task. After independent zero-blocking review,
+    verified TDD evidence, and fresh required gates, the orchestrator may record
+    acceptance under the user's explicit standing project-owner delegation.
+
+handoff:
+  external_issue: null
+  pull_request: null
+  finish_options:
+    - execute one delegated T202C1S attempt after packet review passes
+    - create one bounded packet or implementation fix attempt within the same task
+    - amend and independently re-review blocked T202C2 only after T202C1S acceptance
+
+stop_conditions:
+  - current branch lacks T202C1 production commit aa53efb or evidence commit 801ad30
+  - any Critical, High, or Medium packet finding remains unresolved
+  - a baseline implementation hash differs before RED or an allowed file changes concurrently after RED begins
+  - RED is not contract-relevant or production changes precede RED
+  - exact normative DDL cannot be implemented with unchanged application ID/user version and allowed files
+  - implementation requires migration, repair, public API, Cargo/core/runtime/protocol/CLI/MCP, account/effect writer, event/transcript/error change, or test downgrade
+  - current-projection evolution, immutable remote-effect parentage, enrollment atomicity/recovery, restart validation, or no-temp-sort plan cannot be proved
+  - any secret, real mailbox/account/address/endpoint/UID/content, credential, password, private signing material, signer code, token, or real authorization artifact appears in source, test, output, evidence, or commit
