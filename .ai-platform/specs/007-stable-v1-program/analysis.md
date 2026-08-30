@@ -161,7 +161,7 @@ predecessor receipt, while unsafe observation remains fail-closed recovery.
 Review covers direct removal, create-update-remove history, display reuse only
 with fresh account and credential identities, fault rollback, expiry, restart,
 and tamper recovery. No unresolved Critical, High, or Medium finding remains.
-The user explicitly accepted A003 on 2026-08-30. Credential set is reviewed at
+The user explicitly accepted A003 on 2026-08-30. Credential set is accepted at
 production commit `1c6d7cb`; credential delete, cleanup claim/delete, config,
 keyring, runtime, protocol, CLI, MCP, and network behavior remain excluded.
 
@@ -175,9 +175,9 @@ account versions with the existing credential identity; finalize activates the
 authorized/bound after projection. Abort restores the predecessor receipt and
 tuple, while unsafe observation remains fail-closed recovery. Fault rollback,
 expiry, replay, restart, target mismatch, and kind corruption are covered. No
-unresolved Critical, High, or Medium finding remains. A004 awaits explicit user
-acceptance; credential delete and cleanup remain excluded and no later attempt
-is Ready.
+unresolved Critical, High, or Medium finding remains. The user explicitly
+accepted A004 on 2026-08-30. Credential delete is the next bounded attempt
+pending packet review; cleanup remains excluded and no later attempt is Ready.
 
 ## Current Implementation Evidence Check
 
