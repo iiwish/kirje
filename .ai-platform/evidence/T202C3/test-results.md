@@ -273,3 +273,45 @@ no cleanup row, and transition-kind tamper.
 - Privacy scan found no private key, seed, proof, nonce, credential bytes,
   locator material, real account data, address, endpoint, mailbox content, or
   provider data in the fixture or evidence.
+
+## A006 RED
+
+The focused command exited 101 at the intended unsupported cleanup gate:
+
+```text
+cargo test -p kirje-store --test authority_registry \
+  credential_cleanup_challenge_is_exact \
+  --all-features --locked
+```
+
+The valid request returned `authorization_context_stale` before cleanup
+challenge support existed.
+
+## A006 GREEN And Validation
+
+- Focused cleanup challenge test: 1 passed, 0 failed, 44 filtered out.
+- `cargo test -p kirje-store --all-features --locked`: unit 8,
+  authorization 33, authority registry 45, schema 31, outbox 11, and doc tests
+  passed.
+- `cargo test -p kirje-store --no-default-features --locked`: 8 unit and 11
+  outbox tests passed; feature-gated suites selected zero tests.
+- All-target, all-feature Clippy with `-D warnings`: passed.
+- `cargo fmt --all --check`: passed.
+- Schema and `Cargo.lock` hashes remained unchanged.
+
+## A006 Review Failure
+
+Engineering passed with zero finding and noted residual missing legacy full-flow
+proof. Spec compliance failed with 1 High and 1 Medium. QA failed with 4 Medium
+findings. The High is an error-precedence/privacy defect: mixed invalid target
+plus blocked/recovery state exposes target validity by returning
+`credential_cleanup_invalid` before the required eligibility error. The five
+Medium findings cover locator/legacy mutation discrimination, invalid expired-
+replacement rollback, immutable clock/entropy/concurrency/response-loss
+assertions, historical/restart-corruption matrices, and effect/external-call/
+privacy proof.
+
+A006 is Returned/Needs Fix at
+`2241a946c399ba9c61e67e808a85f777c0d2b402`; passing commands do not override
+the failed reviews. Autonomous execution stopped and may not resume without
+explicit user direction.

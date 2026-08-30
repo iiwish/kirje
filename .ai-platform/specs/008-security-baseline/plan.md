@@ -648,7 +648,7 @@ capability implementable. That decision specifies one unpublished low-level
 crate with `kirje-store` as its only direct dependent and supersedes any shared
 store/runtime or pluggable deletion formulation. This is an architecture decision, not an
 implementation claim and not a claim that the user personally reviewed the
-resulting artifact. `T202C3_A006_PACKET_REVIEW_PASS` authorizes only A006's exact
-production/test scopes at governance HEAD `3533054`; later attempts remain
-closed, and production acceptance still requires TDD, validation, evidence, and
-three implementation reviews.
+resulting artifact. `T202C3_A006_PACKET_REVIEW_PASS` authorized only A006's exact
+candidate scopes at governance HEAD `3533054`. Candidate `2241a946` later failed
+spec and QA review and is Returned/Needs Fix with no current write permission.
+Later attempts remain closed, and explicit user resume is required before a fix.

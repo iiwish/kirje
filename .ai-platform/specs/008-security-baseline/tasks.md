@@ -745,9 +745,14 @@ privacy invariants, closed error precedence, lower credential crate, and
 reservation-time canonicality. `T202C3-A006` is a revised execution packet
 authorized by final independent spec, engineering, and QA passes at governance
 HEAD `3533054`, each with zero Critical, High, Medium, or Low finding.
-`T202C3_A006_PACKET_REVIEW_PASS` makes A006 Ready only for its exact listed
-production/test paths. A007 claim and A008 delete-completion are non-executable
-just-in-time outlines; neither is Ready or packetized.
+`T202C3_A006_PACKET_REVIEW_PASS` authorized the exact candidate scope. Candidate
+commit `2241a946` is Returned/Needs Fix after
+engineering PASS C0/H0/M0/L0, spec FAIL C0/H1/M1/L0, and QA FAIL
+C0/H0/M4/L0. The High is a blocked/recovery error-precedence privacy leak; five
+Medium coverage/proof findings remain. Autonomous execution stopped and the
+heartbeat was paused. Explicit user resume is required before a fix attempt.
+A007 claim and A008 delete-completion are non-executable just-in-time outlines;
+neither is Ready or packetized.
 Priority: P0
 Story / Requirement: US-001, US-003; FR-003-FR-009, FR-016; NFR-001-NFR-003,
 NFR-006, NFR-007
@@ -831,7 +836,9 @@ there is no separate `008-security-baseline/packets/T202C3.yaml`.
 
 Attempt ownership is serial: A006 owns canonical locator validation at
 reservation/prepare plus effect-free cleanup challenge issuance, without
-changing transition state-machine behavior. A007 owns the new unpublished
+changing transition state-machine behavior. Its candidate is Returned/Needs Fix
+and blocks all later outlines until explicit resume, correction, and review.
+A007 owns the new unpublished
 `kirje-credential` workspace crate, root/store-only dependency entries, opaque
 locator, store-private fake deletion hook, store-owned permit and combined
 method foundation, atomic grant use, ready-to-claimed transition, and event 16.

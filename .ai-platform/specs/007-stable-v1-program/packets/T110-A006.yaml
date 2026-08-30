@@ -4,7 +4,7 @@ task_id: T110
 feature_id: 007-stable-v1-program
 mode: delegated_test_first_execution
 adapter: codex_worker
-status: ready
+status: needs_fix
 
 governance_inputs:
   constitution: .ai-platform/memory/constitution.md
@@ -45,6 +45,10 @@ governance_inputs:
       engineering, and QA passes each returned PASS with zero Critical, High,
       Medium, or Low finding and authorized exact A006 production/test scopes.
     packet_review_token: T202C3_A006_PACKET_REVIEW_PASS
+    execution_review: >-
+      Candidate commit 2241a946c399ba9c61e67e808a85f777c0d2b402 was
+      returned: engineering PASS C0/H0/M0/L0 with a legacy full-flow residual;
+      spec FAIL C0/H1/M1/L0; QA FAIL C0/H0/M4/L0.
 
 work_unit:
   title: Issue an exact effect-free credential-cleanup challenge
@@ -87,6 +91,22 @@ codebase_context:
     - exact pending reuse and claimed recovery may mutate only the paired authority clock high-water
     - the unpublished kirje-credential crate is a direct dependency of kirje-store only; no public trait/plugin surface lets runtime bypass authority
     - A008 uses an exhaustive AST allowlist rather than a bypassable literal sole-call scan
+
+execution_result:
+  candidate_commit: 2241a946c399ba9c61e67e808a85f777c0d2b402
+  status: returned_needs_fix
+  blocking_high: >-
+    Cleanup validates origin/locator/tombstone before blocked/recovery
+    eligibility, so a mixed invalid target returns credential_cleanup_invalid
+    instead of account_update_conflict or owner_recovery_required and leaks
+    target validity.
+  medium_findings:
+    - legacy negatives and locator bounds/mutation coverage are not discriminating or complete
+    - invalid-target expired-pending replacement rollback is not actually exercised
+    - immutable projection, clock, entropy, concurrency, pending-reuse, and response-loss assertions are incomplete
+    - historical later update/remove/recreation and durable restart-corruption matrices are incomplete
+    - effect_observations, external-call cardinality, and privacy proof are incomplete
+  resume_gate: explicit user resume after blocker summary; no autonomous fix attempt may begin
 
 contract_snapshot:
   locator:
@@ -172,12 +192,9 @@ later_attempt_outlines:
     kirje-credential or locator material.
 
 execution_constraints:
-  production_permission:
-    - crates/kirje-store/src/authority.rs
-  test_permission:
-    - crates/kirje-store/tests/authority_registry.rs
-    - crates/kirje-store/tests/fixtures/authority/registry/account_credential_cleanup/**
-  allowed_files:
+  production_permission: none_returned_high_requires_explicit_resume
+  test_permission: none_returned_high_requires_explicit_resume
+  last_attempt_allowed_files:
     - crates/kirje-store/src/authority.rs
     - crates/kirje-store/tests/authority_registry.rs
     - crates/kirje-store/tests/fixtures/authority/registry/account_credential_cleanup/**
@@ -186,9 +203,9 @@ execution_constraints:
     - cleanup claim/delete, permit, deletion backend, runtime, config, keyring, protocol, CLI, MCP, network, or remote-effect behavior
     - transition state-machine behavior outside locator input hardening before cleanup insertion
   write_rules:
-    - Begin with a discriminating focused RED and confirm its expected failure before production changes.
-    - A worker edits only the exact production_permission and test_permission paths and does not delegate.
-    - A worker writes only production/test/fixture paths above; evidence, SSOT, packet, and status files remain orchestrator-owned.
+    - No production, test, fixture, schema, Cargo, or lockfile edit may begin without explicit user resume and a reviewed fix packet.
+    - The returned attempt scope is historical evidence, not current write permission.
+    - Evidence, SSOT, packet, and status files remain orchestrator-owned.
     - Deterministic synthetic non-real locator transcript bytes may appear only in authority_registry.rs for canonical byte goldens.
     - Signature fixtures may contain deterministic synthetic public signatures only and never locator transcripts; evidence/output/logs contain only vector IDs, digests, counts, and pass/fail results.
     - Real/private locator bytes remain prohibited in every committed file; private keys, seeds, real proofs/nonces, credentials, and real account data are also prohibited.
@@ -242,6 +259,7 @@ evidence_contract:
 
 review_contract:
   required_review: satisfied by T202C3_A006_PACKET_REVIEW_PASS at governance HEAD 3533054
+  production_review: failed at candidate commit 2241a946c399ba9c61e67e808a85f777c0d2b402
   pass_1_spec_compliance:
     - exact transcripts, explicit cleanup-only historical-before binding exception, transition-bound legacy, ready eligibility, and no core/schema change
   pass_2_engineering:
@@ -256,16 +274,16 @@ review_contract:
     - orchestrator may then record delegated acceptance without claiming user personal review
 
 handoff:
-  current_state: A006 Ready after T202C3_A006_PACKET_REVIEW_PASS at governance HEAD 3533054; exact production/test scopes authorized
-  after_packet_review: satisfied; do not broaden the authorized scopes
-  after_execution: A006 review_complete or delegated Accepted from evidence; A007 may then be packetized just in time
+  current_state: A006 Returned/Needs Fix after failed spec and QA review; autonomous execution stopped and heartbeat paused
+  after_packet_review: historical packet gate passed; production review overrides executable state
+  after_execution: explicit user resume is required before a reviewed fix attempt; A007/A008 remain non-executable
   commit_policy:
     - local commits only
     - no push, merge, tag, publish, GitHub Release, live provider, mailbox, credential, or external destructive operation
 
 stop_conditions:
-  - A later review revokes T202C3_A006_PACKET_REVIEW_PASS or finds a new unresolved Critical, High, or Medium issue.
-  - Production or test work is requested outside the exact permission lists.
+  - The current High review finding remains unresolved or explicit user resume is absent.
+  - Production, test, or fixture work is requested while permissions remain none.
   - A required change touches schema, core transcripts/types, dependencies, runtime, keyring, protocol, CLI, MCP, network, or external calls.
   - Locator material or private origin values would enter output, events, logs, fixtures, evidence, Debug, serialization, cloning, or byte export.
   - Synthetic locator transcript bytes would appear outside authority_registry.rs, or any real/private locator bytes would enter a committed file.

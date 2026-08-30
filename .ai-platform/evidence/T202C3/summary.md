@@ -2,10 +2,13 @@
 
 ## Status
 
-Cleanup amendment and A006 packet passed final independent spec, engineering,
-and QA review at governance HEAD `3533054` with zero Critical, High, Medium, or
-Low finding. `T202C3_A006_PACKET_REVIEW_PASS` authorizes exact scoped test-first
-execution but does not accept A006, T202C3, or T110. `T202C3-A001` challenge issuance is reviewed at production commit
+`T202C3-A006` is Returned/Needs Fix at candidate commit
+`2241a946c399ba9c61e67e808a85f777c0d2b402`. Engineering passed, but spec review
+failed with 1 High/1 Medium and QA failed with 4 Medium findings. Autonomous
+execution stopped and the heartbeat was paused under the user's High-stop
+condition; explicit user resume is required before another attempt. A006,
+T202C3, and T110 remain unaccepted. `T202C3-A001` challenge issuance is reviewed
+at production commit
 `daf22a0`. `T202C3-A002` account-update transition execution is accepted at
 production commit `2c00f32` by explicit user decision on 2026-08-30.
 `T202C3-A003` account-remove transition execution is accepted at production
@@ -51,10 +54,13 @@ commit `316dae0` by explicit user decision on 2026-08-30.
   versions.
 - No credential row deletion, cleanup row, credential bytes, locator material,
   or keyring/config/runtime capability added by credential delete.
+- The returned A006 candidate adds canonical cleanup locator/reservation checks
+  and cleanup challenge issuance, and passes its focused and full validation.
+  These changes are not accepted because required precedence and coverage remain
+  incomplete.
 
-No cleanup challenge/claim/delete, remote effect, runtime, config, keyring,
-protocol, CLI, MCP, network, schema, dependency, or core transcript behavior is
-included.
+No cleanup claim/delete, remote effect, runtime, config, keyring, protocol, CLI,
+MCP, network, schema, dependency, or core transcript behavior is included.
 
 ## Review Result
 
@@ -70,12 +76,17 @@ HEAD `3533054` each returned zero Critical, High, Medium, or Low finding and
 explicitly authorized its exact production/test scopes. This packet pass is not
 implementation evidence or acceptance.
 
-## Final Content Hashes
+Production review of candidate commit `2241a946` did not pass. Engineering was
+PASS C0/H0/M0/L0 with a legacy full-flow residual gap. Spec was FAIL
+C0/H1/M1/L0. QA was FAIL C0/H0/M4/L0. The blocking High is the cleanup error-
+precedence privacy leak; five Medium coverage/proof findings also remain open.
+
+## Returned Candidate Content Hashes
 
 ```text
-60c185a6bac9e90d9e065e7f56075a6997b96ced432cf85d9d91d25afda7dbb5  crates/kirje-store/src/authority.rs
-6480c17d2540e574531c613b91ab140eb6b4916f877586e81f81077e43c86564  crates/kirje-store/tests/authority_registry.rs
-678899fee9cbed74625a56d159d1bf849874f2ae3cd6b4498b4ec048becd2efc  crates/kirje-store/tests/fixtures/authority/registry/account_credential_cleanup/signatures.txt
+59d13b294ce2a0446ce9579391e49e05f96e62a9f079f5d10f39e5dc425ecc5d  crates/kirje-store/src/authority.rs
+ad413f31952e1093e0174809bf4f37a23fffe97817fe65f1229fd3c281b62df2  crates/kirje-store/tests/authority_registry.rs
+e5613c2fef5f0181dfe06ededec939b4e132fc4bbf1cd656dbdfbfe26f076608  crates/kirje-store/tests/fixtures/authority/registry/account_credential_cleanup/signatures.txt
 5d01739b89246a5f495a965e57e416eee9fd0b5016995add41c6edee7f3e970d  crates/kirje-store/src/authority/schema_v1.sql
 596ddb0071ecb38b0b9429c5d91cdbb83abe6a25bc760cf9588b2764274ff850  Cargo.lock
 ```
@@ -87,17 +98,20 @@ implementation evidence or acceptance.
 - Attempt: `.ai-platform/evidence/T202C3/attempts/T202C3-A003.md`
 - Attempt: `.ai-platform/evidence/T202C3/attempts/T202C3-A004.md`
 - Attempt: `.ai-platform/evidence/T202C3/attempts/T202C3-A005.md`
+- Returned attempt: `.ai-platform/evidence/T202C3/attempts/T202C3-A006.md`
 - Contract amendment: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract.md`
 - Contract fix: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract-A002.md`
 - Contract fix: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract-A003.md`
 - Contract fix: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract-A004.md`
 - Packet review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-packet-review.md`
 - Test results: `.ai-platform/evidence/T202C3/test-results.md`
-- Production commits: `daf22a0`, `2c00f32`, `703b5a1`, `1c6d7cb`, `316dae0`
+- Accepted production commits: `daf22a0`, `2c00f32`, `703b5a1`, `1c6d7cb`, `316dae0`
+- Returned candidate commit: `2241a946c399ba9c61e67e808a85f777c0d2b402`
 
 ## Residual Scope
 
-Cleanup challenge, claim, and delete remain fail-closed unimplemented. The
+Cleanup claim and delete remain fail-closed unimplemented. Cleanup challenge is
+implemented only in the returned, unaccepted A006 candidate. The
 revised contract defines the canonical locator and tombstone transcripts,
 historical origin and transition-bound legacy ownership, exact claim/permit and
 delete crash behavior, events 16/17, restart/privacy invariants, and closed
@@ -108,7 +122,7 @@ store, with the combined store apply method as the sole low-level production
 call site. A008 must prove this with an exhaustive AST allowlist across every
 production store Rust file, plus Cargo direct-dependency, no-re-export, and
 runtime compile-fail controls; no AST test exists yet. `T202C3-A006` is
-Ready with production permission limited to `authority.rs` and test permission
-limited to `authority_registry.rs` plus its cleanup fixture subtree. A007 claim
-and A008 delete completion remain non-executable just-in-time outlines. T202C3
-and T110 are not Accepted; the authority umbrella remains Draft.
+Returned/Needs Fix with one High and five Medium findings. A007 claim and A008
+delete completion remain non-executable just-in-time outlines. T202C3 and T110
+are not Accepted; the authority umbrella remains Draft. No fix attempt may begin
+without explicit user resume after the blocker summary.

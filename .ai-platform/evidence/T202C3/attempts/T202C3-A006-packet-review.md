@@ -46,3 +46,10 @@ still requires TDD, the complete validation loop, sanitized evidence, and all
 three implementation reviews. The record reflects independent reviewer and
 delegated orchestrator authority; it does not claim the user personally reviewed
 this unseen artifact.
+
+## Subsequent Production Review
+
+Candidate commit `2241a946c399ba9c61e67e808a85f777c0d2b402` consumed this
+one-attempt authorization but failed later spec and QA review. A006 is
+Returned/Needs Fix with no current write permission; this historical packet
+pass cannot authorize a fix attempt. See `T202C3-A006.md`.

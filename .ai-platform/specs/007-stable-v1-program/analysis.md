@@ -26,10 +26,10 @@ single combined store adapter-call boundary, reservation/prepare canonicality,
 and complete issuance race/replacement matrices. Final QA accepted the High
 repair and found one Medium in the literal sole-call proof; A008 now requires an
 exhaustive production-store AST allowlist. The A006 challenge packet is
-Ready under `T202C3_A006_PACKET_REVIEW_PASS` at governance HEAD `3533054`, with
-production/test permission limited to its three packet-listed paths. A007 claim
-and A008 delete completion remain non-executable just-in-time outlines, not
-Ready packets or implementation permission. One separate dependency Medium
+Returned/Needs Fix at candidate commit `2241a946`. Engineering passed, spec
+failed C0/H1/M1/L0, and QA failed C0/H0/M4/L0. Autonomous execution stopped and
+the heartbeat was paused; explicit user resume is required. A007 claim and A008
+delete completion remain non-executable just-in-time outlines. One separate dependency Medium
 implementation finding is assigned: the unchanged branch dependency graph contains yanked
 `chacha20 0.10.1`, which makes `cargo deny check advisories` fail. T111
 owns remediation and Security Alpha cannot be Accepted until the complete
@@ -244,10 +244,10 @@ changed grant recovery third, signed-context/clock/expiry next, then current
 eligibility and target lifecycle, while existing store/backend codes remain
 stable.
 
-Result: `T202C3_A006_PACKET_REVIEW_PASS`. Final independent spec, engineering,
-and QA passes at governance HEAD `3533054` each returned zero Critical, High,
-Medium, or Low finding and authorized the exact packet scopes. A006 is Ready;
-A007 and A008 remain unpacketized, non-executable outlines and are not Ready.
+Result: `T202C3_A006_RETURNED_NEEDS_FIX`. The packet gate passed, but production
+candidate `2241a946` failed spec and QA review with one High and five Medium
+findings. A006 has no current write permission. A007 and A008 remain
+unpacketized, non-executable outlines and are not Ready.
 
 ## Current Implementation Evidence Check
 
@@ -278,6 +278,11 @@ T109 recovered and reviewed the interrupted T202C2 attempt:
 The final evidence records exact content hashes. Any later change invalidates
 the affected result and requires the corresponding gate to run again.
 
+The A006 candidate passed focused and full store validation at commit
+`2241a946`, but passing tests do not override its failed reviews. Its exact
+scope, hashes, RED/GREEN, review counts, and blockers are recorded in
+`.ai-platform/evidence/T202C3/attempts/T202C3-A006.md`.
+
 ## Findings
 
 ### Critical
@@ -304,6 +309,12 @@ makes the combined store apply method the sole call site. Final QA accepted this
 High repair and returned the Medium below. The final three-pass review at
 `3533054` accepted its AST-proof repair with zero finding.
 
+H-A006-EXEC-001: cleanup checks origin/locator/tombstone before blocked/recovery
+eligibility. Mixed invalid target plus blocked/recovery state therefore returns
+`credential_cleanup_invalid` before `account_update_conflict` or
+`owner_recovery_required`, leaking target validity. This production-review High
+is open and stops autonomous execution.
+
 ### Medium
 
 M-001: The dependency policy gate fails on yanked `chacha20 0.10.1` through
@@ -321,6 +332,12 @@ direct-dependency, no-re-export, and runtime compile-fail checks. This contract
 fix is closed by `T202C3_A006_PACKET_REVIEW_PASS`; the AST test remains future
 A008 work and is not implemented by the A006 packet.
 
+Five A006 execution-review Medium findings remain open: discriminating legacy
+and locator bound/mutation negatives; invalid expired-replacement rollback;
+immutable projection/clock/entropy/concurrency/response-loss assertions;
+historical later-state and restart-corruption matrices; and effect observation,
+external-call, and privacy proof.
+
 ### Low
 
 None.
@@ -328,7 +345,7 @@ None.
 ## Residual Risks
 
 - T109 and the account-create checkpoint were explicitly accepted by the user
-  on 2026-08-30; T110 A006 may execute only its exact reviewed packet scope.
+  on 2026-08-30; T110 A006 is Returned/Needs Fix with no current write permission.
 - Cross-platform support claims remain Draft until T119 produces platform
   evidence.
 - Real-provider checks depend on dedicated credentials and may produce honest
@@ -337,7 +354,7 @@ None.
 
 ## Gate Result
 
-`T109_ACCEPTED_T202C3_A006_READY`
+`T109_ACCEPTED_T202C3_A006_RETURNED_NEEDS_FIX`
 
 The user approved `plan.md` and `tasks.md` on 2026-08-30. T109 review and fresh
 validation are complete at `94f3495`; the user explicitly accepted the

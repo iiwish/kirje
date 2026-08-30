@@ -3,7 +3,7 @@
 ## Metadata
 
 - Feature ID: `008-security-baseline`
-- Status: T202C3_A006_Ready
+- Status: T202C3_A006_Returned_Needs_Fix
 - Updated: 2026-08-31
 - Inputs: `spec.md`, `checklists/requirements.md`, `plan.md`, `research.md`,
   `data-model.md`, `contracts/**`, `tasks.md`, project constitution and AGENTS
@@ -13,7 +13,12 @@
 ## Gate Result
 
 - Critical findings: 0 unresolved.
-- High findings: 0 unresolved. The first A006
+- High findings: 1 unresolved in A006 production review. Cleanup validates
+  origin/locator/tombstone before blocked/recovery eligibility, so mixed invalid
+  target plus blocked/recovery state returns `credential_cleanup_invalid`
+  instead of `account_update_conflict` or `owner_recovery_required` and leaks
+  target validity. Candidate `2241a946` is Returned/Needs Fix and autonomous
+  execution is stopped. The first A006 packet
   review rejected the current-binding contradiction, incomplete clock-only
   recovery rule, and non-implementable cross-crate delete capability. The
   revised amendment makes cleanup the explicit historical-before exception,
@@ -27,8 +32,9 @@
   accepted that boundary but found one Medium in its literal call-site proof.
   The final independent three-pass review at governance HEAD `3533054` accepted
   the AST-proof repair with zero finding and issued
-  `T202C3_A006_PACKET_REVIEW_PASS`. A006 is Ready for its exact packet scopes;
-  A007/A008 remain non-executable JIT outlines.
+  `T202C3_A006_PACKET_REVIEW_PASS`; that historical packet pass does not
+  override the later failed production review. A007/A008 remain non-executable
+  JIT outlines.
   The 3 A001 T202C1 findings are closed by A002
   and `T202C1_A002_PACKET_REVIEW_PASS`. Historical challenge validation is now
   intrinsic, lifecycle replacement and final-state terminals are distinct, and
@@ -42,7 +48,12 @@
   packet review found mutable remote-effect parents; accepted T202C1S replaces
   them with immutable version parents and closes that High finding. T202C2 A006
   independently passed with zero findings.
-- Medium findings: 0 unresolved. The literal
+- Medium findings: 5 unresolved in A006 production review: incomplete
+  legacy/locator bound and mutation discrimination; unexercised invalid
+  expired-replacement rollback; incomplete immutable projection/clock/entropy/
+  concurrency/response-loss assertions; missing historical later-state and
+  durable restart-corruption matrices; and incomplete effect observation,
+  external-call, and privacy proof. The earlier literal
   sole-call scan can be bypassed by aliases, wildcards, re-exports, macros,
   function pointers, or indirect bindings. A008 now owns a dedicated exhaustive
   AST allowlist over every production store Rust file, composed with Cargo
@@ -84,8 +95,9 @@ must preserve that placement or add an explicit counter before loop expansion.
   cleanup security-contract amendment on 2026-08-30. The orchestrator approved
   the material unpublished store-only credential-crate architecture under
   delegated authority on 2026-08-31, superseding the flawed shared formulation.
-  T202C3-A006 holds `T202C3_A006_PACKET_REVIEW_PASS` and is Ready only for
-  its exact packet-listed production/test scopes; A007/A008 remain closed.
+  T202C3-A006 candidate `2241a946` is Returned/Needs Fix with no current write
+  permission. The heartbeat is paused and explicit user resume is required;
+  A007/A008 remain closed.
   T202C4, T202D-T202E, and T203-T212 remain dependency-gated Draft work. T204
   and every later task directly require the T202 umbrella to be Accepted.
 
@@ -524,9 +536,9 @@ T202C2 owns account-create issuance and transitions; T202C3 owns remaining accou
 credential, and delete-only cleanup lifecycles; T202C4 owns six remote challenge
 effects and aggregate T202C validation. These tasks are strict serial because
 they share the authority transaction, validator, event stream, and fixture
-surface. T202C2 is Accepted. T202C3-A006 passed final independent spec,
-engineering, and QA review at `3533054` and is Ready only for its exact packet
-scopes. A007/A008 remain non-executable outlines. T202C4 plus
+surface. T202C2 is Accepted. T202C3-A006 passed its packet review at `3533054`,
+but candidate `2241a946` failed production spec/QA review and is Returned/Needs
+Fix. A007/A008 remain non-executable outlines. T202C4 plus
 T202D-T202E remain dependency-gated Draft tasks, and T202 remains a Draft
 acceptance umbrella.
 
@@ -620,6 +632,6 @@ rule still contradicted recovery terminality. A006 limits that rule to
 finalized/aborted transitions and freezes RecoveryRequired retry to the unchanged
 terminal current row with no successor. Independent A006 review replayed the
 prior findings, reported zero Critical, High, Medium, or Low, and issued
-`T202C2_A006_PACKET_REVIEW_PASS`. T202C2 is Accepted. T202C3-A006 holds
-`T202C3_A006_PACKET_REVIEW_PASS` and exact scoped execution permission; the
-T202C and T202 umbrellas remain non-Accepted.
+`T202C2_A006_PACKET_REVIEW_PASS`. T202C2 is Accepted. T202C3-A006 is
+Returned/Needs Fix with an unresolved High and no current execution permission;
+the T202C and T202 umbrellas remain non-Accepted.
