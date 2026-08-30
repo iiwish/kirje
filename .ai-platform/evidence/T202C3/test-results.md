@@ -313,5 +313,7 @@ privacy proof.
 
 A006 is Returned/Needs Fix at
 `2241a946c399ba9c61e67e808a85f777c0d2b402`; passing commands do not override
-the failed reviews. Autonomous execution stopped and may not resume without
-explicit user direction.
+the failed reviews. Autonomous execution stopped at that gate. The user
+explicitly resumed A006 repair on 2026-08-31; F001 is ready for independent
+fix-packet review only, has no code or fixture permission, and has no new
+production test result yet.

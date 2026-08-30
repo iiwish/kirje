@@ -750,8 +750,15 @@ commit `2241a946` is Returned/Needs Fix after
 engineering PASS C0/H0/M0/L0, spec FAIL C0/H1/M1/L0, and QA FAIL
 C0/H0/M4/L0. The High is a blocked/recovery error-precedence privacy leak; five
 Medium coverage/proof findings remain. Autonomous execution stopped and the
-heartbeat was paused. Explicit user resume is required before a fix attempt.
-A007 claim and A008 delete-completion are non-executable just-in-time outlines;
+heartbeat was paused. The user explicitly resumed A006 repair on 2026-08-31 and
+set the serial path to A006 repair/re-review, A007 claim, A008 delete, then
+T202C3/T110 closure. `T202C3-A006-F001` is ready for independent fix-packet
+review with production, test, and fixture permissions still none. Its first RED
+must prove blocked/recovery eligibility precedence over invalid private targets,
+with a persisted-corruption step-2 control and zero mutation/entropy. Each of
+the five Medium proof gaps is a separate discriminating pre-change TDD
+obligation. A007
+claim and A008 delete-completion are non-executable just-in-time outlines;
 neither is Ready or packetized.
 Priority: P0
 Story / Requirement: US-001, US-003; FR-003-FR-009, FR-016; NFR-001-NFR-003,
@@ -837,7 +844,9 @@ there is no separate `008-security-baseline/packets/T202C3.yaml`.
 Attempt ownership is serial: A006 owns canonical locator validation at
 reservation/prepare plus effect-free cleanup challenge issuance, without
 changing transition state-machine behavior. Its candidate is Returned/Needs Fix
-and blocks all later outlines until explicit resume, correction, and review.
+and blocks all later outlines. The user has resumed repair, but F001 is only
+`ready_for_fix_packet_review`; an independent zero-finding packet review must
+explicitly authorize the exact code/test/fixture scope before execution.
 A007 owns the new unpublished
 `kirje-credential` workspace crate, root/store-only dependency entries, opaque
 locator, store-private fake deletion hook, store-owned permit and combined

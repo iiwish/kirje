@@ -25,11 +25,13 @@ unpublished low-level credential crate directly depended on only by store, a
 single combined store adapter-call boundary, reservation/prepare canonicality,
 and complete issuance race/replacement matrices. Final QA accepted the High
 repair and found one Medium in the literal sole-call proof; A008 now requires an
-exhaustive production-store AST allowlist. The A006 challenge packet is
-Returned/Needs Fix at candidate commit `2241a946`. Engineering passed, spec
-failed C0/H1/M1/L0, and QA failed C0/H0/M4/L0. Autonomous execution stopped and
-the heartbeat was paused; explicit user resume is required. A007 claim and A008
-delete completion remain non-executable just-in-time outlines. One separate dependency Medium
+exhaustive production-store AST allowlist. The A006 challenge candidate
+`2241a946` remains Returned/Needs Fix: engineering passed, spec failed
+C0/H1/M1/L0, and QA failed C0/H0/M4/L0. The user explicitly resumed A006 repair
+on 2026-08-31. Fix attempt `T202C3-A006-F001` encodes every failed review item
+as discriminating TDD and is ready for independent fix-packet review; production,
+test, and fixture permissions remain closed until that review passes. A007 claim
+and A008 delete completion remain non-executable just-in-time outlines. One separate dependency Medium
 implementation finding is assigned: the unchanged branch dependency graph contains yanked
 `chacha20 0.10.1`, which makes `cargo deny check advisories` fail. T111
 owns remediation and Security Alpha cannot be Accepted until the complete
@@ -244,10 +246,11 @@ changed grant recovery third, signed-context/clock/expiry next, then current
 eligibility and target lifecycle, while existing store/backend codes remain
 stable.
 
-Result: `T202C3_A006_RETURNED_NEEDS_FIX`. The packet gate passed, but production
-candidate `2241a946` failed spec and QA review with one High and five Medium
-findings. A006 has no current write permission. A007 and A008 remain
-unpacketized, non-executable outlines and are not Ready.
+Result: `T202C3_A006_F001_READY_FOR_FIX_PACKET_REVIEW`. The historical packet
+gate authorized only returned production candidate `2241a946`, whose one High
+and five Medium findings remain open. The user's 2026-08-31 resume clears the
+resume gate only. F001 has no current production, test, or fixture permission;
+A007 and A008 remain unpacketized, non-executable outlines and are not Ready.
 
 ## Current Implementation Evidence Check
 
@@ -313,7 +316,11 @@ H-A006-EXEC-001: cleanup checks origin/locator/tombstone before blocked/recovery
 eligibility. Mixed invalid target plus blocked/recovery state therefore returns
 `credential_cleanup_invalid` before `account_update_conflict` or
 `owner_recovery_required`, leaking target validity. This production-review High
-is open and stops autonomous execution.
+is open in the returned candidate. F001 requires the first RED to combine every
+blocked/recovery class with invalid origin/locator/tombstone targets, while a
+persisted-corruption control preserves precedence step 2. Implementation must
+classify mutable eligibility before private target validity without trusting or
+disclosing that target.
 
 ### Medium
 
@@ -332,11 +339,14 @@ direct-dependency, no-re-export, and runtime compile-fail checks. This contract
 fix is closed by `T202C3_A006_PACKET_REVIEW_PASS`; the AST test remains future
 A008 work and is not implemented by the A006 packet.
 
-Five A006 execution-review Medium findings remain open: discriminating legacy
-and locator bound/mutation negatives; invalid expired-replacement rollback;
-immutable projection/clock/entropy/concurrency/response-loss assertions;
-historical later-state and restart-corruption matrices; and effect observation,
-external-call, and privacy proof.
+Five A006 execution-review Medium findings remain open in `2241a946`. F001 maps
+them to correct-kind legacy full-flow and complete locator bounds/mutations;
+invalid and valid expired-replacement rollback/freshness; complete immutable
+projection, paired-clock, entropy, concurrency, restart, and cleanup response-
+loss assertions; later update/remove/recreation non-rebinding and durable
+restart corruption; and zero rows across grant uses plus every effect table,
+including `effect_observations`, with source-level no-external-capability and
+privacy proof.
 
 ### Low
 
@@ -345,7 +355,8 @@ None.
 ## Residual Risks
 
 - T109 and the account-create checkpoint were explicitly accepted by the user
-  on 2026-08-30; T110 A006 is Returned/Needs Fix with no current write permission.
+  on 2026-08-30. The user resumed A006 repair on 2026-08-31, but F001 remains
+  review-only with no production, test, or fixture permission.
 - Cross-platform support claims remain Draft until T119 produces platform
   evidence.
 - Real-provider checks depend on dedicated credentials and may produce honest
@@ -354,7 +365,7 @@ None.
 
 ## Gate Result
 
-`T109_ACCEPTED_T202C3_A006_RETURNED_NEEDS_FIX`
+`T109_ACCEPTED_T202C3_A006_F001_READY_FOR_FIX_PACKET_REVIEW`
 
 The user approved `plan.md` and `tasks.md` on 2026-08-30. T109 review and fresh
 validation are complete at `94f3495`; the user explicitly accepted the

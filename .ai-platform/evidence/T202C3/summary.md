@@ -6,8 +6,10 @@
 `2241a946c399ba9c61e67e808a85f777c0d2b402`. Engineering passed, but spec review
 failed with 1 High/1 Medium and QA failed with 4 Medium findings. Autonomous
 execution stopped and the heartbeat was paused under the user's High-stop
-condition; explicit user resume is required before another attempt. A006,
-T202C3, and T110 remain unaccepted. `T202C3-A001` challenge issuance is reviewed
+condition. The user explicitly resumed A006 repair on 2026-08-31. Fix candidate
+packet `T202C3-A006-F001` is ready for independent packet review with no
+production, test, or fixture permission; A006, T202C3, and T110 remain
+unaccepted. `T202C3-A001` challenge issuance is reviewed
 at production commit
 `daf22a0`. `T202C3-A002` account-update transition execution is accepted at
 production commit `2c00f32` by explicit user decision on 2026-08-30.
@@ -99,6 +101,7 @@ e5613c2fef5f0181dfe06ededec939b4e132fc4bbf1cd656dbdfbfe26f076608  crates/kirje-s
 - Attempt: `.ai-platform/evidence/T202C3/attempts/T202C3-A004.md`
 - Attempt: `.ai-platform/evidence/T202C3/attempts/T202C3-A005.md`
 - Returned attempt: `.ai-platform/evidence/T202C3/attempts/T202C3-A006.md`
+- Pending fix-packet review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F001-packet-review.md`
 - Contract amendment: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract.md`
 - Contract fix: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract-A002.md`
 - Contract fix: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract-A003.md`
@@ -121,8 +124,10 @@ privacy, and an unpublished credential crate directly depended on only by
 store, with the combined store apply method as the sole low-level production
 call site. A008 must prove this with an exhaustive AST allowlist across every
 production store Rust file, plus Cargo direct-dependency, no-re-export, and
-runtime compile-fail controls; no AST test exists yet. `T202C3-A006` is
-Returned/Needs Fix with one High and five Medium findings. A007 claim and A008
-delete completion remain non-executable just-in-time outlines. T202C3 and T110
-are not Accepted; the authority umbrella remains Draft. No fix attempt may begin
-without explicit user resume after the blocker summary.
+runtime compile-fail controls; no AST test exists yet. Returned candidate
+`T202C3-A006` retains one High and five Medium findings. The user resumed repair,
+and F001 encodes each as a discriminating TDD obligation, beginning with mixed
+blocked/recovery plus invalid-target precedence, but is not executable before
+independent packet review. A007 claim and A008 delete completion remain
+non-executable just-in-time outlines. T202C3 and T110 are not Accepted; the
+authority umbrella remains Draft.

@@ -151,9 +151,14 @@ AST allowlist. Final independent spec, engineering, and QA reviews at governance
 HEAD `3533054` each passed with zero finding and issued
 `T202C3_A006_PACKET_REVIEW_PASS`. Candidate commit `2241a946` passed engineering
 review but failed spec review with 1 High/1 Medium and QA with 4 Medium
-findings. A006 is Returned/Needs Fix with no write permission. Autonomous work
-stopped and the heartbeat was paused; explicit user resume is required. A007
-claim and A008 delete completion remain non-executable just-in-time outlines.
+findings. Candidate `2241a946` is Returned/Needs Fix. Autonomous work stopped
+and the heartbeat was paused. The user explicitly resumed A006 repair
+on 2026-08-31. `T202C3-A006-F001` is ready for independent fix-packet review
+with production, test, and fixture permissions still closed. Its first RED
+proves blocked/recovery precedence over invalid private targets while preserving
+persisted-corruption precedence, and its remaining TDD obligations cover every
+failed Medium proof category. A007 claim and A008 delete completion remain
+non-executable just-in-time outlines.
 Priority: P0
 Depends on: T109 Accepted
 Blocks: T111
@@ -234,8 +239,14 @@ Evidence required:
    and the AST-proof Medium. `T202C3-A006` owns locator reservation/prepare
    hardening and effect-free challenge issuance. Candidate `2241a946` is
    Returned/Needs Fix because error precedence leaks cleanup target validity;
-   five Medium coverage/proof findings also remain. No fix attempt may begin
-   without explicit user resume.
+   five Medium coverage/proof findings also remain. The user explicitly resumed
+   repair on 2026-08-31. Fix attempt `T202C3-A006-F001` is ready for independent
+   packet review only and grants no code or fixture write permission. The packet
+   requires real category-specific pre-change tests, beginning with the mixed
+   blocked/recovery plus invalid-target precedence RED, then complete legacy,
+   locator, replacement, clock, concurrency, response-loss, historical,
+   restart-corruption, effect-cardinality, external-capability, and privacy
+   proof.
    A007 owns the unpublished credential crate/opaque locator, store-only direct
    dependency, store-private fake deletion hook, permit, claim, and event 16.
    A008 owns the real low-level keyring delete, exact private adapter method,

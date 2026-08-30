@@ -651,4 +651,6 @@ implementation claim and not a claim that the user personally reviewed the
 resulting artifact. `T202C3_A006_PACKET_REVIEW_PASS` authorized only A006's exact
 candidate scopes at governance HEAD `3533054`. Candidate `2241a946` later failed
 spec and QA review and is Returned/Needs Fix with no current write permission.
-Later attempts remain closed, and explicit user resume is required before a fix.
+The user explicitly resumed A006 repair on 2026-08-31. F001 is ready for
+independent fix-packet review with no production, test, or fixture permission;
+later A007/A008 attempts remain closed.

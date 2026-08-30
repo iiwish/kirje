@@ -1,10 +1,10 @@
 schema_version: 1
-packet_id: 007-T110-T202C3-A006
+packet_id: 007-T110-T202C3-A006-F001
 task_id: T110
 feature_id: 007-stable-v1-program
 mode: delegated_test_first_execution
 adapter: codex_worker
-status: needs_fix
+status: ready_for_fix_packet_review
 
 governance_inputs:
   constitution: .ai-platform/memory/constitution.md
@@ -22,7 +22,8 @@ governance_inputs:
   account_contract: .ai-platform/specs/008-security-baseline/contracts/account-config-v2.md
   data_model: .ai-platform/specs/008-security-baseline/data-model.md
   predecessor_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A005.md
-  packet_review_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A006-packet-review.md
+  historical_packet_review_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A006-packet-review.md
+  fix_packet_review_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F001-packet-review.md
   approval_gates:
     T202C3_A005: accepted by user on 2026-08-30 at production commit 316dae0
     cleanup_contract: approved by user on 2026-08-30
@@ -37,22 +38,29 @@ governance_inputs:
       The orchestrator may accept later artifacts only after required TDD,
       validation, evidence, and three reviews; no record may claim the user
       personally reviewed unseen work.
-    packet_review: >-
+    historical_packet_review: >-
       First review failed with three High findings. Repeat review accepted the
       binding and clock repairs but found one High in the public low-level
       deletion surface. Final QA of the store-only repair found one Medium in
       the literal call-site scan. At HEAD 3533054, final independent spec,
       engineering, and QA passes each returned PASS with zero Critical, High,
       Medium, or Low finding and authorized exact A006 production/test scopes.
-    packet_review_token: T202C3_A006_PACKET_REVIEW_PASS
+    historical_packet_review_token: T202C3_A006_PACKET_REVIEW_PASS
     execution_review: >-
       Candidate commit 2241a946c399ba9c61e67e808a85f777c0d2b402 was
       returned: engineering PASS C0/H0/M0/L0 with a legacy full-flow residual;
       spec FAIL C0/H1/M1/L0; QA FAIL C0/H0/M4/L0.
+    explicit_resume: >-
+      The user explicitly resumed A006 repair on 2026-08-31 and fixed the
+      subsequent path as A006 repair and re-review, then A007 claim, then A008
+      delete, then closure of T202C3/T110. This clears only the prior resume
+      gate; it does not authorize production, test, or fixture edits before
+      this F001 fix packet passes independent review.
+    fix_packet_review: pending; no pass token or execution authorization exists
 
 work_unit:
   title: Issue an exact effect-free credential-cleanup challenge
-  attempt: T202C3-A006
+  attempt: T202C3-A006-F001
   parent: T110 Complete Authority Lifecycles
   security_task: T202C3 Account Credential And Cleanup Lifecycles
   goal: >-
@@ -66,7 +74,8 @@ work_unit:
   depends_on:
     - T202C3-A005 Accepted at production commit 316dae0
     - approved cleanup security contract in 008 canonical artifacts
-    - T202C3_A006_PACKET_REVIEW_PASS at governance HEAD 3533054
+    - historical T202C3_A006_PACKET_REVIEW_PASS at governance HEAD 3533054
+    - explicit user resume on 2026-08-31 after the A006 blocker summary
   blocks:
     - T202C3-A007 cleanup claim packetization
     - T202C3 completion
@@ -76,7 +85,7 @@ work_unit:
 
 codebase_context:
   branch: codex/v1-roadmap-governance
-  baseline_head: 43d0d0e
+  baseline_head: fc3f3bca62329cbe0424dfdd8fbe16540150f6b8
   reviewed_governance_head: 3533054
   existing_surfaces:
     - sealed CredentialCleanupManifest and canonical authorization TLV helpers in kirje-core
@@ -106,7 +115,8 @@ execution_result:
     - immutable projection, clock, entropy, concurrency, pending-reuse, and response-loss assertions are incomplete
     - historical later update/remove/recreation and durable restart-corruption matrices are incomplete
     - effect_observations, external-call cardinality, and privacy proof are incomplete
-  resume_gate: explicit user resume after blocker summary; no autonomous fix attempt may begin
+  resume_gate: satisfied by explicit user resume on 2026-08-31
+  next_gate: independent F001 fix-packet review with zero findings and explicit scope authorization
 
 contract_snapshot:
   locator:
@@ -151,6 +161,18 @@ contract_snapshot:
     - Blocked store/account returns account_update_conflict; recovery store returns owner_recovery_required.
     - Manifest expected state is ready and common binding is origin-before historical binding.
     - Later account update/remove/recreation does not rebind the origin.
+    - >-
+      Closed precedence step 2 remains authoritative for persisted schema,
+      anchor, history, transcript, or event corruption, including a persisted
+      NULL transition, and returns owner_recovery_required without a private
+      target distinction.
+    - >-
+      For otherwise structurally valid state, mutable blocked/recovery
+      eligibility is classified from the request's signed common subject plus
+      current public authority projections before origin, locator, or tombstone
+      target-validity distinctions. Blocked store/account therefore returns
+      account_update_conflict and recovery store returns
+      owner_recovery_required even when the submitted private target is wrong.
   reservation_prepare:
     - CredentialCleanupReservation::new parses one complete bounded canonical locator transcript, checks caller kind, and derives its digest.
     - Before row insertion, prepare rederives exact kind/service/username/digest from authority realm and signed historical-before origin.
@@ -162,6 +184,86 @@ contract_snapshot:
     - Valid expired-pending replacement records one predecessor event 5 before one successor event 3 and creates exactly one fresh grant UUID and nonce.
     - Invalid-target replacement rolls back expiry, successor, events, clock, and entropy; concurrent exact issuance has one creator and clock-only losers.
     - Public projection, errors, logs, events, fixtures, and evidence omit locator material and private fields.
+
+fix_contract:
+  precedence_first_red:
+    - >-
+      Before any production edit, one focused RED combines blocked store,
+      blocked account, and recovery store cases with independently invalid
+      origin, locator, and tombstone targets. It proves precedence step 6 over
+      step 7: account_update_conflict for blocked store/account and
+      owner_recovery_required for recovery store, with zero durable mutation
+      and zero entropy consumption.
+    - >-
+      A paired persisted-corruption control proves precedence step 2 still
+      wins and returns owner_recovery_required; mutable eligibility
+      classification must neither trust nor disclose private target validity.
+  locator_and_legacy:
+    - >-
+      Every legacy negative invokes the legacy_v1 caller kind, so a rejection
+      cannot pass by accidentally selecting active_v2. The matrix covers the
+      domain, exact kind, exact services, lowercase username shape, digest,
+      unrecognized/duplicate/out-of-order tags, trailing bytes, declared-length
+      mismatch, malformed or noncanonical UTF-8, and embedded NUL.
+    - >-
+      Boundary cases cover service byte and character lengths 0, 1, 128, and
+      129; username byte and character lengths 0, 1, 1024, and 1025; the exact
+      greatest constructible canonical transcript; and raw complete-transcript
+      total-bound gates at 0, 1, 4096, and 4097 bytes. Canonical locator and
+      exact 14-tag tombstone byte/digest goldens each have closed-form one-field
+      mutations; the locator matrix changes only kind, service, username, or
+      digest, and the tombstone matrix changes only one tag value. Every
+      negative proves the expected closed error with zero mutation and entropy.
+    - >-
+      One transition-bound legacy_v1 flow succeeds through reservation,
+      prepare, finalize, and exact cleanup challenge issuance from the
+      historical origin-before display ID.
+  replacement_reuse_and_races:
+    - >-
+      Invalid-target expired-pending replacement snapshots and proves rollback
+      of predecessor challenge state and terminal event, successor row, grant
+      UUID, nonce, authority_meta.last_observed_at, authority_meta.updated_at,
+      entropy count, and cleanup projection.
+    - >-
+      Valid expired replacement proves fresh grant and nonce, exactly one
+      predecessor event 5 followed by exactly one successor event 3, unchanged
+      cleanup, and no grant use or effect row.
+    - >-
+      Exact pending reuse, restart reuse, and every concurrent loser compare
+      the complete immutable challenge projection byte-for-byte, consume no
+      entropy, append no event, change no lifecycle/event timestamp, and may
+      change only authority_meta.last_observed_at and authority_meta.updated_at
+      as the paired clock high-water. Exactly one concurrent winner owns the
+      new grant, nonce, and event.
+    - >-
+      Cleanup-specific response loss replays the exact committed request after
+      reopen and returns the same immutable challenge with the same clock-only
+      allowance and no second lifecycle interval.
+  history_and_restart:
+    - >-
+      Finalized later account update, finalized later account remove, and
+      same-display account recreation each prove that historical origin-before
+      account, generation, credential, binding, and legacy display ownership do
+      not rebind.
+    - >-
+      Reopen must fail owner_recovery_required for duplicate or missing cleanup
+      descriptor, nonfinal or wrong-kind origin, historical account/generation/
+      credential/binding tuple drift, created_at/prepared_at drift, and
+      impossible ready-state transition, digest, claim, or deleted fields.
+  effects_and_privacy:
+    - >-
+      First issuance, exact reuse, response-loss replay, failed replacement,
+      and concurrent losers prove zero delta in grant_uses, challenge_effects,
+      remote_effects, effect_claims, effect_invocations, and
+      effect_observations, plus zero cleanup mutation and zero external-call
+      count.
+    - >-
+      Static/source inspection proves A006 adds no keyring, credential backend,
+      delete permit, delete-only call, runtime, network, or other external
+      capability. Errors, events, fixtures, diagnostics, Debug/serialization,
+      evidence, and public projections are scanned for locator service,
+      username, transcript bytes, origin private fields, credentials, and raw
+      target material.
 
 later_attempt_outlines:
   T202C3_A007:
@@ -192,9 +294,9 @@ later_attempt_outlines:
     kirje-credential or locator material.
 
 execution_constraints:
-  production_permission: none_returned_high_requires_explicit_resume
-  test_permission: none_returned_high_requires_explicit_resume
-  last_attempt_allowed_files:
+  production_permission: none_pending_independent_fix_packet_review
+  test_permission: none_pending_independent_fix_packet_review
+  future_allowed_files:
     - crates/kirje-store/src/authority.rs
     - crates/kirje-store/tests/authority_registry.rs
     - crates/kirje-store/tests/fixtures/authority/registry/account_credential_cleanup/**
@@ -203,21 +305,29 @@ execution_constraints:
     - cleanup claim/delete, permit, deletion backend, runtime, config, keyring, protocol, CLI, MCP, network, or remote-effect behavior
     - transition state-machine behavior outside locator input hardening before cleanup insertion
   write_rules:
-    - No production, test, fixture, schema, Cargo, or lockfile edit may begin without explicit user resume and a reviewed fix packet.
+    - No production, test, or fixture edit may begin until independent review passes this exact F001 packet and a governance follow-up opens its exact permissions.
     - The returned attempt scope is historical evidence, not current write permission.
     - Evidence, SSOT, packet, and status files remain orchestrator-owned.
     - Deterministic synthetic non-real locator transcript bytes may appear only in authority_registry.rs for canonical byte goldens.
-    - Signature fixtures may contain deterministic synthetic public signatures only and never locator transcripts; evidence/output/logs contain only vector IDs, digests, counts, and pass/fail results.
+    - Signature fixtures may change only if deterministic synthetic public signatures truly change; they contain no locator transcript. Evidence/output/logs contain only vector IDs, digests, counts, and pass/fail results.
     - Real/private locator bytes remain prohibited in every committed file; private keys, seeds, real proofs/nonces, credentials, and real account data are also prohibited.
     - Do not mark A007, A008, T202C3, or T110 Ready or Accepted from this packet.
 
 tdd_plan:
+  ordering: >-
+    The precedence RED is first. Each currently unproven review category then
+    receives a discriminating pre-change test. Where existing behavior is
+    wrong or absent, the worker must capture a real RED before the corresponding
+    production edit. If a category is already behaviorally correct, record the
+    pre-change characterization pass and add test-only proof; do not fabricate a
+    RED and do not change production for that category.
   red:
-    - Prove the first exact ready cleanup challenge reaches the unsupported action gate with zero rows/events/clock/entropy beyond the pre-existing origin graph.
-    - Add canonical locator and tombstone byte/digest goldens and every one-field mutation negative.
-    - Reject malformed active-v2/legacy-v1 constructor transcripts and canonical wrong-origin prepare before cleanup insertion with zero durable mutation.
-    - Add active/removal history, later update/remove/recreation, blocked/recovery, NULL-transition, wrong-origin, duplicate-descriptor, state, restart, corruption, and privacy negatives.
-    - Add exact pending-reuse clock-only, expired-pending replacement, concurrent exact issuance, restart, entropy/event cardinality, and invalid-target rollback matrices.
+    - Run precedence_first_red before every production edit and retain its exact failing assertions and zero-mutation/entropy snapshot.
+    - Run the correct-kind legacy and complete locator bound/tag/domain/UTF-8/NUL/closed-form mutation matrix, including the successful transition-bound legacy flow.
+    - Run invalid expired-replacement rollback and valid replacement freshness/event-cardinality matrices.
+    - Run complete immutable-projection, paired-clock-only reuse/loser, concurrent issuance, restart, and cleanup response-loss matrices.
+    - Run later-history non-rebinding plus descriptor/origin/tuple/timestamp/ready-state durable restart-corruption matrices.
+    - Run all-effect-table/grant-use/external-call cardinality and privacy/capability source scans.
   green:
     - Parse the canonical locator at reservation and rederive/compare kind, service, username, and digest from realm plus signed historical-before origin before row insertion.
     - Rederive the tombstone from immutable origin history with bounded streaming validation.
@@ -242,15 +352,17 @@ validation_loop:
     - python3 /Users/iiwish/.codex/skills/ai-delivery-governor/scripts/validate_delivery_artifacts.py --root /Users/iiwish/self/kirje --feature-id 008-security-baseline
 
 evidence_contract:
-  attempt_path: .ai-platform/evidence/T202C3/attempts/T202C3-A006.md
+  attempt_path: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F001.md
+  packet_review_path: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F001-packet-review.md
   summary_path: .ai-platform/evidence/T202C3/summary.md
   test_results_path: .ai-platform/evidence/T202C3/test-results.md
   required:
     - exact RED/GREEN commands and results
-    - canonical locator/tombstone goldens and mutation matrix
-    - origin/eligibility/state/restart/corruption/privacy matrices
-    - zero grant-use/effect/claim/delete/external-call proof
-    - clock-only reuse, replacement/concurrency entropy/event, invalid-target rollback, and reservation/prepare matrices
+    - first mixed blocked/recovery plus invalid-target precedence RED, persisted-corruption control, and zero-mutation/entropy snapshots
+    - correct-kind legacy success/negatives and complete locator/tombstone bounds, tags, domains, UTF-8, NUL, length, golden, and closed-form mutation matrix
+    - invalid and valid expired replacement, complete immutable projection, paired-clock-only reuse/loser, concurrency, restart, entropy/event, and cleanup response-loss matrices
+    - historical later-update/remove/recreation non-rebinding and descriptor/origin/tuple/timestamp/ready-state restart-corruption matrices
+    - zero grant-use and zero row delta for every effect table including effect_observations, plus zero cleanup/external-call and privacy/capability source proof
     - schema and Cargo.lock unchanged hashes
     - spec, engineering, and QA reviews with residual risk
   prohibited:
@@ -258,14 +370,15 @@ evidence_contract:
     - credentials, addresses, endpoints, private keys, seeds, real proofs/nonces, mailbox content, or real provider data
 
 review_contract:
-  required_review: satisfied by T202C3_A006_PACKET_REVIEW_PASS at governance HEAD 3533054
+  historical_review: T202C3_A006_PACKET_REVIEW_PASS at governance HEAD 3533054 authorized only the returned candidate
+  required_fix_packet_review: pending for T202C3-A006-F001; production and test permissions remain none
   production_review: failed at candidate commit 2241a946c399ba9c61e67e808a85f777c0d2b402
   pass_1_spec_compliance:
-    - exact transcripts, explicit cleanup-only historical-before binding exception, transition-bound legacy, ready eligibility, and no core/schema change
+    - step-2 corruption and step-6-before-step-7 mutable eligibility precedence, exact transcripts, cleanup-only historical-before binding, transition-bound legacy, and no core/schema change
   pass_2_engineering:
-    - strict bounds, reservation/prepare canonicality, streaming restart derivation, error precedence, clock-only pending reuse, replacement/concurrency rollback, zero-effect transaction, and privacy/capability closure
+    - strict complete bounds/mutations, reservation/prepare canonicality, streaming restart derivation, non-disclosing eligibility classification, clock-only pending reuse/losers, replacement/concurrency rollback, zero-effect transaction, and privacy/capability closure
   pass_3_qa:
-    - golden/mutation, malformed reservation/prepare, active/removed/later-history, blocked/recovery, NULL transition, corruption, clock-only reuse, expired replacement, concurrent issuance/restart, response loss, and zero-external-call coverage
+    - mixed invalid-target precedence, correct-kind legacy full flow, golden/mutation, active/removed/later-history, durable corruption, complete clock/projection/entropy rollback, concurrent issuance/restart, cleanup response loss, all-effect-table zero counts, and zero-external-call/privacy coverage
   packet_pass_condition:
     - no unresolved Critical, High, Medium, or Low finding
     - independent reviewer explicitly authorizes production and test execution in a governance follow-up
@@ -274,15 +387,15 @@ review_contract:
     - orchestrator may then record delegated acceptance without claiming user personal review
 
 handoff:
-  current_state: A006 Returned/Needs Fix after failed spec and QA review; autonomous execution stopped and heartbeat paused
-  after_packet_review: historical packet gate passed; production review overrides executable state
-  after_execution: explicit user resume is required before a reviewed fix attempt; A007/A008 remain non-executable
+  current_state: user resumed A006 repair; F001 is ready for independent fix-packet review with permissions closed
+  after_packet_review: only a zero-finding independent review plus governance authorization may open the exact future scopes
+  after_execution: F001 still requires TDD, full validation, evidence, and three implementation reviews; A007/A008 remain non-executable
   commit_policy:
     - local commits only
     - no push, merge, tag, publish, GitHub Release, live provider, mailbox, credential, or external destructive operation
 
 stop_conditions:
-  - The current High review finding remains unresolved or explicit user resume is absent.
+  - Independent F001 packet review finds any unresolved issue or has not explicitly authorized the exact production/test scopes.
   - Production, test, or fixture work is requested while permissions remain none.
   - A required change touches schema, core transcripts/types, dependencies, runtime, keyring, protocol, CLI, MCP, network, or external calls.
   - Locator material or private origin values would enter output, events, logs, fixtures, evidence, Debug, serialization, cloning, or byte export.
