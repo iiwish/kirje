@@ -630,7 +630,9 @@ Evidence required:
 
 ### T202C2: Account Creation Transition
 
-Status: Draft
+Status: Ready
+Packet review: `T202C2_A006_PACKET_REVIEW_PASS` with zero Critical, High,
+Medium, or Low findings
 Priority: P0
 Story / Requirement: US-001, US-003; FR-003-FR-006, FR-016; NFR-001-NFR-003,
 NFR-006, NFR-007

@@ -3,7 +3,7 @@
 ## Metadata
 
 - Feature ID: `008-security-baseline`
-- Status: T202C1S_Accepted_T202C2_Packet_Amendment_Required
+- Status: T202C1S_Accepted_T202C2_Ready
 - Updated: 2026-08-30
 - Inputs: `spec.md`, `checklists/requirements.md`, `plan.md`, `research.md`,
   `data-model.md`, `contracts/**`, `tasks.md`, project constitution and AGENTS
@@ -23,19 +23,28 @@
   relationships, minimal validated core public-key prerequisite, fail-closed
   staged ownership, exact durable transcripts/replay tables, closed transaction
   requests, and rotation/recovery state machine. The first independent T202C2
-  packet review found a blocking schema relationship: remote effects referenced
-  mutable current store/account tuples, so historical rows would prevent later
-  config/account updates through `ON UPDATE RESTRICT`. T202C1S owns the
-  pre-release canonical-v1 correction; the original T202C2 packet has no pass
-  and remains blocked.
+  packet review found mutable remote-effect parents; accepted T202C1S replaces
+  them with immutable version parents and closes that High finding. T202C2 A006
+  independently passed with zero findings.
 - Medium findings: 0 unresolved in the confirmed requirement contract. The 1 A001 T202C1 finding is closed by A002
   and `T202C1_A002_PACKET_REVIEW_PASS`. A 128-or-more complete legal-history RED
   plus indexed EXPLAIN plans and O(1) memory review is now mandatory. Canonical schema ownership
   is assigned to T202B and propagated through T202C-T202E, the unreleased T202A
   development fence has an explicit fail-closed disposal boundary, and the
-  schema target/hash gates are present at task and packet level. T202C2 retry,
-  synthetic-signature-fixture wording, and restart-order findings remain packet
-  amendment items after T202C1S acceptance and cannot be waived by this task.
+  schema target/hash gates are present at task and packet level. T202C2 A002
+  review found four Medium packet gaps: config-commit ordering/timestamps/faults,
+  cross-transition historical projection recovery, executable event-stream SQL,
+  and stale analysis status. A003 closed those items but exposed two further
+  Medium gaps: terminal recovery raw-pair provenance and a synthetic-fixture stop
+  contradiction. A004 closed the recovery reconstruction but left predecessor
+  synthetic-vector scope ambiguous. A005 grandfathers exact hash-pinned
+  predecessor vectors, restricts task-new vectors, freezes recovery-store
+  immutability through T202E, but its generic cross-transition retry rule still
+  included the terminal recovery state. A006 limits cross-transition retry to
+  finalized/aborted transitions and requires recovery retry to prove the
+  unchanged terminal current row with no successor. Independent review confirmed
+  the complete packet with zero Critical, High, Medium, or Low findings and issued
+  `T202C2_A006_PACKET_REVIEW_PASS`.
 - Low findings: 4 accepted watch items: future policy/assurance snapshot schemas
   remain executable fail-closed unsupported; the generic artifact validator
   cannot select letter-suffixed child IDs independently. The generated unified-diff
@@ -51,9 +60,9 @@ must preserve that placement or add an explicit counter before loop expansion.
   at production commit `43f0788`; T202C is a Draft acceptance umbrella split
   into strict serial T202C1, T202C1S, and T202C2-T202C4. T202C1 is Accepted at
   production commit `aa53efb`; T202C1S is Accepted at production commit
-  `8eceaff` after `T202C1S_A001_CODE_REVIEW_PASS`. T202C2-T202C4, T202D-T202E,
-  and T203-T212 remain Draft; T202C2 may execute only after its blocked packet
-  is amended and independently passes review. T204 and every
+  `8eceaff` after `T202C1S_A001_CODE_REVIEW_PASS`. T202C2 is Ready for delegated
+  execution after `T202C2_A006_PACKET_REVIEW_PASS`; T202C3-T202C4, T202D-T202E,
+  and T203-T212 remain Draft. T204 and every
   later task directly require the T202 umbrella to be Accepted.
 
 The product requirements remain confirmed and do not add a remote mailbox
@@ -484,13 +493,22 @@ they share the authority transaction, validator, event stream, and fixture
 surface. T202C1S is Accepted. T202C2-T202C4 plus T202D-T202E remain
 dependency-gated Draft tasks, and T202 remains a Draft acceptance umbrella.
 
-The first T202C2 packet review issued no pass. Its blocking High finding is the
-mutable-parent remote-effect relationship assigned to T202C1S. The T202C2
-packet remains non-executable until T202C1S is Accepted and a later amendment
-closes monotonic exact retry across legal successor states, explicitly permits
-only synthetic detached-signature fixtures while forbidding signer/private
-material, and binds restart ordering to the immutable store-version/event
-indexes with no temporary sort.
+The first T202C2 packet review issued no pass. Its mutable-parent remote-effect
+finding is closed by accepted T202C1S. A002 closed the synthetic-fixture and
+transition-ID timing findings, but independent review found four remaining
+Medium gaps. A003 freezes version-before-projection config-commit order and
+timestamps, three missing fault hooks, transition-scoped historical projections
+across later independent transitions, valid authority-event SQL, and consistent
+governance status. A003 then found the canonical-v1 recovery raw-pair exception
+and a fixture stop-condition conflict. A004 permits a terminal store-pair read
+only after exact recovery graph proof and narrows the stop condition to real or
+private material and misplaced task-new synthetic bytes. A005 additionally
+grandfathers unchanged accepted predecessor vectors and makes the account-
+transition recovery store row immutable for every canonical-v1 path through
+T202E, but its generic T1-after-T2 retry matrix still included recovery. A006
+limits cross-transition retry to finalized/aborted terminals and gives
+RecoveryRequired only an unchanged-current-row, no-successor retry case. T202C2
+remains non-executable until independent A006 review passes.
 
 ## Watch Items
 
@@ -521,7 +539,7 @@ permission to merge child evidence or relax the strict serial gates.
 
 ## Execution Gate
 
-`T202C1S_ACCEPTED_T202C2_PACKET_AMENDMENT_REQUIRED`
+`APPROVED_FOR_T202C2_DELEGATED_EXECUTION`
 
 T202A is accepted from four test-first attempts, independent security and QA
 review, its bootstrap-schema digest, and fresh packet/workspace gates. A003
@@ -551,5 +569,19 @@ Accepted at production commit `8eceaff` after one delegated test-first attempt,
 fresh package/workspace gates, and independent
 `T202C1S_A001_CODE_REVIEW_PASS` with zero Critical, High, or Medium finding.
 The accepted Low watch item records that the one-time registry-parent preflight
-lacks a dedicated test counter. T202C2 remains blocked until a fresh amended
-packet review passes. The T202C and T202 umbrellas remain non-Accepted.
+lacks a dedicated test counter. T202C2 A001 received no pass with three High and
+two Medium findings. A002 closed the immutable-parent, synthetic-fixture,
+transition-ID timing, and same-transition monotonic-retry gaps but received no
+pass with four Medium findings. A003 closed config-commit order/time/fault,
+cross-transition projection, executable SQL, and analysis consistency gaps but
+received no pass with two Medium findings. A004 closed terminal recovery pair
+provenance but received no pass with one Medium and two Low findings. A005
+grandfathers unchanged predecessor synthetic vectors, restricts task-new bytes,
+freezes recovery-store immutability, and aligns all status artifacts, but
+received no pass with one Medium finding because its generic T1-after-T2 retry
+rule still contradicted recovery terminality. A006 limits that rule to
+finalized/aborted transitions and freezes RecoveryRequired retry to the unchanged
+terminal current row with no successor. Independent A006 review replayed the
+prior findings, reported zero Critical, High, Medium, or Low, and issued
+`T202C2_A006_PACKET_REVIEW_PASS`. T202C2 is Ready; the T202C and T202 umbrellas
+remain non-Accepted.

@@ -432,14 +432,24 @@ permanently; supported paths never physically delete it. After the replace,
 recovery marks config committed and finalizes
 without repeating config work. Any pair other than the exact before/after pair
 leaves the store recovery-required and the reserved account blocked; it never
-probes a credential or connects.
+probes a credential or connects. Canonical v1 has no recovery-clearing or
+successor mutation for that store row through T202E: the exact unsafe pair and
+recovery-required state remain available for deterministic restart projection.
+Clearing that terminal state requires a separately reviewed post-v1 schema and
+product contract.
 
 Prepare also reserves the credential ID in the immutable credential registry.
-Marking the after config committed inserts immutable store and account version
-rows before the current projections advance. Historical remote effects refer to
-those version rows rather than mutable current registry tuples, so later account
-or config updates cannot invalidate old audit relationships or be blocked by
-them.
+Its `created_at` equals the transition prepare time and prepare state-event time.
+Marking the after config committed inserts the immutable store version, then the
+immutable account version, updates the transition to config-committed, advances
+the blocked current store projection, appends the event, and updates the paired
+clock in that exact order. Both version `created_at` values, transition
+`config_committed_at`, current-store `updated_at`, event time, and paired clock
+are the same effective observation time. Dedicated faults after credential,
+store-version, and account-version insertion prove rollback at each boundary.
+Historical remote effects refer to those version rows rather than mutable
+current registry tuples, so later account or config updates cannot invalidate
+old audit relationships or be blocked by them.
 
 ### Update
 

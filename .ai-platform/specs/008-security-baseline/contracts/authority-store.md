@@ -844,6 +844,28 @@ digests, config digests, grant/receipt identities, manifest, proof, signature,
 nonce, key, endpoint, and event detail. Request and projection types implement
 neither `Debug`, `Display`, serde, `JsonSchema`, nor logging helpers.
 
+Prepared, config-committed, finalized, and aborted projections are scoped to the
+selected transition's immutable history, not to the mutable current store row.
+They return proposed/blocked with the before generation, proposed/blocked with
+the after generation, active/active with the after generation, and removed/
+active with the before generation respectively.
+
+Recovery-required is the sole terminal-current-row exception because canonical
+v1 stores the raw unsafe pair only in `registered_stores`. The projection may
+read that pair only after proving the store is `recovery_required`, the account
+is blocked with `active_transition_id` equal to the selected recovery-required
+transition, both recovery events recompute from that exact pair and prior state,
+and no successor transition or event exists. Any mismatch is corruption. All
+create projections retain account generation one and their original prepared
+timestamp. A later independent transition may exist only after the selected
+transition reached `finalized` or `aborted`, and cannot change that older
+transition's projection. Every supported canonical-v1 path through T202E leaves
+an account-transition recovery store pair/state unchanged and admits no
+successor. T202E trust
+recovery may block additional stores but cannot clear, update, delete, or reuse
+this terminal row. Recovery clearing requires a separately versioned future
+schema/product contract and is outside Kirje v1.
+
 `prepare_account_transition` consumes the grant only inside this transition
 transaction. Grant use is not separately callable. The four observation
 methods are `mark_config_committed`, `finalize_account_transition`,
@@ -952,15 +974,22 @@ the exact receipt, account generation 1, credential identity, display digest,
 and binding digest, and is not usable for authentication or operations. The
 store is `blocked`, so unrelated account work cannot cross the config/authority
 gap. This reservation occurs before config or keyring access.
+The credential reservation `created_at`, transition `prepared_at`, proposed
+account `created_at`/initial `updated_at`, and both prepare state events use the
+same effective prepare time. A deterministic pre-commit fault immediately after
+credential insertion proves the complete cyclic reservation rolls back.
 
 Error precedence is closed. Pure request validation runs first. Transactional
 schema/anchor/history/event corruption is `owner_recovery_required`. A present
 grant row is compared next: changed bounded prepare identity is
 `grant_already_used`; an exact grant with a missing or mismatched immutable
 prepare graph or an illegal later lifecycle is corruption. An exact grant whose
-transition legally advanced returns the current transition projection instead
-of a stale prepared snapshot. Checked clock may advance, but no lifecycle row,
-timestamp, or event changes. With no grant, exact receipt/challenge/transition
+transition legally advanced returns that transition's scoped latest durable
+projection instead of a stale prepared snapshot. A later independent transition
+may coexist only when the selected transition reached `finalized` or `aborted`;
+`recovery_required` instead requires the unchanged terminal store pair/state and
+no successor. Checked clock may advance, but no
+lifecycle row, timestamp, or event changes. With no grant, exact receipt/challenge/transition
 intent is checked; mismatch is `authorization_context_stale`. Expiry commits
 before current store and occupancy checks. Current store/config mismatch is
 `authorization_context_stale`, store/location conflict is
@@ -1007,12 +1036,28 @@ event identity returns the recovery projection from every observation method;
 a changed terminal pair conflicts. Every other terminal/method/pair combination
 is `account_update_conflict` with no write.
 
+Exact phase recovery is monotonic and transition-scoped. Each method first
+proves whether its exact phase event committed, validates every legal successor
+inside that transition, and returns that transition's latest durable projection
+without replay. If the selected transition reached `finalized` or `aborted`, a
+later independent transition may change the mutable store state or generation;
+the older result still comes from its own transition, version rows, and events.
+`recovery_required` has no later-transition case: exact retry requires the
+unchanged terminal current store pair/state, exact recovery graph, and no
+successor transition. Only the paired authority clock may advance.
+
 `mark_config_committed` requires request expected state `prepared`. Observing
 before is an exact no-op and returns the prepared projection. Observing after
-atomically changes the transition to `config_committed`, records
-`config_committed_at`, changes the registered store config pair to after while
-leaving it blocked, inserts the immutable after store and account version rows,
-appends `account_config_committed`, and updates the clock.
+atomically inserts the immutable after store version, inserts the immutable
+account-generation-one account version, changes the transition to
+`config_committed` with `config_committed_at`, advances the blocked registered
+store current pair to after, appends `account_config_committed`, and updates the
+clock, in that exact order. Both version `created_at` values,
+`config_committed_at`, the store `updated_at`, the event `occurred_at`, and the
+paired clock use the same store-derived effective time.
+Distinct deterministic faults immediately after the store-version insert and
+after the account-version insert prove neither immutable row can survive without
+the complete config-committed graph.
 An exact retry in `config_committed` returns unchanged. A third pair enters
 recovery.
 

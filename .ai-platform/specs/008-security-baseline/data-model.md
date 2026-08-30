@@ -1316,13 +1316,22 @@ Store enrollment inserts the current store and its initial store-version row in
 the same transaction. Account prepare reserves a new credential identity before
 external config or keyring work. `mark_config_committed` inserts the after
 store-version row and, when an after account exists, its account-version row in
-the same transaction that advances the current projections. Create uses account
-generation one; account update, credential set, and credential delete each
-advance it exactly once. Remove has no after account/version. Abort before config
-commit retains the credential reservation but creates no committed account or
-store version. A recovery observation may place an unsafe third config pair only
-in the blocked current store projection; it does not bless that pair as a
-committed version.
+that order before changing the transition and advancing the current store
+projection. The credential reservation time equals prepare time. Both transition-
+origin version times equal transition config-committed time, current-store update
+time, config-committed event time, and the paired clock value from that
+transaction. Create uses account generation one; account update, credential set,
+and credential delete each advance it exactly once. Remove has no after account/
+version. Abort before config commit retains the credential reservation but
+creates no committed account or store version. A recovery observation may place
+an unsafe third config pair only in the blocked current store projection; it does
+not bless that pair as a committed version.
+
+For canonical v1, a store made `recovery_required` by an account transition is
+terminal: no supported path through T202E updates or deletes its current pair,
+clears its state, or appends a successor transition. This preserves the only raw
+unsafe pair used to verify its recovery event and projection. Trust recovery may
+block additional stores but does not clear this terminal row.
 
 `remote_effects` references the immutable store and account version parents.
 Advancing either current projection therefore cannot invalidate a historical

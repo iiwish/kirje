@@ -594,7 +594,8 @@ acceptance umbrella split into strict serial T202C1, T202C1S, and T202C2-T202C4.
 at production commit `aa53efb` after `T202C1_A003_CODE_REVIEW_PASS` and fresh
 packet/workspace gates. T202C1S is Accepted at production commit `8eceaff`
 after `T202C1S_A001_CODE_REVIEW_PASS` and fresh packet/workspace gates. T202C2
-requires an amended independent packet review before execution. T202C3-T202C4 and
+is Ready for delegated execution after `T202C2_A006_PACKET_REVIEW_PASS` with
+zero Critical, High, Medium, or Low findings. T202C3-T202C4 and
 T202D-E remain Draft until their predecessor is Accepted. T204 and every
 later production task additionally require the T202 umbrella to be Accepted.
 Execution still requires one self-contained packet per ready task, verified RED
