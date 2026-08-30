@@ -721,10 +721,13 @@ boundary. `T202C3-A005` is accepted at production commit `316dae0` and owns the
 exact credential-delete authority transition, retained credential history,
 immutable after versions, and the no-cleanup/no-keyring boundary. The user
 explicitly accepted A005 on 2026-08-30. `T202C3-A006` is reserved for effect-free
-cleanup challenge issuance, but is Blocked because the confirmed contracts do
-not define the signed `tombstone_sha256` domain, transcript, or derivation from
-the durable cleanup row. Cleanup claim/delete remain later, and no later attempt
-is Ready.
+cleanup challenge-contract resolution, but is Blocked on three minimum
+decisions: tombstone digest derivation, account/binding and store-state
+selection, and `transition_id=None` legacy ownership. Later A007 claim and A008
+delete-completion decisions remain unresolved for claim identity/retry/expiry/
+concurrency, opaque `DeleteOnlyLocator` ownership/recovery, crash/terminal
+retry, and exact event 16/17 semantics. Neither later attempt is Ready or
+packetized, and no cleanup implementation is permitted.
 Priority: P0
 Story / Requirement: US-001, US-003; FR-003-FR-009, FR-016; NFR-001-NFR-003,
 NFR-006, NFR-007

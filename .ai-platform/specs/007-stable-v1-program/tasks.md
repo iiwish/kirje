@@ -138,11 +138,13 @@ T202C3-A002 account-update transition is accepted at commit `2c00f32`.
 `T202C3-A004` credential-set transition is accepted at commit `1c6d7cb`.
 `T202C3-A005` credential-delete transition is accepted at commit `316dae0` by
 explicit user decision on 2026-08-30. `T202C3-A006` is reserved for exact,
-effect-free cleanup challenge issuance, but its packet is Blocked: the confirmed
-contracts define `tombstone_sha256` as a signed field without defining its
-normative domain, transcript, or derivation from the durable cleanup row. No
-production execution is Ready until a confirmed contract amendment closes that
-High packet gap. Cleanup claim/delete remain a later attempt.
+effect-free cleanup challenge-contract resolution, but its packet is Blocked.
+The minimal A006 contract lacks the tombstone digest derivation, account/binding
+selection across historical, removed, blocked, and recovery states, and
+`transition_id=None` legacy ownership. Separate unpacketized A007 claim and A008
+delete-completion work also lacks claim/retry/expiry/concurrency identity,
+opaque `DeleteOnlyLocator` ownership/recovery, crash and terminal retry rules,
+and exact event 16/17 semantics. No cleanup implementation is Ready.
 Priority: P0
 Depends on: T109 Accepted
 Blocks: T111
@@ -214,10 +216,11 @@ Evidence required:
    prepare through terminal state, permanent credential-history retention,
    immutable account/store versioning, and the no-cleanup/no-keyring boundary
    at commit `316dae0`; the user explicitly accepted A005 on 2026-08-30.
-   `T202C3-A006` is the reserved cleanup-challenge attempt and remains Blocked
-   on the exact `tombstone_sha256` contract decision recorded in its packet and
-   analysis. Cleanup claim/delete remain later. The unattended cadence does not
-   waive that security-contract gate.
+   `T202C3-A006` is the reserved cleanup-challenge contract attempt and remains
+   Blocked on its three minimum contract decisions. A007 claim and A008
+   delete-completion are only reserved labels for later contract decisions; they
+   are neither Ready nor packetized. The unattended cadence does not waive any
+   cleanup security-contract gate.
 2. `T202C4`: remote challenge registry binding and planner-owned effect row.
 3. `T202D`: effect claim, invocation permit, observation, and ambiguity.
 4. `T202E`: owner rotation/recovery, audit, and aggregate authority acceptance.

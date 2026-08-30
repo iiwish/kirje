@@ -85,6 +85,9 @@ registry test, and synthetic public-signature fixture.
 
 Cleanup challenge, claim, and delete remain fail-closed unimplemented.
 `T202C3-A006` is reserved but Blocked because the confirmed contracts do not
-define the signed `tombstone_sha256` domain, transcript, or derivation from the
-durable cleanup row. Cleanup claim/delete remain later. T202C3 and T110 remain
+define its three minimum challenge decisions: tombstone digest derivation,
+account/binding and store-state selection, and transition-less legacy ownership.
+A007 claim and A008 delete-completion are unpacketized and blocked on their own
+identity/retry/concurrency, opaque capability, crash/terminal retry, and event
+16/17 decisions. No cleanup implementation is permitted. T202C3 and T110 remain
 Blocked; the authority umbrella remains Draft.

@@ -170,14 +170,14 @@ handoff:
     - commit production after RED/GREEN and changed-crate validation
     - commit evidence and status after review
     - do not push, merge, tag, or publish without a later finish decision
-  next_attempt: T202C3-A006 cleanup challenge packet, blocked on the confirmed tombstone digest contract
+  next_attempt: T202C3-A006 cleanup challenge-contract blocker; A007/A008 remain unpacketized
 
 result:
   production_commit: 316dae0
   evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A005.md
   review: no unresolved Critical, High, or Medium finding
   acceptance: explicitly accepted by the user on 2026-08-30
-  next_gate: confirmed tombstone digest amendment before T202C3-A006 can become ready
+  next_gate: confirm all A006 minimum contract decisions and independently review a replacement packet
 
 stop_conditions:
   - A required change touches schema, core, runtime, keyring, local I/O, protocol, CLI, MCP, network, or dependency files.

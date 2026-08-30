@@ -13,11 +13,13 @@
 ## Gate Result
 
 - Critical findings: 0 unresolved.
-- High findings: 1 unresolved. `T202C3-A006` cannot safely admit cleanup
-  challenge issuance because the confirmed contracts do not define the domain,
-  transcript, or derivation of signed `tombstone_sha256`. It must not be assumed
-  equal to `locator_sha256`, and an execution packet cannot invent that security
-  semantic. The 3 A001 T202C1 findings are closed by A002
+- High findings: 8 unresolved for cleanup. A006 lacks tombstone digest
+  derivation, account/binding and store-state selection, and
+  `transition_id=None` legacy ownership. A later A007 claim contract lacks
+  claim/retry/expiry/concurrency identity, opaque `DeleteOnlyLocator`
+  ownership/recovery, and exact event 16 semantics. A later A008 delete contract
+  lacks crash/terminal retry protocol and exact event 17 semantics. A007/A008
+  are labels only, not Ready packets. The 3 A001 T202C1 findings are closed by A002
   and `T202C1_A002_PACKET_REVIEW_PASS`. Historical challenge validation is now
   intrinsic, lifecycle replacement and final-state terminals are distinct, and
   durable grant/event time is store-derived effective authority time with a

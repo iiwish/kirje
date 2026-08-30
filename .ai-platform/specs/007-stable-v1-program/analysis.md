@@ -17,11 +17,11 @@ per-version governance stacks while retaining executor-sized tasks, TDD,
 content-addressed evidence, adversarial review, complete checkpoint gates, and
 human acceptance.
 
-The confirmed checkpoint plan remains internally consistent, but one High
-execution-packet finding blocks `T202C3-A006`: the confirmed contracts name
-`tombstone_sha256` in the cleanup manifest without defining its domain,
-transcript, or derivation from the durable cleanup row. Inventing that rule in an
-execution packet would alter the security contract. One separate Medium
+The confirmed checkpoint plan remains internally consistent, but eight High
+cleanup-contract findings block T202C3. Three define the minimum A006 challenge
+contract; three belong to a later A007 claim contract; two belong to a later
+A008 delete-completion contract. A007 and A008 are reserved labels only, not
+Ready packets or implementation permission. One separate Medium
 implementation finding is assigned: the unchanged branch dependency graph contains yanked
 `chacha20 0.10.1`, which makes `cargo deny check advisories` fail. T111
 owns remediation and Security Alpha cannot be Accepted until the complete
@@ -203,17 +203,26 @@ after TDD, full validation, and three-pass review while remaining only
 `review_complete`; this does not waive confirmed security semantics or the major
 human acceptance gates.
 
-The cleanup challenge packet cannot be made Ready from the current SSOT. The
-core manifest contains `tombstone_sha256`, while the authority schema persists
-locator material and `locator_sha256`; no confirmed transcript defines how to
-derive or validate the tombstone digest. Assuming that it equals
-`locator_sha256` would silently collapse two signed fields and alter the security
-contract. This is a High blocker. Claim/delete remain a later attempt and must
-receive their own just-in-time packet review after challenge issuance is
-review-complete.
+The cleanup challenge packet cannot be made Ready from the current SSOT. Its
+minimum unresolved subset is: the domain/transcript/derivation of signed
+`tombstone_sha256`; whether challenge ownership binds a historical-before or
+current account/binding and how removed accounts plus blocked/recovery stores
+behave; and ownership of legacy tombstones whose manifest has
+`transition_id=None`. No selection among those alternatives is implied.
 
-Result: `T202C3_A006_PACKET_BLOCKED`. A006 remains Blocked and production work
-must stop until the user confirms the tombstone digest contract amendment.
+Later claim and delete-completion decisions are intentionally not folded into
+A006. A007 must separately define claim identity, exact/changed retry, expiry,
+response loss, concurrency, opaque `DeleteOnlyLocator` ownership and recovery,
+and exact `cleanup_claimed` event 16 semantics. A008 must separately define the
+delete-completion capability and crash protocol, missing-key outcome, terminal
+retry/recovery, and exact `cleanup_deleted` event 17 semantics including its
+order after event 16. A007 and A008 are unpacketized and have no execution
+permission.
+
+Result: `T202C3_A006_PACKET_BLOCKED`. A006 remains Blocked until all three
+minimum challenge decisions are explicitly confirmed in the security contract
+and a replacement packet passes independent review. This does not resolve or
+authorize A007 or A008.
 
 ## Current Implementation Evidence Check
 
