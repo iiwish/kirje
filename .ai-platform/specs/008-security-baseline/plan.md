@@ -477,19 +477,23 @@ matching resolved authority claim becomes `ambiguous`.
    CSPRNG boundary (T202A).
 3. Typed core payload projection, challenges, proofs, receipts, nonce use, and
    replay (T202B).
-4. Store/account registry, transitions, and cleanup lifecycle (T202C).
-5. Grant use, remote-effect claim, invocation permit, and observation (T202D).
-6. Verified staged-finalize classification, rotation, recovery, audit, and T202
+4. Grant use and exact store enrollment (T202C1).
+5. Account-create challenge and transition lifecycle (T202C2).
+6. Remaining account/credential transitions and delete-only cleanup (T202C3).
+7. Registry-bound remote challenge effects and T202C aggregate acceptance
+   (T202C4/T202C).
+8. Remote-effect claim, invocation permit, and observation (T202D).
+9. Verified staged-finalize classification, rotation, recovery, audit, and T202
    umbrella acceptance gates (T202E).
-7. Same-handle bounded local I/O and cross-platform recoverable replacement.
-8. Config v2, conservative migration, account identity, and bound keyring
+10. Same-handle bounded local I/O and cross-platform recoverable replacement.
+11. Config v2, conservative migration, account identity, and bound keyring
    lifecycle.
-9. Operation-ledger v3 migration and authorization/effect integration.
-10. Shared authorization and crash-recovery runtime.
-11. CLI owner, store, account, credential, and operation workflow.
-12. Bounded MCP transport and lifecycle budgets.
-13. Bounded protocol responses and complete capability model.
-14. Canonical documentation, cross-platform QA, controlled live verification,
+12. Operation-ledger v3 migration and authorization/effect integration.
+13. Shared authorization and crash-recovery runtime.
+14. CLI owner, store, account, credential, and operation workflow.
+15. Bounded MCP transport and lifecycle budgets.
+16. Bounded protocol responses and complete capability model.
+17. Canonical documentation, cross-platform QA, controlled live verification,
    release commit, PR, CI, merge, tag, and post-merge evidence.
 
 Each numbered implementation task has its own packet and RED/GREEN evidence.
@@ -583,9 +587,11 @@ Additional security gates include:
 ## User Review Gate
 
 Confirmed on 2026-08-28 under the user's delegated project-owner authority.
-T202 is a serial umbrella. T202A and T202B are Accepted. T202C is Draft pending
-packetization and independent review, so no production task is Ready. T202D-E
-remain Draft until their predecessor is Accepted. T204 and every
+T202 is a serial umbrella. T202A and T202B are Accepted. T202C is a Draft
+acceptance umbrella split into strict serial T202C1-T202C4. T202C1 is Ready
+after `T202C1_A002_PACKET_REVIEW_PASS` and is the sole production task allowed
+to execute.
+T202C2-T202C4 and T202D-E remain Draft until their predecessor is Accepted. T204 and every
 later production task additionally require the T202 umbrella to be Accepted.
 Execution still requires one self-contained packet per ready task, verified RED
 evidence, and review.

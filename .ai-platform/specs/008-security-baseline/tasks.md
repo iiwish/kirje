@@ -417,65 +417,165 @@ Evidence required:
 - RED/GREEN logs, byte goldens, replay/concurrency matrix, core API review,
   private-output scan, and residual risk
 
-### T202C: Store/Account Registry And Transitions
+### T202C: Store/Account Registry And Transitions Umbrella
 
 Status: Draft
 Priority: P0
 Story / Requirement: US-001, US-003; FR-003-FR-009, FR-016; NFR-001-NFR-003,
 NFR-006, NFR-007
-Depends on: T202B Accepted
+Depends on: T202B Accepted; T202C1-T202C4 Accepted
 Blocks: T202D; T202 umbrella acceptance
 Parallel: No
 Conflicts with: T202A-T202B/T202D-T202E and every registry, transition, cleanup,
-location, generation, credential, or display-identity rule
+location, generation, credential, display-identity, or registry-backed challenge
+rule
 
 Goal:
-Implement exact owner-authorized store enrollment, account registry rows,
-account-transition prepare/config-committed/finalize/abort/recovery operations,
-removed-history semantics, and delete-only cleanup lifecycle against the fixed
-schema and immutable receipts. Expand challenge issuance for registry-backed
-account, credential, cleanup, send, and mailbox manifests; remote actions bind
-the planner-owned effect in one `challenge_effects` row.
+Accept the complete T202C security slice only after four strict serial production
+tasks prove grant consumption and store enrollment, account creation, remaining
+account/credential/cleanup transitions, and remote challenge issuance against
+the unchanged canonical T202B schema.
+
+Acceptance criteria:
+- Store/location/account/credential/display mappings cannot alias or be replaced
+  by changed retry, restart, crash, or concurrency.
+- Every transition resolves only to the exact before or after snapshot, or enters
+  recovery; removed history and cleanup evidence remain immutable.
+- Every T202C control action has registry-backed challenge issuance and every
+  remote action has exactly one planner-owned ordinal-zero challenge effect.
+- T202C1-T202C4 evidence, independent reviews, aggregate registry/event restart
+  validation, privacy review, canonical DDL hash, and package gates are green.
+
+Packet path:
+- None; T202C is an acceptance umbrella and has no production packet.
+
+Evidence required:
+- `.ai-platform/evidence/T202C/summary.md`
+- Child evidence index, aggregate schema/event/privacy/gate review, and residual
+  risk handoff to T202D
+
+### T202C1: Grant Use And Store Enrollment
+
+Status: Ready
+Priority: P0
+Story / Requirement: US-003; FR-003, FR-016, FR-018; NFR-001-NFR-003,
+NFR-006, NFR-007
+Depends on: T202B Accepted at production commit `43f0788`
+Blocks: T202C2; T202C umbrella acceptance
+Parallel: No
+Conflicts with: T202C2-T202C4/T202D-T202E and every grant-use, store registry,
+authority clock, authority event, or restart-validator rule
+
+Goal:
+Implement the exact canonical grant-use substrate and owner-authorized config
+store enrollment in one transaction. Consume the existing T202B `store_enroll`
+receipt, bind one store ID to one bounded private location identity and exact
+config generation/digest, preserve immutable use/enrollment evidence, and expand
+the restart validator only for these two row kinds and events.
 
 Allowed files:
 - `crates/kirje-store/src/lib.rs`
 - `crates/kirje-store/src/authority.rs`
 - `crates/kirje-store/tests/authority_registry.rs`
-- `crates/kirje-store/tests/fixtures/authority/registry/**`
+- `crates/kirje-store/tests/fixtures/authority/registry/store_enrollment/**`
 
 Test targets:
-- Exact store-enroll first/retry and changed retry; both-direction store/location
-  uniqueness; config generation/digest and receipt/grant linkage
-- Registry-backed account/credential/cleanup and send/mail challenge issuance,
-  stale binding/config/policy/effect rejection, exact challenge-effect row, and
-  pending-context/restart/concurrency behavior
-- Account/credential global uniqueness, active display partial index, create/
-  update/remove, removed display recreation only with new identities
-- Account-transition canonical digest, exact next generation, one active
-  transition, every state/row shape and concurrent prepare winner
-- Before/after/third config digest restart matrix and no credential/network calls
-  while blocked/recovery-required
-- Provisional/ready/claimed/deleted cleanup, active-v2/legacy-v1 enum, delete-only
-  projection and no get/contains/list/copy/export/test/set capability
-- Registry/event projection privacy and FK/corruption fail-closed behavior
+- Grant-use transcript byte golden, parse/recompute, exact first use, exact
+  committed recovery after expiry/restart, changed retry, and first-use expiry
+- Store-derived effective use time under tolerated raw clock rollback and an
+  exact time-independent enrollment-intent digest for no-grant expiry recovery
+- Store-enroll first/retry, both-direction store/location uniqueness, changed
+  config/receipt/location retries, bounded location material, and exact receipt,
+  target, manifest, anchor, key, epoch, bundle, clock, and config linkage
+- One transaction and one fixed apply lock across grant row/event, store row/event,
+  clock update, commit-before-response loss, deterministic fault points, and
+  concurrent/stale-handle winner behavior
+- Streaming bounded restart validation for grant/store rows and event graph;
+  every account/effect/transition/cleanup/rotation row remains rejected
+- Same/different-context authorized/pending siblings after one enrollment,
+  replacement-terminal versus final-expiry ordering, and 128-or-more complete
+  legal histories with indexed EXPLAIN plans and O(1) additional memory
+- Public projection, stable-error, ordinary-output, log, SQL/path, location,
+  manifest/proof/signature/nonce, and real-account privacy scans
 
 Deliverables:
-- Registry, transition, and cleanup transaction APIs and fixtures
-- Registry-backed control/remote challenge issuance and challenge-effect fixtures
-- Exact idempotency, recovery, removed-history, and privacy evidence
+- Typed `GrantUseRequest` and `EnrollStoreRequest` plus a bounded public store
+  projection with no private location or authorization bytes
+- Canonical `KIRJE-GRANT-USE-V1` durable transcript and exact immutable row checks
+- Atomic enrollment API, fault hooks, event insertion, and restart validator
 
 Acceptance criteria:
-- Store/location/account/credential/display mappings cannot alias or be replaced
-  by changed retry/concurrency.
-- Every transition resolves only before/after or enters recovery; removed history
-  and cleanup evidence remain immutable.
+- No first use succeeds after immutable receipt expiry or against stale/mismatched
+  authority context; an exact committed retry returns the historical same use and
+  store projection without refreshing authority.
+- Store ID and location digest are globally one-to-one and immutable; neither a
+  changed retry nor a concurrent contender can claim either identity.
+- T202B behavior remains green and canonical schema bytes do not change.
 
 TDD plan:
-- RED: Reproduce aliasing, NULL uniqueness, stale generation, changed retry,
-  transition crash, removed-ID reuse, and cleanup capability escalation.
-- GREEN: Implement one registry/transition transaction at a time with exact row
-  comparisons and existing grant/receipt checks.
-- REFACTOR: Share registry codecs only after crash/concurrency/privacy tests pass.
+- RED: Add missing API/transcript, expiry/replay, uniqueness, crash, concurrency,
+  event, corruption, bounded-load, and privacy tests; confirm contract-relevant
+  failures before production edits.
+- GREEN: Add the minimum typed transaction and incremental validator/event support.
+- REFACTOR: Share exact row/transcript helpers only after all RED targets pass.
+
+Validation commands:
+```bash
+cargo test -p kirje-store --test authority_registry --all-features --locked
+cargo test -p kirje-store --test authority_authorization --all-features --locked
+cargo test -p kirje-store --test authority_schema --all-features --locked
+cargo test -p kirje-store --all-features --locked
+cargo test -p kirje-store --no-default-features --locked
+cargo clippy -p kirje-store --all-targets --all-features --locked -- -D warnings
+cargo +1.88 check -p kirje-store --all-features --locked
+test "$(shasum -a 256 crates/kirje-store/src/authority/schema_v1.sql | cut -d ' ' -f1)" = "572a73ba5fa83c763188d804ce9767a3c21373410d8b170f6d97b49be0a86454"
+```
+
+Definition of Done:
+- Grant use, store enrollment, exact recovery, concurrency, fault, event, restart,
+  corruption, boundedness, privacy, no-default-features, MSRV, and schema-hash
+  gates pass with no Cargo, core, runtime, CLI, MCP, protocol, or DDL change.
+
+Packet path:
+- `.ai-platform/specs/008-security-baseline/packets/T202C1.yaml`
+
+Evidence required:
+- `.ai-platform/evidence/T202C1/summary.md`
+- RED/GREEN logs, byte golden, replay/expiry/uniqueness/fault/concurrency/event/
+  restart matrices, privacy scan, and residual risk
+
+### T202C2: Account Creation Transition
+
+Status: Draft
+Priority: P0
+Story / Requirement: US-001, US-003; FR-003-FR-006, FR-016; NFR-001-NFR-003,
+NFR-006, NFR-007
+Depends on: T202C1 Accepted
+Blocks: T202C3; T202C umbrella acceptance
+Parallel: No
+Conflicts with: T202C1/T202C3-T202C4/T202D-T202E and every account-create,
+account registry, display identity, transition, or registry challenge rule
+
+Goal:
+Expand challenge issuance for exact registry-backed `account_create`, then
+implement create prepare/config-committed/finalize/abort/recovery transitions
+that reserve account, credential, and active display identities before config or
+keyring work and recover only from exact before/after config snapshots.
+
+Allowed files:
+- `crates/kirje-store/src/lib.rs`
+- `crates/kirje-store/src/authority.rs`
+- `crates/kirje-store/tests/authority_registry.rs`
+- `crates/kirje-store/tests/fixtures/authority/registry/account_create/**`
+
+Test targets:
+- Registry-backed create challenge exact context, pending reuse/restart/
+  concurrency, stale store/config/binding rejection, and zero challenge effects
+- Global account/credential uniqueness, active display partial-index behavior,
+  exact next generation, transition digest, one active transition, and exact retry
+- Prepare-before-config blocking, config-committed/finalize/abort/recovery fault
+  boundaries, before/after/third digest restart matrix, and no external calls
+- Event graph, corruption, streaming bounded restart validation, and privacy
 
 Validation commands:
 ```bash
@@ -485,21 +585,122 @@ cargo clippy -p kirje-store --all-targets --all-features --locked -- -D warnings
 ```
 
 Definition of Done:
-- Exact enrollment, account lifecycle, transition recovery, cleanup state, FK,
-  challenge issuance/effect, event, and projection tests pass without changing
-  the canonical T202B schema.
-- No registry API returns location material, credential ID/binding digest, clear
-  display/email/endpoint, locator bytes, or cross-account state normally.
+- Account-create issuance and transition lifecycle are exact, crash-safe,
+  idempotent, private, and schema-preserving.
 
 Packet path:
-- `.ai-platform/specs/008-security-baseline/packets/T202C.yaml`
+- `.ai-platform/specs/008-security-baseline/packets/T202C2.yaml`
 
 Evidence required:
-- `.ai-platform/evidence/T202C/summary.md`
-- RED/GREEN logs, uniqueness/concurrency and transition fault matrices,
-  delete-only API review, privacy scan, and residual risk
+- `.ai-platform/evidence/T202C2/summary.md`
+- RED/GREEN logs, identity/concurrency and transition fault matrices, restart/
+  event/privacy review, and residual risk
 
-### T202D: Grant/Effect Claim/Invocation/Observation
+### T202C3: Account Credential And Cleanup Lifecycles
+
+Status: Draft
+Priority: P0
+Story / Requirement: US-001, US-003; FR-003-FR-009, FR-016; NFR-001-NFR-003,
+NFR-006, NFR-007
+Depends on: T202C2 Accepted
+Blocks: T202C4; T202C umbrella acceptance
+Parallel: No
+Conflicts with: T202C1-T202C2/T202C4/T202D-T202E and every account update/remove,
+credential, cleanup, transition, removed-history, or challenge rule
+
+Goal:
+Expand exact challenge issuance and transition execution for account update,
+account remove, credential set, credential delete, and credential cleanup. Retain
+all removed identities and bind private locator tombstones to a closed delete-only
+cleanup lifecycle with no read/probe/copy/export/set capability.
+
+Allowed files:
+- `crates/kirje-store/src/lib.rs`
+- `crates/kirje-store/src/authority.rs`
+- `crates/kirje-store/tests/authority_registry.rs`
+- `crates/kirje-store/tests/fixtures/authority/registry/account_credential_cleanup/**`
+
+Test targets:
+- Per-action exact current/proposed registry challenge context and zero effects
+- Update/remove/set/delete transition first/retry/crash/concurrency/recovery and
+  immutable removed account/credential identity history
+- Removed display recreation only with new account and credential identities
+- Provisional/ready/claimed/deleted cleanup; active-v2/legacy-v1 exact enum;
+  delete-only projection/API compile review and capability-escalation negatives
+- Event/corruption/restart/boundedness/privacy and no-external-call-before-claim
+
+Validation commands:
+```bash
+cargo test -p kirje-store --test authority_registry --all-features --locked
+cargo test -p kirje-store --all-features --locked
+cargo clippy -p kirje-store --all-targets --all-features --locked -- -D warnings
+```
+
+Definition of Done:
+- Every remaining control lifecycle is exact, immutable, crash-safe, delete-only
+  where required, private, and schema-preserving.
+
+Packet path:
+- `.ai-platform/specs/008-security-baseline/packets/T202C3.yaml`
+
+Evidence required:
+- `.ai-platform/evidence/T202C3/summary.md`
+- RED/GREEN logs, transition/removed-history/cleanup capability matrices,
+  restart/event/privacy review, and residual risk
+
+### T202C4: Remote Challenge Registry Binding
+
+Status: Draft
+Priority: P0
+Story / Requirement: US-002, US-003; FR-013, FR-016-FR-018; NFR-001-NFR-003,
+NFR-006, NFR-007
+Depends on: T202C3 Accepted
+Blocks: T202C umbrella acceptance
+Parallel: No
+Conflicts with: T202C1-T202C3/T202D-T202E and every remote challenge, policy,
+effect registration, registry validation, or event/restart rule
+
+Goal:
+Expand challenge issuance for send and the five governed mailbox actions against
+one exact active store/account/binding/config/policy snapshot, atomically persist
+exactly one planner-owned ordinal-zero `challenge_effects` row, and complete the
+aggregate T202C streaming restart validator without claiming or invoking effects.
+
+Allowed files:
+- `crates/kirje-store/src/lib.rs`
+- `crates/kirje-store/src/authority.rs`
+- `crates/kirje-store/tests/authority_registry.rs`
+- `crates/kirje-store/tests/fixtures/authority/registry/remote_challenges/**`
+
+Test targets:
+- Send/seen/starred/move/archive/safe-delete exact registry, policy, manifest,
+  account, credential, binding, location, generation, capability, and effect checks
+- One and only one ordinal-zero effect row, globally unique planner-owned effect,
+  exact pending reuse/restart/concurrency, stale/changed retry rejection, and no
+  remote effect/claim/invocation/observation row
+- Aggregate T202C grant/store/account/transition/cleanup/challenge-effect event
+  and streaming bounded restart validation plus corruption/FK/privacy matrices
+
+Validation commands:
+```bash
+cargo test -p kirje-store --test authority_registry --all-features --locked
+cargo test -p kirje-store --all-features --locked
+cargo clippy -p kirje-store --all-targets --all-features --locked -- -D warnings
+```
+
+Definition of Done:
+- All T202C challenge actions and registry histories validate exactly after
+  restart with no claim/invocation/network capability and unchanged canonical DDL.
+
+Packet path:
+- `.ai-platform/specs/008-security-baseline/packets/T202C4.yaml`
+
+Evidence required:
+- `.ai-platform/evidence/T202C4/summary.md`
+- RED/GREEN logs, six-action/effect/stale-context/concurrency/event/restart/
+  privacy matrices, T202C aggregate gates, and residual risk
+
+### T202D: Effect Claim Invocation And Observation
 
 Status: Draft
 Priority: P0
@@ -508,15 +709,16 @@ NFR-006, NFR-007
 Depends on: T202C Accepted
 Blocks: T202E; T202 umbrella acceptance
 Parallel: No
-Conflicts with: T202A-T202C/T202E and grant-use, remote-effect, claim,
+Conflicts with: T202A-T202C/T202E and grant-use integration, remote-effect, claim,
 invocation-permit, observation, or apply-boundary behavior
 
 Goal:
-Implement typed same-transaction current-context revalidation, canonical grant
-use/effect claim/invocation start/observation transcripts, global effect claim,
-single adapter-entry permit, exact recovery, and crash-to-ambiguous observation.
-Expand challenge issuance for `ambiguous_close` only after its referenced
-effect, claim, invocation, and observation history validates exactly.
+Reuse T202C1's exact grant-use substrate inside typed same-transaction remote
+current-context revalidation, then implement canonical effect claim/invocation
+start/observation transcripts, global effect claim, single adapter-entry permit,
+exact recovery, and crash-to-ambiguous observation. Expand challenge issuance
+for `ambiguous_close` only after its referenced effect, claim, invocation, and
+observation history validates exactly.
 
 Allowed files:
 - `crates/kirje-core/src/account.rs`

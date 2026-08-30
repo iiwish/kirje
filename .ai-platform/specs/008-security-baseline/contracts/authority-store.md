@@ -584,6 +584,106 @@ time. It inserts/rechecks the grant use and store registration atomically. Exact
 retry returns the same registration; either-direction store/location mismatch,
 changed config context, or changed receipt fails.
 
+T202C1 fixes this boundary more narrowly. `GrantUseRequest` carries the six
+immutable identity fields through manifest SHA-256 and contains no caller time.
+`EnrollStoreRequest` adds the store UUID, exact bounded canonical
+`PlatformLocationMaterial` transcript, location digest, config generation and
+digest, plus a raw observed time used only by the authority clock. Location
+SHA-256 must equal both the canonical material and the sealed store-enroll
+manifest's `ConfigCas.location_sha256`; store ID, generation, and config digest
+must equal that manifest. Request and projection implement neither `Debug`,
+`Display`, serialization, nor schema generation. Normal projection contains
+only store ID, closed store state, config generation, and created/updated
+timestamps; it omits location material/digest, config digest, grant/receipt IDs,
+manifest, proof, nonce, key, realm, and event detail.
+
+The store derives durable `used_at` from checked effective authority time on the
+first successful use. Raw observed time is never persisted in a grant, store,
+or event and is not idempotency identity. The exact enrollment-intent digest is
+SHA-256 of `KIRJE-STORE-ENROLLMENT-INTENT-V1\0` with tags `0x0001` through
+`0x000a`: grant UUID16, receipt UUID16, action u16be, target-kind u16be,
+canonical target bytes, manifest SHA-256, store UUID16, location SHA-256,
+config generation u64be, and config SHA-256. Canonical material bytes are
+represented by their checked location digest. This intent can be reconstructed
+from the bounded request plus immutable challenge/receipt/manifest without a
+grant or store row; observed time is deliberately absent.
+
+The first no-existing-use attempt checks immutable receipt/challenge and exact
+enrollment-intent identity before current authority context. If effective time
+is past immutable receipt expiry, it changes the authorized, unclaimed
+challenge to expired, advances the paired clock, appends one
+`challenge_expired` event, commits, and returns `authorization_expired`; it
+inserts no grant or store row. That event is entity kind 8/code 5/source 1,
+relates to kind 9 and the receipt UUID, transitions `0x0802 -> 0x0803`, uses the
+enrollment-intent digest as context, contains the same receipt UUID, and occurs
+at effective authority time. Exact no-use response-loss retry recomputes that
+intent, returns the same error with no second event, and may advance only the
+paired clock. Changed intent writes nothing. Exact proof replay still returns
+the immutable receipt projection in `Expired` state.
+
+Successful store enrollment uses the same effective time for `grant_uses.used_at`,
+store `created_at`/`updated_at`, and both contiguous causal events.
+`grant_used` is entity kind 10/code 7/source 1, relates to kind 9 and the receipt
+UUID, transitions `0x0901 -> 0x0902`, uses `use_sha256` as context, and contains
+the receipt UUID. `store_enrolled` is entity kind 4/code 8/source 4, relates to
+kind 10 and the grant UUID, transitions `0x0000 -> 0x0401`, uses the same
+`use_sha256`, and contains the same receipt UUID. Exact committed retry appends
+neither event, retains the original derived use/store time, and may change only
+the paired clock high-water for a later raw observation.
+
+Grant-row replay is checked before fresh expiry/current-context authority. An
+exact durable row recovers the same enrollment after later expiry; changed
+six-field identity returns `grant_already_used`. T202E must preserve this order
+after valid invalidation exists. Without a durable grant, store/location aliases
+return `config_store_identity_conflict`; request fields disagreeing with sealed
+manifest or typed material return `authorization_context_stale`. Enrollment
+uses no entropy.
+
+Historical challenge validation is purely intrinsic. No pending, authorized,
+expired, used, same-context sibling, or different-context sibling is rejected
+because the current registry contains its store or location. Store/location
+absence belongs only to fresh store-enroll challenge issuance and a current
+no-grant first use; issuance checks both target store ID and sealed location
+digest. A successful grant links through its exact receipt to one enrolled store
+row. In the T202C1 stage, where transition tables are empty, current store config
+must still equal the initial enrollment manifest; T202C2 replaces only that
+stage-specific current-config check with the exact transition chain and never
+rewrites enrollment history.
+
+Receipt projection applies fixed priority: a receipt with a durable grant use is
+`Used` before expiry. Exact proof replay after enrollment returns the same
+receipt as `Used` even later than expiry, grants no new authority, and changes
+only the permitted paired clock high-water.
+
+Same-context lifecycle validation has two distinct sequences. The replacement
+terminal that closes a pending interval is the authorization event when a
+receipt exists, otherwise the pending-to-expired event. Every successor's
+created event must follow that replacement terminal. A later
+authorized-to-expired event proves final state only; it must follow
+authorization but may follow a successor already validly created. Thus
+`authorize A -> create B -> expire A` is legal, including equal effective
+timestamps, while missing, duplicate, swapped, or pre-authorization final-expiry
+events are corruption.
+
+Error precedence is closed. Pure request bounds/type/material validation runs
+first. Transactional schema/anchor/history corruption is
+`owner_recovery_required`. A present grant row is compared next: changed bounded
+identity is `grant_already_used`; exact grant with missing/mismatched atomic
+store/event graph is corruption; exact graph then passes the checked clock and
+recovers. With no grant, exact receipt/challenge/enrollment intent is checked;
+mismatch is `authorization_context_stale`. Checked effective time and expiry
+follow. Expiry commits before fresh current-authority and occupancy checks, so
+expired authority cannot probe aliases. Current mismatch is
+`authorization_context_stale`; only a current first use reaches
+`config_store_identity_conflict`. Two valid distinct receipts racing the same
+store/location are not exact retries: the loser returns that identity conflict,
+inserts no grant/event, and never rewrites `enrolled_receipt_id`.
+
+Restart validation admits only these T202C1 grant/store rows and events beyond
+T202B and rejects every account, transition, cleanup, effect, invocation,
+observation, rotation, or recovery row. It streams bounded rows with O(1)
+additional history memory and indexed primary/unique/event lookups.
+
 `PrepareAccountTransitionRequest` contains an exact grant-use request,
 transition UUID, store/account identities, closed transition kind, complete
 before/after config digests, expected/next generations, proposed registry values,
@@ -602,7 +702,7 @@ retains historical account and credential identities.
 
 ```rust
 struct GrantUseRequest { grant_id, receipt_id, action, target_kind,
-    target_bytes, manifest_sha256, used_at_unix_ms }
+    target_bytes, manifest_sha256 }
 
 struct EffectClaimRequest { grant_use, effect_id, operation_id, store_id,
     store_location_sha256, account_id, config_generation, config_sha256,
@@ -622,7 +722,8 @@ context. Exact committed recovery returns the same use even when that context is
 later expired or invalidated; changed retry returns `grant_already_used`.
 When a first-use request arrives after expiry, the same transaction marks an
 otherwise pending/authorized-unclaimed challenge expired and returns
-`authorization_expired`; clock tolerance never extends the deadline.
+`authorization_expired`; clock tolerance never extends the deadline. Durable
+use time is always store-derived effective authority time, not a caller field.
 
 First effect claim performs all comparisons in the same transaction: receipt and
 grant, expiry, anchor/meta readiness, active role/key/epoch/bundle, registered
@@ -631,6 +732,10 @@ credential/binding, policy, manifest, effect, ordinal, and operation UUID. It
 sets `invoke_before` exactly to the receipt expiry. Exact committed claim recovery
 returns the same claim after later context change; a changed retry returns
 `effect_already_claimed`.
+
+T202D reuses T202C1's exact grant-use helper inside the first remote effect-claim
+transaction; it does not introduce a second transcript, replay order, expiry
+path, or independently callable grant-use mutation.
 
 First invocation requires a current claim context and
 `started_at <= invoke_before`. It generates invocation/session-bound start bytes

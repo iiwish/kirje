@@ -3,7 +3,7 @@
 ## Metadata
 
 - Feature ID: `008-security-baseline`
-- Status: T202A_T202B_Accepted_T202C_Packetization
+- Status: T202A_T202B_Accepted_T202C1_Ready
 - Updated: 2026-08-30
 - Inputs: `spec.md`, `checklists/requirements.md`, `plan.md`, `research.md`,
   `data-model.md`, `contracts/**`, `tasks.md`, project constitution and AGENTS
@@ -13,21 +13,22 @@
 ## Gate Result
 
 - Critical findings: 0 unresolved
-- High findings: 0 unresolved. The A003 packet accepts the
-  current A002 implementation as its immutable baseline and narrows execution
-  to lifecycle/schema REDs; its stop conditions permit only the declared
-  additive amendment. Independent packet re-review confirms both findings are
-  resolved. The nine T202 authority-store packetization
+- High findings: 0 unresolved. The 3 A001 T202C1 findings are closed by A002
+  and `T202C1_A002_PACKET_REVIEW_PASS`. Historical challenge validation is now
+  intrinsic, lifecycle replacement and final-state terminals are distinct, and
+  durable grant/event time is store-derived effective authority time with a
+  time-independent enrollment-intent digest. The nine T202 authority-store packetization
   findings and four focused T202A artifact-review findings are resolved by the
   canonical authority-store contract, transaction-body DDL, composite SQLite
   relationships, minimal validated core public-key prerequisite, fail-closed
   staged ownership, exact durable transcripts/replay tables, closed transaction
   requests, and rotation/recovery state machine.
-- Medium findings: 0 unresolved. Canonical schema ownership
+- Medium findings: 0 unresolved. The 1 A001 T202C1 finding is closed by A002
+  and `T202C1_A002_PACKET_REVIEW_PASS`. A 128-or-more complete legal-history RED
+  plus indexed EXPLAIN plans and O(1) memory review is now mandatory. Canonical schema ownership
   is assigned to T202B and propagated through T202C-T202E, the unreleased T202A
   development fence has an explicit fail-closed disposal boundary, and the
-  schema target/hash gates are present at task and packet level. Independent
-  packet re-review confirms all three findings are resolved.
+  schema target/hash gates are present at task and packet level.
 - Low findings: 3 accepted watch items: future policy/assurance snapshot schemas
   remain executable fail-closed unsupported; the generic artifact validator
   cannot select letter-suffixed child IDs independently; and the frozen
@@ -37,8 +38,9 @@ evidence is excluded from whitespace lint because its context lines use the
 standard single-space patch marker.
 - Execution decision: T201 and T202A are Accepted. T202 remains a Draft
   acceptance umbrella split into strict serial T202A-T202E. T202B is Accepted
-  at production commit `43f0788`; T202C-T202E and T203-T212 remain Draft, so no
-  production task is Ready. T204 and every
+  at production commit `43f0788`; T202C is a Draft acceptance umbrella split
+  into strict serial T202C1-T202C4. T202C1 is the sole Ready production task;
+  T202C2-T202C4, T202D-T202E, and T203-T212 remain Draft. T204 and every
   later task directly require the T202 umbrella to be Accepted.
 
 The product requirements remain confirmed and do not add a remote mailbox
@@ -437,9 +439,21 @@ already-expired response-loss recovery. The fixed event numeric/detail table
 plus causal B validator replaces T202A's initial-empty rule without weakening
 the bootstrap prefix or exact later-table zero-row boundary.
 
-No product-spec or executable-contract question blocks T202B packetization.
-T202C-T202E remain dependency-gated Draft tasks and T202 remains a Draft
-acceptance umbrella.
+The first independent T202C1 packet review found three High and one Medium
+execution-contract gap: historical siblings depended on current store absence,
+authorized-to-expired was conflated with the replacement terminal, caller use
+time conflicted with effective authority time and no-grant recovery identity,
+and O(1) validation lacked executable high-cardinality/query-plan proof. The
+A002 amendment resolves these in the canonical authority-store contract and
+packet, and `T202C1_A002_PACKET_REVIEW_PASS` closes the execution-packet gate.
+T202C is an acceptance umbrella rather than a single production patch:
+T202C1 owns generic grant consumption plus store enrollment; T202C2 owns
+account-create issuance and transitions; T202C3 owns remaining account,
+credential, and delete-only cleanup lifecycles; T202C4 owns six remote challenge
+effects and aggregate T202C validation. These tasks are strict serial because
+they share the authority transaction, validator, event stream, and fixture
+surface. T202C1-T202C4 and T202D-T202E remain dependency-gated Draft tasks, and
+T202 remains a Draft acceptance umbrella.
 
 ## Watch Items
 
@@ -461,12 +475,12 @@ not an accepted fallback.
 ### L-003 Suffixed Task Validator Selection
 
 The shared artifact validator recognizes numeric `T###` headings but cannot
-select `T202A`-`T202E` through `--task-id`. Feature-wide validation still checks
-the confirmed work graph and scans every packet file once present. Child packet
-review must therefore use feature-wide validation plus the declared packet and
-evidence paths until the validator is extended in a separately allowed tooling
-task. This is a smoke-tool limitation, not permission to merge child evidence or
-relax the strict serial gates.
+select `T202A`-`T202E` or `T202C1`-`T202C4` through `--task-id`. Feature-wide
+validation still checks the confirmed work graph and scans every packet file
+once present. Child packet review must therefore use feature-wide validation
+plus the declared packet and evidence paths until the validator is extended in
+a separately allowed tooling task. This is a smoke-tool limitation, not
+permission to merge child evidence or relax the strict serial gates.
 
 ### L-004 Canonical DDL Diff Lint
 
@@ -481,7 +495,7 @@ its digest.
 
 ## Execution Gate
 
-`APPROVED_FOR_T202C_PACKETIZATION`
+`APPROVED_FOR_T202C1_A001_EXECUTION`
 
 T202A is accepted from four test-first attempts, independent security and QA
 review, its bootstrap-schema digest, and fresh packet/workspace gates. A003
@@ -489,6 +503,8 @@ retains the A001/A002 RED evidence and implementation as a hash-pinned baseline,
 then adds only lifecycle linkage/schema REDs and their minimum implementation.
 Its amended packet received `T202B_A003_PACKET_REVIEW_PASS`. Four test-first
 attempts, fresh packet/workspace gates, and `T202B_A004_CODE_REVIEW_PASS`
-support evidence-based T202B acceptance at `43f0788`. T202C may be packetized
-but remains Draft until its own independent packet review. The T202 umbrella
-remains non-Accepted.
+support evidence-based T202B acceptance at `43f0788`. T202C1 A001 received no
+pass (`0 Critical / 3 High / 1 Medium`); A002 closes those findings and received
+`T202C1_A002_PACKET_REVIEW_PASS` with zero Critical, High, Medium, or Low
+findings. T202C1 is the sole Ready production task. The T202C and T202 umbrellas
+remain non-Accepted.

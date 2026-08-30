@@ -1051,6 +1051,25 @@ digest. Created time equals `issued_at`, authorized time equals `verified_at`,
 and expired time is greater than `expires_at` and no greater than authority
 clock high-water. Pending reuse and exact proof replay append no event.
 
+T202C1 also permits authorized-unclaimed expiry and the successful enrollment
+pair. Authorized-unclaimed expiry is challenge entity/code/source `8/5/1`,
+relates to receipt kind 9 and its UUID, transitions `0x0802 -> 0x0803`, uses the
+store-enrollment-intent digest as context, includes that receipt UUID, and
+occurs at effective authority time. Grant use is grant entity/code/source
+`10/7/1`, relates to the receipt, transitions `0x0901 -> 0x0902`, and uses the
+use digest as context. Store enrollment is store entity/code/source `4/8/4`,
+relates to the grant, transitions `0x0000 -> 0x0401`, and uses the same use
+digest. Both successful events include the receipt UUID, are contiguous in
+grant-then-store order, and use the same store-derived effective authority time
+as the grant and store rows. Exact recovery appends no event.
+
+For same-context replacement ordering, authorization remains the terminal that
+closed the pending interval when a receipt exists. A later authorized-to-expired
+event is a final-state event, not a replacement terminal, so it may legally
+follow a successor challenge created after authorization. It must still follow
+the exact authorization event; missing, duplicate, or swapped lifecycle events
+are corruption.
+
 Polymorphic event entity IDs intentionally have no foreign key; their exact
 kind/length pair and typed detail must match a durable row or retained realm
 identity inside the inserting transaction. Challenge `store_id`/`account_id`
