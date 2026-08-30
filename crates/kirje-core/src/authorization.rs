@@ -19,6 +19,8 @@ use crate::{
 
 const MANIFEST_DOMAIN: &[u8] = b"KIRJE-MANIFEST-V1\0";
 const AUTHORIZATION_DOMAIN: &[u8] = b"KIRJE-AUTHORIZATION-V1\0";
+const AUTHORIZATION_PROOF_DOMAIN: &[u8] = b"KIRJE-AUTHORIZATION-PROOF-V1\0";
+const AUTHORIZATION_PROOF_CONTRACT_VERSION: &str = "kirje.authorization-proof.v1";
 const EFFECT_DOMAIN: &[u8] = b"KIRJE-EFFECT-V1\0";
 const ADDRESS_DOMAIN: &[u8] = b"KIRJE-ADDRESS-V1\0";
 const ATTACHMENT_DOMAIN: &[u8] = b"KIRJE-ATTACHMENT-V1\0";
@@ -287,7 +289,8 @@ pub enum TargetKind {
 }
 
 impl TargetKind {
-    const fn code(self) -> u16 {
+    #[must_use]
+    pub const fn code(self) -> u16 {
         match self {
             Self::Operation => 1,
             Self::Store => 2,
@@ -330,7 +333,8 @@ pub enum EffectKind {
 }
 
 impl EffectKind {
-    const fn code(self) -> u16 {
+    #[must_use]
+    pub const fn code(self) -> u16 {
         match self {
             Self::None => 0,
             Self::SmtpSubmit => 1,
@@ -410,7 +414,8 @@ pub enum ManifestTarget {
 }
 
 impl ManifestTarget {
-    fn kind(&self) -> TargetKind {
+    #[must_use]
+    pub fn kind(&self) -> TargetKind {
         match self {
             Self::Operation(_) => TargetKind::Operation,
             Self::Store(_) => TargetKind::Store,
@@ -435,6 +440,35 @@ impl ManifestTarget {
             Self::TrustEpoch(value) => value.get().to_be_bytes().to_vec(),
             Self::RemoteEffect(value) => value.as_bytes().to_vec(),
         }
+    }
+
+    #[must_use]
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        self.bytes()
+    }
+
+    fn display(&self) -> TargetDisplay {
+        TargetDisplay(match self {
+            Self::Operation(value) => value.to_string(),
+            Self::Store(value) => value.to_string(),
+            Self::Account(value) => value.to_string(),
+            Self::Credential(value) => value.to_string(),
+            Self::Cleanup(value) => value.to_string(),
+            Self::Policy => "policy".to_owned(),
+            Self::Assurance => "assurance".to_owned(),
+            Self::TrustEpoch(value) => value.get().to_string(),
+            Self::RemoteEffect(value) => value.to_string(),
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TargetDisplay(String);
+
+impl TargetDisplay {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
@@ -989,6 +1023,11 @@ impl ActionManifest {
     #[must_use]
     pub fn context(&self) -> &ManifestContext {
         &self.context
+    }
+
+    #[must_use]
+    pub fn payload(&self) -> &ManifestPayload {
+        &self.payload
     }
 }
 
@@ -2493,7 +2532,7 @@ fn parse_account_state_reason(bytes: &[u8]) -> Result<Option<AccountStateReason>
 pub struct AuthorizationContext {
     pub owner_realm: OwnerRealmId,
     pub trust_bundle_sha256: Sha256Digest,
-    pub owner_key_id: Sha256Digest,
+    pub signer_key_id: Sha256Digest,
     pub trust_epoch: NonZeroU64,
     pub grant_id: AuthorizationGrantId,
     pub nonce: [u8; 32],
@@ -2507,18 +2546,164 @@ struct AuthorizationEffect {
     kind: EffectKind,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AuthorizationPayload {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AuthorizationEffectSnapshot {
+    effect_id: RemoteEffectId,
+    ordinal: u16,
+    kind: EffectKind,
+}
+
+impl AuthorizationEffectSnapshot {
+    #[must_use]
+    pub const fn effect_id(self) -> RemoteEffectId {
+        self.effect_id
+    }
+
+    #[must_use]
+    pub const fn ordinal(self) -> u16 {
+        self.ordinal
+    }
+
+    #[must_use]
+    pub const fn kind(self) -> EffectKind {
+        self.kind
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct AuthorizationPayloadSnapshot<'a> {
     owner_realm: OwnerRealmId,
     action: SensitiveAction,
-    target: ManifestTarget,
+    target_kind: TargetKind,
+    target_bytes: &'a [u8],
+    target_display: &'a TargetDisplay,
     store_id: Option<StoreId>,
     account_id: Option<AccountId>,
     manifest_sha256: Sha256Digest,
     account_binding_sha256: Option<Sha256Digest>,
     policy_sha256: Option<Sha256Digest>,
     trust_bundle_sha256: Sha256Digest,
-    owner_key_id: Sha256Digest,
+    signer_key_id: Sha256Digest,
+    trust_epoch: NonZeroU64,
+    grant_id: AuthorizationGrantId,
+    nonce: &'a [u8; 32],
+    issued_at_unix_ms: i64,
+    expires_at_unix_ms: i64,
+    effect: Option<AuthorizationEffectSnapshot>,
+    canonical_bytes: &'a [u8],
+}
+
+impl<'a> AuthorizationPayloadSnapshot<'a> {
+    #[must_use]
+    pub const fn owner_realm(self) -> OwnerRealmId {
+        self.owner_realm
+    }
+
+    #[must_use]
+    pub const fn action(self) -> SensitiveAction {
+        self.action
+    }
+
+    #[must_use]
+    pub const fn target_kind(self) -> TargetKind {
+        self.target_kind
+    }
+
+    #[must_use]
+    pub const fn target_bytes(self) -> &'a [u8] {
+        self.target_bytes
+    }
+
+    #[must_use]
+    pub const fn target_display(self) -> &'a TargetDisplay {
+        self.target_display
+    }
+
+    #[must_use]
+    pub const fn store_id(self) -> Option<StoreId> {
+        self.store_id
+    }
+
+    #[must_use]
+    pub const fn account_id(self) -> Option<AccountId> {
+        self.account_id
+    }
+
+    #[must_use]
+    pub const fn manifest_sha256(self) -> Sha256Digest {
+        self.manifest_sha256
+    }
+
+    #[must_use]
+    pub const fn binding_sha256(self) -> Option<Sha256Digest> {
+        self.account_binding_sha256
+    }
+
+    #[must_use]
+    pub const fn policy_sha256(self) -> Option<Sha256Digest> {
+        self.policy_sha256
+    }
+
+    #[must_use]
+    pub const fn bundle_sha256(self) -> Sha256Digest {
+        self.trust_bundle_sha256
+    }
+
+    #[must_use]
+    pub const fn signer_key_id(self) -> Sha256Digest {
+        self.signer_key_id
+    }
+
+    #[must_use]
+    pub const fn trust_epoch(self) -> NonZeroU64 {
+        self.trust_epoch
+    }
+
+    #[must_use]
+    pub const fn grant_id(self) -> AuthorizationGrantId {
+        self.grant_id
+    }
+
+    #[must_use]
+    pub const fn nonce(self) -> &'a [u8; 32] {
+        self.nonce
+    }
+
+    #[must_use]
+    pub const fn issued_at_unix_ms(self) -> i64 {
+        self.issued_at_unix_ms
+    }
+
+    #[must_use]
+    pub const fn expires_at_unix_ms(self) -> i64 {
+        self.expires_at_unix_ms
+    }
+
+    #[must_use]
+    pub const fn effect(self) -> Option<AuthorizationEffectSnapshot> {
+        self.effect
+    }
+
+    #[must_use]
+    pub const fn canonical_bytes(self) -> &'a [u8] {
+        self.canonical_bytes
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AuthorizationPayload {
+    owner_realm: OwnerRealmId,
+    action: SensitiveAction,
+    target_kind: TargetKind,
+    target_bytes: Vec<u8>,
+    target_display: TargetDisplay,
+    store_id: Option<StoreId>,
+    account_id: Option<AccountId>,
+    manifest_sha256: Sha256Digest,
+    account_binding_sha256: Option<Sha256Digest>,
+    policy_sha256: Option<Sha256Digest>,
+    trust_bundle_sha256: Sha256Digest,
+    signer_key_id: Sha256Digest,
     trust_epoch: NonZeroU64,
     grant_id: AuthorizationGrantId,
     nonce: [u8; 32],
@@ -2541,6 +2726,9 @@ impl AuthorizationPayload {
     ) -> Result<Self, MailError> {
         validate_authorization_time(context.issued_at_unix_ms, context.expires_at_unix_ms)?;
         let action = manifest.action();
+        let target_kind = manifest.context.target.kind();
+        let target_bytes = manifest.context.target.bytes();
+        let target_display = manifest.context.target.display();
         let effects = match (manifest.context.effect_id, action.policy().effect_kind) {
             (Some(effect_id), kind) if kind != EffectKind::None => {
                 vec![AuthorizationEffect { effect_id, kind }]
@@ -2558,7 +2746,7 @@ impl AuthorizationPayload {
             manifest.context.account_binding_sha256,
             manifest.context.policy_sha256,
             context.trust_bundle_sha256,
-            context.owner_key_id,
+            context.signer_key_id,
             context.trust_epoch,
             context.grant_id,
             &context.nonce,
@@ -2570,14 +2758,16 @@ impl AuthorizationPayload {
         Ok(Self {
             owner_realm: context.owner_realm,
             action,
-            target: manifest.context.target.clone(),
+            target_kind,
+            target_bytes,
+            target_display,
             store_id: manifest.context.store_id,
             account_id: manifest.context.account_id,
             manifest_sha256: manifest.sha256,
             account_binding_sha256: manifest.context.account_binding_sha256,
             policy_sha256: manifest.context.policy_sha256,
             trust_bundle_sha256: context.trust_bundle_sha256,
-            owner_key_id: context.owner_key_id,
+            signer_key_id: context.signer_key_id,
             trust_epoch: context.trust_epoch,
             grant_id: context.grant_id,
             nonce: context.nonce,
@@ -2624,7 +2814,7 @@ impl AuthorizationPayload {
             policy_sha256,
         )?;
         let trust_bundle_sha256 = parse_digest(fields[9].1)?;
-        let owner_key_id = parse_digest(fields[10].1)?;
+        let signer_key_id = parse_digest(fields[10].1)?;
         let trust_epoch = parse_nonzero_u64(fields[11].1)?;
         let grant_id = parse_uuid(fields[12].1)?;
         let nonce = parse_array(fields[13].1)?;
@@ -2647,7 +2837,7 @@ impl AuthorizationPayload {
             account_binding_sha256,
             policy_sha256,
             trust_bundle_sha256,
-            owner_key_id,
+            signer_key_id,
             trust_epoch,
             grant_id,
             &nonce,
@@ -2659,17 +2849,22 @@ impl AuthorizationPayload {
             return Err(malformed("authorization transcript is not canonical"));
         }
         let challenge_id = Sha256Digest::digest(&canonical_bytes);
+        let target_kind = target.kind();
+        let target_bytes = target.bytes();
+        let target_display = target.display();
         Ok(Self {
             owner_realm,
             action,
-            target,
+            target_kind,
+            target_bytes,
+            target_display,
             store_id,
             account_id,
             manifest_sha256,
             account_binding_sha256,
             policy_sha256,
             trust_bundle_sha256,
-            owner_key_id,
+            signer_key_id,
             trust_epoch,
             grant_id,
             nonce,
@@ -2682,13 +2877,45 @@ impl AuthorizationPayload {
     }
 
     #[must_use]
-    pub fn canonical_bytes(&self) -> Vec<u8> {
-        self.canonical_bytes.clone()
+    pub fn canonical_bytes(&self) -> &[u8] {
+        &self.canonical_bytes
     }
 
     #[must_use]
     pub const fn challenge_id(&self) -> Sha256Digest {
         self.challenge_id
+    }
+
+    #[must_use]
+    pub fn snapshot(&self) -> AuthorizationPayloadSnapshot<'_> {
+        AuthorizationPayloadSnapshot {
+            owner_realm: self.owner_realm,
+            action: self.action,
+            target_kind: self.target_kind,
+            target_bytes: &self.target_bytes,
+            target_display: &self.target_display,
+            store_id: self.store_id,
+            account_id: self.account_id,
+            manifest_sha256: self.manifest_sha256,
+            account_binding_sha256: self.account_binding_sha256,
+            policy_sha256: self.policy_sha256,
+            trust_bundle_sha256: self.trust_bundle_sha256,
+            signer_key_id: self.signer_key_id,
+            trust_epoch: self.trust_epoch,
+            grant_id: self.grant_id,
+            nonce: &self.nonce,
+            issued_at_unix_ms: self.issued_at_unix_ms,
+            expires_at_unix_ms: self.expires_at_unix_ms,
+            effect: self
+                .effects
+                .first()
+                .map(|effect| AuthorizationEffectSnapshot {
+                    effect_id: effect.effect_id,
+                    ordinal: 0,
+                    kind: effect.kind,
+                }),
+            canonical_bytes: &self.canonical_bytes,
+        }
     }
 }
 
@@ -2703,7 +2930,7 @@ fn encode_authorization(
     account_binding_sha256: Option<Sha256Digest>,
     policy_sha256: Option<Sha256Digest>,
     trust_bundle_sha256: Sha256Digest,
-    owner_key_id: Sha256Digest,
+    signer_key_id: Sha256Digest,
     trust_epoch: NonZeroU64,
     grant_id: AuthorizationGrantId,
     nonce: &[u8; 32],
@@ -2744,7 +2971,7 @@ fn encode_authorization(
                     .unwrap_or_default(),
             ),
             (10, trust_bundle_sha256.as_bytes().to_vec()),
-            (11, owner_key_id.as_bytes().to_vec()),
+            (11, signer_key_id.as_bytes().to_vec()),
             (12, trust_epoch.get().to_be_bytes().to_vec()),
             (13, grant_id.as_bytes().to_vec()),
             (14, nonce.to_vec()),
@@ -2876,18 +3103,90 @@ pub fn owner_key_id(role: OwnerKeyRole, public_key: &[u8; 32]) -> Sha256Digest {
     Sha256Digest::digest(&bytes)
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuthorizationProof {
-    pub contract_version: String,
-    pub challenge_id: Sha256Digest,
-    pub key_id: Sha256Digest,
-    pub signing_payload_sha256: Sha256Digest,
-    #[serde(deserialize_with = "deserialize_signature_base64url")]
-    pub signature_base64url: String,
+    pub(crate) contract_version: String,
+    pub(crate) challenge_id: Sha256Digest,
+    pub(crate) key_id: Sha256Digest,
+    pub(crate) signing_payload_sha256: Sha256Digest,
+    pub(crate) signature_base64url: String,
+    #[serde(skip)]
+    canonical_bytes: Vec<u8>,
 }
 
 impl AuthorizationProof {
+    #[must_use]
+    pub fn new(
+        challenge_id: Sha256Digest,
+        key_id: Sha256Digest,
+        signing_payload_sha256: Sha256Digest,
+        signature: [u8; 64],
+    ) -> Self {
+        let canonical_bytes =
+            encode_proof(challenge_id, key_id, signing_payload_sha256, &signature);
+        Self {
+            contract_version: AUTHORIZATION_PROOF_CONTRACT_VERSION.to_owned(),
+            challenge_id,
+            key_id,
+            signing_payload_sha256,
+            signature_base64url: URL_SAFE_NO_PAD.encode(signature),
+            canonical_bytes,
+        }
+    }
+
+    #[must_use]
+    pub fn contract_version(&self) -> &str {
+        &self.contract_version
+    }
+
+    #[must_use]
+    pub const fn challenge_id(&self) -> Sha256Digest {
+        self.challenge_id
+    }
+
+    #[must_use]
+    pub const fn key_id(&self) -> Sha256Digest {
+        self.key_id
+    }
+
+    #[must_use]
+    pub const fn signing_payload_sha256(&self) -> Sha256Digest {
+        self.signing_payload_sha256
+    }
+
+    #[must_use]
+    pub fn canonical_bytes(&self) -> &[u8] {
+        &self.canonical_bytes
+    }
+
+    #[must_use]
+    pub fn proof_sha256(&self) -> Sha256Digest {
+        Sha256Digest::digest(&self.canonical_bytes)
+    }
+
+    /// Parse one exact serializer-independent proof transcript.
+    ///
+    /// # Errors
+    ///
+    /// Returns authorization-malformed for an oversized, malformed, or noncanonical proof.
+    pub fn parse_canonical(bytes: &[u8]) -> Result<Self, MailError> {
+        if bytes.len() > 4_096 {
+            return Err(limit("authorization proof transcript is too large"));
+        }
+        let fields = parse_fields(bytes, AUTHORIZATION_PROOF_DOMAIN, 4)?;
+        expect_tags(&fields, &[1, 2, 3, 4])?;
+        let challenge_id = parse_digest(fields[0].1)?;
+        let key_id = parse_digest(fields[1].1)?;
+        let signing_payload_sha256 = parse_digest(fields[2].1)?;
+        let signature = parse_array(fields[3].1)?;
+        let proof = Self::new(challenge_id, key_id, signing_payload_sha256, signature);
+        if proof.canonical_bytes != bytes {
+            return Err(malformed("authorization proof transcript is not canonical"));
+        }
+        Ok(proof)
+    }
+
     /// Decode the exact 64-byte detached signature.
     ///
     /// # Errors
@@ -2896,6 +3195,57 @@ impl AuthorizationProof {
     pub fn signature_bytes(&self) -> Result<[u8; 64], MailError> {
         decode_signature_base64url(&self.signature_base64url)
     }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AuthorizationProofWire {
+    contract_version: String,
+    challenge_id: Sha256Digest,
+    key_id: Sha256Digest,
+    signing_payload_sha256: Sha256Digest,
+    #[serde(deserialize_with = "deserialize_signature_base64url")]
+    signature_base64url: String,
+}
+
+impl<'de> Deserialize<'de> for AuthorizationProof {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = AuthorizationProofWire::deserialize(deserializer)?;
+        if wire.contract_version != AUTHORIZATION_PROOF_CONTRACT_VERSION {
+            return Err(de::Error::custom(
+                "authorization proof contract version is unsupported",
+            ));
+        }
+        let signature =
+            decode_signature_base64url(&wire.signature_base64url).map_err(de::Error::custom)?;
+        Ok(Self::new(
+            wire.challenge_id,
+            wire.key_id,
+            wire.signing_payload_sha256,
+            signature,
+        ))
+    }
+}
+
+fn encode_proof(
+    challenge_id: Sha256Digest,
+    key_id: Sha256Digest,
+    signing_payload_sha256: Sha256Digest,
+    signature: &[u8; 64],
+) -> Vec<u8> {
+    encode_fields(
+        AUTHORIZATION_PROOF_DOMAIN,
+        &[
+            (1, challenge_id.as_bytes().to_vec()),
+            (2, key_id.as_bytes().to_vec()),
+            (3, signing_payload_sha256.as_bytes().to_vec()),
+            (4, signature.to_vec()),
+        ],
+    )
+    .expect("fixed-size authorization proof transcript must encode")
 }
 
 fn deserialize_signature_base64url<'de, D>(deserializer: D) -> Result<String, D::Error>

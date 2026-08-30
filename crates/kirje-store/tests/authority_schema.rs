@@ -45,12 +45,13 @@ const TABLES: [&str; 17] = [
     "remote_effects",
     "trust_epochs",
 ];
-const INDEXES: [&str; 14] = [
+const INDEXES: [&str; 15] = [
     "account_transitions_account_state",
     "account_transitions_store_state",
     "authority_events_entity_sequence",
     "authority_keys_one_active_role",
     "authority_keys_one_staged_role",
+    "authorization_challenges_context_created_sequence",
     "authorization_challenges_one_pending_context",
     "authorization_challenges_state_epoch_expiry",
     "authorization_receipts_epoch_expiry",
@@ -545,7 +546,7 @@ fn production_and_isolated_constructors_have_closed_inputs() {
 fn canonical_schema_body_has_exact_digest_and_inventory() {
     assert_eq!(
         hex(&Sha256::digest(SCHEMA)),
-        "3a59cf60ebe57affad3e440c3eb3f70e09d8e3c90974fc57318861560c4fb632"
+        "572a73ba5fa83c763188d804ce9767a3c21373410d8b170f6d97b49be0a86454"
     );
     for forbidden in ["PRAGMA", "BEGIN TRANSACTION", "BEGIN IMMEDIATE", "COMMIT"] {
         assert!(!SCHEMA.contains(forbidden));
@@ -609,7 +610,7 @@ fn outer_transaction_rollback_leaves_no_schema_identity_or_rows() {
                 params![[21_u8; 16], detail, detail_sha256],
             )
             .unwrap();
-        assert_eq!(user_object_count(&transaction), 34);
+        assert_eq!(user_object_count(&transaction), 35);
         assert_eq!(
             scalar_i64(
                 &transaction,
@@ -626,6 +627,75 @@ fn outer_transaction_rollback_leaves_no_schema_identity_or_rows() {
     assert_eq!(user_object_count(&connection), 0);
     assert_eq!(pragma_i64(&connection, "application_id"), 0);
     assert_eq!(pragma_i64(&connection, "user_version"), 0);
+}
+
+#[test]
+fn challenge_created_event_sequence_is_nullable_transactionally_and_typed_when_linked() {
+    let connection = schema_connection();
+    let (declared_type, not_null): (String, i64) = connection
+        .query_row(
+            "SELECT type,\"notnull\" FROM pragma_table_info('authorization_challenges')
+             WHERE name='created_event_sequence'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(declared_type, "INTEGER");
+    assert_eq!(not_null, 0);
+    assert_eq!(
+        scalar_text(
+            &connection,
+            "SELECT sql FROM sqlite_schema
+             WHERE type='index' AND name='authorization_challenges_context_created_sequence'",
+        ),
+        "CREATE INDEX authorization_challenges_context_created_sequence\n\
+ON authorization_challenges(context_sha256, created_event_sequence, challenge_id)"
+    );
+
+    let root = insert_raw_authority_root(&connection);
+    let challenge = RawAuthorization::store_enroll(20, &RawRemoteContext::new(), &root);
+    insert_raw_challenge(&connection, &challenge);
+    assert_eq!(
+        scalar_text(
+            &connection,
+            "SELECT typeof(created_event_sequence) FROM authorization_challenges",
+        ),
+        "null"
+    );
+
+    connection.execute_batch("SAVEPOINT event_link").unwrap();
+    connection
+        .execute(
+            "UPDATE authorization_challenges SET created_event_sequence=3",
+            [],
+        )
+        .unwrap();
+    assert_eq!(
+        scalar_i64(
+            &connection,
+            "SELECT created_event_sequence FROM authorization_challenges",
+        ),
+        3
+    );
+    connection
+        .execute_batch("ROLLBACK TO event_link; RELEASE event_link")
+        .unwrap();
+    assert_eq!(
+        scalar_text(
+            &connection,
+            "SELECT typeof(created_event_sequence) FROM authorization_challenges",
+        ),
+        "null"
+    );
+
+    for sql in [
+        "UPDATE authorization_challenges SET created_event_sequence=0",
+        "UPDATE authorization_challenges SET created_event_sequence=-1",
+        "UPDATE authorization_challenges SET created_event_sequence=1.5",
+        "UPDATE authorization_challenges SET created_event_sequence='wrong-storage-class'",
+    ] {
+        assert_sql_mutation_rejected(&connection, sql);
+    }
 }
 
 #[test]
@@ -2147,8 +2217,14 @@ fn insert_raw_authority_root(connection: &Connection) -> RawAuthorityRoot {
 fn insert_raw_challenge(connection: &Connection, value: &RawAuthorization) {
     connection
         .execute(
-            "INSERT INTO authorization_challenges VALUES (
-         ?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?1,?12,1,?13,?14,?15,?16,10,100,'authorized',NULL)",
+            "INSERT INTO authorization_challenges (
+                 challenge_id,grant_id,action,target_kind,target_id,store_id,account_id,
+                 context_sha256,manifest,manifest_sha256,signing_payload,signing_sha256,
+                 key_id,trust_epoch,bundle_sha256,binding_sha256,policy_sha256,nonce,
+                 issued_at,expires_at,state,invalidated_at
+             ) VALUES (
+                 ?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?1,?12,1,?13,?14,?15,?16,
+                 10,100,'authorized',NULL)",
             params![
                 value.challenge_id,
                 value.grant_id,

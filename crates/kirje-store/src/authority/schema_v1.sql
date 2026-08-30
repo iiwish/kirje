@@ -302,6 +302,9 @@ CREATE TABLE authorization_challenges (
     invalidated_at INTEGER
         CHECK(invalidated_at IS NULL OR
           (typeof(invalidated_at) = 'integer' AND invalidated_at >= issued_at)),
+    created_event_sequence INTEGER
+        CHECK(created_event_sequence IS NULL OR
+          (typeof(created_event_sequence) = 'integer' AND created_event_sequence > 0)),
     CHECK(challenge_id = signing_sha256),
     CHECK((target_kind IN (1,2,3,4,5,9) AND length(target_id) = 16)
        OR (target_kind = 8 AND length(target_id) = 8)
@@ -342,6 +345,8 @@ CREATE TABLE authorization_challenges (
 
 CREATE UNIQUE INDEX authorization_challenges_one_pending_context
 ON authorization_challenges(context_sha256) WHERE state = 'pending';
+CREATE INDEX authorization_challenges_context_created_sequence
+ON authorization_challenges(context_sha256, created_event_sequence, challenge_id);
 CREATE INDEX authorization_challenges_state_epoch_expiry
 ON authorization_challenges(state, trust_epoch, expires_at);
 

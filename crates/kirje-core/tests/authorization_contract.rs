@@ -7,18 +7,18 @@ use chrono::{TimeZone as _, Utc};
 use kirje_core::{
     AccountBinding, AccountId, AccountMutationManifest, AccountSnapshot, AccountStateReason,
     ActionManifest, AmbiguousAssertion, AmbiguousCloseManifest, AmbiguousTerminal,
-    AuthorizationContext, AuthorizationGrantId, AuthorizationPayload, AuthorizationProof,
-    AuthorizationReceiptId, AuthorizationReceiptProjection, AuthorizationReceiptState,
-    BindingState, CleanupDescriptor, CleanupId, CleanupState, ConfigCas, CredentialCleanupManifest,
-    CredentialId, CredentialKind, CredentialMutationManifest, EffectKind, Endpoint,
-    EndpointSnapshot, HostKind, InvalidationScope, InvocationId, JournalId, LocatorKind,
-    MailAccountConfig, MailboxManifest, MailboxSpecialUseInput, MailboxStrategy, ManifestAddress,
-    ManifestContext, ManifestPayload, ManifestSupport, ManifestTarget, McpMutationPolicy,
-    MimeBuilderVersion, OperationId, OwnerKeyRole, OwnerPublicKey, OwnerRealmId,
-    OwnerRecoverManifest, Protocol, RemoteEffectId, SendSubmitManifest, SensitiveAction,
-    Sha256Digest, StoreEnrollManifest, StoreEnrollmentState, StoreId, StoredCredentialState,
-    TargetKind, TransitionId, TransportSecurity, TrustPermissionMask, TrustRotationManifest,
-    owner_key_id, verify_authorization_signature,
+    AuthorizationContext, AuthorizationEffectSnapshot, AuthorizationGrantId, AuthorizationPayload,
+    AuthorizationPayloadSnapshot, AuthorizationProof, AuthorizationReceiptId,
+    AuthorizationReceiptProjection, AuthorizationReceiptState, BindingState, CleanupDescriptor,
+    CleanupId, CleanupState, ConfigCas, CredentialCleanupManifest, CredentialId, CredentialKind,
+    CredentialMutationManifest, EffectKind, Endpoint, EndpointSnapshot, HostKind,
+    InvalidationScope, InvocationId, JournalId, LocatorKind, MailAccountConfig, MailboxManifest,
+    MailboxSpecialUseInput, MailboxStrategy, ManifestAddress, ManifestContext, ManifestPayload,
+    ManifestSupport, ManifestTarget, McpMutationPolicy, MimeBuilderVersion, OperationId,
+    OwnerKeyRole, OwnerPublicKey, OwnerRealmId, OwnerRecoverManifest, Protocol, RemoteEffectId,
+    SendSubmitManifest, SensitiveAction, Sha256Digest, StoreEnrollManifest, StoreEnrollmentState,
+    StoreId, StoredCredentialState, TargetKind, TransitionId, TransportSecurity,
+    TrustPermissionMask, TrustRotationManifest, owner_key_id, verify_authorization_signature,
 };
 
 const GOLDEN_MANIFEST_HEX: &str = "4b49524a452d4d414e49464553542d5631000019000100000002000100020000000200010003000000103333333333334333833333333333333300040000001011111111111141118111111111111111000500000010222222222222422282222222222222220006000000203333333333333333333333333333333333333333333333333333333333333333000700000020444444444444444444444444444444444444444444444444444444444444444400080000000200010009000000104444444444444444844444444444444401000000000800000000000000070101000000354b49524a452d414444524553532d5631000002000100000002014600020000001466726f6d406578616d706c652e696e76616c696401020000003a00010000000000324b49524a452d414444524553532d563100000200010000000100000200000012746f406578616d706c652e696e76616c6964010300000002000001040000000200000105000000015301060000000201420107000000010001080000000200000109000000133c6d406578616d706c652e696e76616c69643e010a00000008000001a3185c5000010b000000020001010c0000000162010d0000000100010e000000020000010f00000000";
@@ -27,6 +27,13 @@ const GOLDEN_MANIFEST_SHA256: &str =
 const GOLDEN_AUTHORIZATION_HEX: &str = "4b49524a452d415554484f52495a4154494f4e2d56310000110001000000207777777777777777777777777777777777777777777777777777777777777777000200000002000100030000000200010004000000103333333333334333833333333333333300050000001011111111111141118111111111111111000600000010222222222222422282222222222222220007000000209ee6725292cf57770f72d576ca34cecbd0c6775792de23a3a30a3350219d50a400080000002033333333333333333333333333333333333333333333333333333333333333330009000000204444444444444444444444444444444444444444444444444444444444444444000a000000205555555555555555555555555555555555555555555555555555555555555555000b000000206666666666666666666666666666666666666666666666666666666666666666000c000000080000000000000007000d0000001055555555555545558555555555555555000e000000208888888888888888888888888888888888888888888888888888888888888888000f00000008000001a3185c5000001000000008000001a3186a0ba000110000003800010000000000304b49524a452d4546464543542d5631000002000100000010444444444444444484444444444444440002000000020001";
 const GOLDEN_CHALLENGE_ID: &str =
     "ec781b17b5220460048f63bac55b8ab0149c5377ba4dc25d28e66f217766941e";
+
+trait AmbiguousIfDebug<A> {
+    fn marker() {}
+}
+
+impl<T: ?Sized> AmbiguousIfDebug<()> for T {}
+impl<T: ?Sized + std::fmt::Debug> AmbiguousIfDebug<u8> for T {}
 
 fn digest(byte: u8) -> Sha256Digest {
     Sha256Digest::from_bytes([byte; 32])
@@ -1138,7 +1145,7 @@ fn authorization_transcript_is_derived_from_manifest_and_has_golden_bytes() {
         AuthorizationContext {
             owner_realm: OwnerRealmId::from_bytes([0x77; 32]),
             trust_bundle_sha256: digest(0x55),
-            owner_key_id: digest(0x66),
+            signer_key_id: digest(0x66),
             trust_epoch: NonZeroU64::new(7).unwrap(),
             grant_id: id::<AuthorizationGrantId>("55555555-5555-4555-8555-555555555555"),
             nonce: [0x88; 32],
@@ -1147,16 +1154,148 @@ fn authorization_transcript_is_derived_from_manifest_and_has_golden_bytes() {
         },
     )
     .unwrap();
-    assert_eq!(hex(&payload.canonical_bytes()), GOLDEN_AUTHORIZATION_HEX);
+    assert_eq!(hex(payload.canonical_bytes()), GOLDEN_AUTHORIZATION_HEX);
     assert_eq!(payload.challenge_id().to_string(), GOLDEN_CHALLENGE_ID);
     assert_eq!(
-        AuthorizationPayload::parse(&payload.canonical_bytes()).unwrap(),
+        AuthorizationPayload::parse(payload.canonical_bytes()).unwrap(),
         payload
     );
 
-    let mut trailing = payload.canonical_bytes();
+    let mut trailing = payload.canonical_bytes().to_vec();
     trailing.push(0);
     assert!(AuthorizationPayload::parse(&trailing).is_err());
+}
+
+#[test]
+fn authorization_payload_exposes_one_borrowed_sealed_snapshot() {
+    let manifest = manifest();
+    assert!(matches!(manifest.payload(), ManifestPayload::SendSubmit(_)));
+    let payload = AuthorizationPayload::new(
+        &manifest,
+        AuthorizationContext {
+            owner_realm: OwnerRealmId::from_bytes([0x77; 32]),
+            trust_bundle_sha256: digest(0x55),
+            signer_key_id: digest(0x66),
+            trust_epoch: NonZeroU64::new(7).unwrap(),
+            grant_id: id::<AuthorizationGrantId>("55555555-5555-4555-8555-555555555555"),
+            nonce: [0x88; 32],
+            issued_at_unix_ms: 1_800_000_000_000,
+            expires_at_unix_ms: 1_800_000_900_000,
+        },
+    )
+    .unwrap();
+
+    let snapshot: AuthorizationPayloadSnapshot<'_> = payload.snapshot();
+    assert_eq!(snapshot.owner_realm(), OwnerRealmId::from_bytes([0x77; 32]));
+    assert_eq!(snapshot.action(), SensitiveAction::SendSubmit);
+    assert_eq!(snapshot.target_kind(), TargetKind::Operation);
+    assert_eq!(snapshot.target_kind().code(), 1);
+    assert_eq!(
+        snapshot.target_bytes(),
+        &[
+            0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x43, 0x33, 0x83, 0x33, 0x33, 0x33, 0x33, 0x33,
+            0x33, 0x33
+        ]
+    );
+    assert_eq!(
+        snapshot.target_display().as_str(),
+        "33333333-3333-4333-8333-333333333333"
+    );
+    assert_eq!(
+        snapshot.store_id(),
+        Some(id("11111111-1111-4111-8111-111111111111"))
+    );
+    assert_eq!(
+        snapshot.account_id(),
+        Some(id("22222222-2222-4222-8222-222222222222"))
+    );
+    assert_eq!(snapshot.manifest_sha256(), manifest.sha256());
+    assert_eq!(snapshot.binding_sha256(), Some(digest(0x33)));
+    assert_eq!(snapshot.policy_sha256(), Some(digest(0x44)));
+    assert_eq!(snapshot.bundle_sha256(), digest(0x55));
+    assert_eq!(snapshot.signer_key_id(), digest(0x66));
+    assert_eq!(snapshot.trust_epoch(), NonZeroU64::new(7).unwrap());
+    assert_eq!(
+        snapshot.grant_id(),
+        id::<AuthorizationGrantId>("55555555-5555-4555-8555-555555555555")
+    );
+    assert_eq!(snapshot.nonce(), &[0x88; 32]);
+    assert_eq!(snapshot.issued_at_unix_ms(), 1_800_000_000_000);
+    assert_eq!(snapshot.expires_at_unix_ms(), 1_800_000_900_000);
+    assert_eq!(snapshot.canonical_bytes(), payload.canonical_bytes());
+
+    let effect: AuthorizationEffectSnapshot = snapshot.effect().unwrap();
+    assert_eq!(
+        effect.effect_id(),
+        id::<RemoteEffectId>("44444444-4444-4444-8444-444444444444")
+    );
+    assert_eq!(effect.ordinal(), 0);
+    assert_eq!(effect.kind(), EffectKind::SmtpSubmit);
+    assert_eq!(effect.kind().code(), 1);
+}
+
+#[test]
+fn proof_codec_has_golden_bytes_digest_roundtrip_and_private_surface() {
+    let proof = AuthorizationProof::new(digest(0x11), digest(0x22), digest(0x33), [0x44; 64]);
+    let canonical = proof.canonical_bytes();
+    let expected_hex = concat!(
+        "4b49524a452d415554484f52495a4154494f4e2d50524f4f462d5631000004",
+        "0001000000201111111111111111111111111111111111111111111111111111111111111111",
+        "0002000000202222222222222222222222222222222222222222222222222222222222222222",
+        "0003000000203333333333333333333333333333333333333333333333333333333333333333",
+        "0004000000404444444444444444444444444444444444444444444444444444444444444444",
+        "4444444444444444444444444444444444444444444444444444444444444444"
+    );
+    assert_eq!(hex(canonical), expected_hex);
+    assert_eq!(proof.contract_version(), "kirje.authorization-proof.v1");
+    assert_eq!(proof.challenge_id(), digest(0x11));
+    assert_eq!(proof.key_id(), digest(0x22));
+    assert_eq!(proof.signing_payload_sha256(), digest(0x33));
+    assert_eq!(proof.signature_bytes().unwrap(), [0x44; 64]);
+    assert_eq!(proof.proof_sha256(), Sha256Digest::digest(canonical));
+    assert!(AuthorizationProof::parse_canonical(canonical).unwrap() == proof);
+
+    let serialized = serde_json::to_value(&proof).unwrap();
+    assert_eq!(
+        serialized["contract_version"],
+        "kirje.authorization-proof.v1"
+    );
+    assert!(serde_json::from_value::<AuthorizationProof>(serialized).unwrap() == proof);
+
+    for marker in [0x11_u8, 0x22, 0x33, 0x44] {
+        let mut changed = canonical.to_vec();
+        let offset = changed.iter().position(|byte| *byte == marker).unwrap();
+        changed[offset] ^= 1;
+        let parsed = AuthorizationProof::parse_canonical(&changed).unwrap();
+        assert!(parsed != proof);
+        assert_ne!(parsed.proof_sha256(), proof.proof_sha256());
+    }
+    let mut wrong_domain = canonical.to_vec();
+    wrong_domain[0] ^= 1;
+    assert!(AuthorizationProof::parse_canonical(&wrong_domain).is_err());
+    let mut wrong_tag = canonical.to_vec();
+    let first_tag = b"KIRJE-AUTHORIZATION-PROOF-V1\0".len() + 2;
+    wrong_tag[first_tag + 1] = 2;
+    assert!(AuthorizationProof::parse_canonical(&wrong_tag).is_err());
+    let mut wrong_length = canonical.to_vec();
+    wrong_length[first_tag + 5] = 31;
+    assert!(AuthorizationProof::parse_canonical(&wrong_length).is_err());
+    let mut trailing = canonical.to_vec();
+    trailing.push(0);
+    assert!(AuthorizationProof::parse_canonical(&trailing).is_err());
+
+    let mut wrong_version = serde_json::to_value(&proof).unwrap();
+    wrong_version["contract_version"] = "kirje.authorization-proof.v2".into();
+    assert!(serde_json::from_value::<AuthorizationProof>(wrong_version).is_err());
+    let mut unknown = serde_json::to_value(&proof).unwrap();
+    unknown["extra"] = true.into();
+    assert!(serde_json::from_value::<AuthorizationProof>(unknown).is_err());
+    let mut padded = serde_json::to_value(&proof).unwrap();
+    padded["signature_base64url"] =
+        format!("{}=", padded["signature_base64url"].as_str().unwrap()).into();
+    assert!(serde_json::from_value::<AuthorizationProof>(padded).is_err());
+
+    let _ = <AuthorizationProof as AmbiguousIfDebug<_>>::marker;
 }
 
 #[test]

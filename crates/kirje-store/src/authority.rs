@@ -8,10 +8,14 @@ use std::{
 #[cfg(feature = "test-support")]
 use std::sync::{Arc, Barrier, Mutex};
 
+use chrono::{DateTime, SecondsFormat, TimeZone as _, Utc};
 use directories::ProjectDirs;
 use kirje_core::{
-    JournalId, MailError, MailErrorCode, OwnerKeyRole, OwnerPublicKey, OwnerRealmId, Sha256Digest,
-    owner_key_id,
+    ActionManifest, AuthorizationGrantId, AuthorizationPayload, AuthorizationProof,
+    AuthorizationReceiptId, AuthorizationReceiptProjection, AuthorizationReceiptState, JournalId,
+    MailError, MailErrorCode, ManifestPayload, OwnerKeyRole, OwnerPublicKey, OwnerRealmId,
+    SensitiveAction, Sha256Digest, StoreEnrollmentState, TargetKind, TrustPermissionMask,
+    owner_key_id, verify_authorization_signature,
 };
 use rusqlite::{
     Connection, OpenFlags, OptionalExtension as _, Transaction, TransactionBehavior, params,
@@ -26,6 +30,9 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const CLOCK_ROLLBACK_TOLERANCE_MS: i64 = 30_000;
 const TRUST_BUNDLE_DOMAIN: &[u8] = b"KIRJE-TRUST-BUNDLE-V1\0";
 const EVENT_DETAIL_DOMAIN: &[u8] = b"KIRJE-AUTHORITY-EVENT-DETAIL-V1\0";
+const AUTHORIZATION_CONTEXT_DOMAIN: &[u8] = b"KIRJE-AUTHORIZATION-CONTEXT-V1\0";
+const AUTHORIZATION_RECEIPT_DOMAIN: &[u8] = b"KIRJE-AUTHORIZATION-RECEIPT-V1\0";
+const AUTHORIZATION_LIFETIME_MS: i64 = 900_000;
 
 const TABLES: [&str; 17] = [
     "account_transitions",
@@ -46,12 +53,13 @@ const TABLES: [&str; 17] = [
     "remote_effects",
     "trust_epochs",
 ];
-const INDEXES: [&str; 14] = [
+const INDEXES: [&str; 15] = [
     "account_transitions_account_state",
     "account_transitions_store_state",
     "authority_events_entity_sequence",
     "authority_keys_one_active_role",
     "authority_keys_one_staged_role",
+    "authorization_challenges_context_created_sequence",
     "authorization_challenges_one_pending_context",
     "authorization_challenges_state_epoch_expiry",
     "authorization_receipts_epoch_expiry",
@@ -146,6 +154,69 @@ pub struct BootstrapSnapshot {
     pub trust_bundle_sha256: Sha256Digest,
     pub journal_location_sha256: JournalLocationDigest,
     pub anchor: AnchorSnapshot,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct CreateChallengeRequest {
+    pub manifest: ActionManifest,
+    pub observed_at_unix_ms: i64,
+    pub expires_at_unix_ms: i64,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct VerifyProofRequest {
+    pub proof: AuthorizationProof,
+    pub observed_at_unix_ms: i64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ChallengeReview {
+    pub bounded: bool,
+    pub authoritative: bool,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct AuthorizationChallengeExport {
+    pub contract_version: String,
+    pub challenge_id: Sha256Digest,
+    pub action: SensitiveAction,
+    pub target_kind: TargetKind,
+    pub target_id: String,
+    pub key_id: Sha256Digest,
+    pub trust_epoch: NonZeroU64,
+    pub issued_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+    pub manifest_sha256: Sha256Digest,
+    pub signing_payload_sha256: Sha256Digest,
+    pub signing_payload_base64url: String,
+    pub manifest_base64url: String,
+    pub review: ChallengeReview,
+}
+
+impl AuthorizationChallengeExport {
+    /// Render the one explicit owner-facing signing artifact.
+    #[must_use]
+    pub fn to_json_value(&self) -> serde_json::Value {
+        serde_json::json!({
+            "contract_version": self.contract_version,
+            "challenge_id": self.challenge_id,
+            "action": self.action,
+            "target_kind": self.target_kind,
+            "target_id": self.target_id,
+            "key_id": self.key_id,
+            "trust_epoch": self.trust_epoch,
+            "issued_at": self.issued_at.to_rfc3339_opts(SecondsFormat::Millis, true),
+            "expires_at": self.expires_at.to_rfc3339_opts(SecondsFormat::Millis, true),
+            "manifest_sha256": self.manifest_sha256,
+            "signing_payload_sha256": self.signing_payload_sha256,
+            "signing_payload_base64url": self.signing_payload_base64url,
+            "manifest_base64url": self.manifest_base64url,
+            "review": {
+                "bounded": self.review.bounded,
+                "authoritative": self.review.authoritative,
+            },
+        })
+    }
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -266,6 +337,38 @@ impl IsolatedAuthorityHome {
         self.test_hooks.prepare_retry = Some(TestPause { reached, resume });
         self
     }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_authority_fault(mut self, fault: AuthorityFaultPoint) -> Self {
+        self.test_hooks.fault = Some(fault);
+        self
+    }
+}
+
+#[cfg(feature = "test-support")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AuthorityFaultPoint {
+    OldChallengeExpiredState,
+    OldChallengeExpiredEvent,
+    ChallengeInserted,
+    ChallengeClockUpdated,
+    ChallengeCreatedEventAppended,
+    ChallengeCreatedEvent,
+    ChallengeBeforeCommit,
+    ChallengeAfterCommit,
+    ReceiptInserted,
+    NonceInserted,
+    AuthorizedStateUpdated,
+    ProofClockUpdated,
+    AuthorizationEvent,
+    ProofBeforeCommit,
+    ProofAfterCommit,
+    ExpiredStateUpdated,
+    ExpiryClockUpdated,
+    ExpiryEvent,
+    ExpiryBeforeCommit,
+    ExpiryAfterCommit,
 }
 
 #[derive(Clone, Default)]
@@ -274,6 +377,8 @@ struct AuthorityTestHooks {
     open_snapshot: Option<TestPause>,
     #[cfg(feature = "test-support")]
     prepare_retry: Option<TestPause>,
+    #[cfg(feature = "test-support")]
+    fault: Option<AuthorityFaultPoint>,
 }
 
 #[cfg(feature = "test-support")]
@@ -297,6 +402,67 @@ impl AuthorityTestHooks {
         if let Some(pause) = &self.prepare_retry {
             pause.reached.wait();
             pause.resume.wait();
+        }
+    }
+
+    fn fault(&self, point: TestFaultPoint) -> Result<(), MailError> {
+        #[cfg(feature = "test-support")]
+        if self.fault == Some(point.into()) {
+            return Err(store_write_error());
+        }
+        let _ = point;
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy)]
+enum TestFaultPoint {
+    OldChallengeExpiredState,
+    OldChallengeExpiredEvent,
+    ChallengeInserted,
+    ChallengeClockUpdated,
+    ChallengeCreatedEventAppended,
+    ChallengeCreatedEvent,
+    ChallengeBeforeCommit,
+    ChallengeAfterCommit,
+    ReceiptInserted,
+    NonceInserted,
+    AuthorizedStateUpdated,
+    ProofClockUpdated,
+    AuthorizationEvent,
+    ProofBeforeCommit,
+    ProofAfterCommit,
+    ExpiredStateUpdated,
+    ExpiryClockUpdated,
+    ExpiryEvent,
+    ExpiryBeforeCommit,
+    ExpiryAfterCommit,
+}
+
+#[cfg(feature = "test-support")]
+impl From<TestFaultPoint> for AuthorityFaultPoint {
+    fn from(value: TestFaultPoint) -> Self {
+        match value {
+            TestFaultPoint::OldChallengeExpiredState => Self::OldChallengeExpiredState,
+            TestFaultPoint::OldChallengeExpiredEvent => Self::OldChallengeExpiredEvent,
+            TestFaultPoint::ChallengeInserted => Self::ChallengeInserted,
+            TestFaultPoint::ChallengeClockUpdated => Self::ChallengeClockUpdated,
+            TestFaultPoint::ChallengeCreatedEventAppended => Self::ChallengeCreatedEventAppended,
+            TestFaultPoint::ChallengeCreatedEvent => Self::ChallengeCreatedEvent,
+            TestFaultPoint::ChallengeBeforeCommit => Self::ChallengeBeforeCommit,
+            TestFaultPoint::ChallengeAfterCommit => Self::ChallengeAfterCommit,
+            TestFaultPoint::ReceiptInserted => Self::ReceiptInserted,
+            TestFaultPoint::NonceInserted => Self::NonceInserted,
+            TestFaultPoint::AuthorizedStateUpdated => Self::AuthorizedStateUpdated,
+            TestFaultPoint::ProofClockUpdated => Self::ProofClockUpdated,
+            TestFaultPoint::AuthorizationEvent => Self::AuthorizationEvent,
+            TestFaultPoint::ProofBeforeCommit => Self::ProofBeforeCommit,
+            TestFaultPoint::ProofAfterCommit => Self::ProofAfterCommit,
+            TestFaultPoint::ExpiredStateUpdated => Self::ExpiredStateUpdated,
+            TestFaultPoint::ExpiryClockUpdated => Self::ExpiryClockUpdated,
+            TestFaultPoint::ExpiryEvent => Self::ExpiryEvent,
+            TestFaultPoint::ExpiryBeforeCommit => Self::ExpiryBeforeCommit,
+            TestFaultPoint::ExpiryAfterCommit => Self::ExpiryAfterCommit,
         }
     }
 }
@@ -580,6 +746,392 @@ impl AuthorityStore {
         Ok(loaded.snapshot)
     }
 
+    /// Persist or exactly recover one bounded owner-signing challenge.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable authorization, clock, recovery, store, or schema error.
+    #[allow(clippy::too_many_lines, clippy::needless_pass_by_value)]
+    pub fn create_challenge(
+        &self,
+        request: CreateChallengeRequest,
+    ) -> Result<AuthorizationChallengeExport, MailError> {
+        validate_challenge_request(&request)?;
+        if !matches!(self.state, AuthorityOpenState::Ready(_)) {
+            return Err(recovery_error());
+        }
+        let reparsed = ActionManifest::parse(request.manifest.canonical_bytes())?;
+        if reparsed != request.manifest || reparsed.sha256() != request.manifest.sha256() {
+            return Err(recovery_error());
+        }
+        ensure_t202b_action(request.manifest.action())?;
+
+        let _apply_lock = acquire_apply_lock(&self.home)?;
+        if !authority_database_exists(&self.home.database)? {
+            return Err(recovery_error());
+        }
+        let mut connection = existing_authority_read_connection(&self.home.database)?;
+        if classify_database(&connection)? != DatabaseClass::AuthorityV1 {
+            return Err(recovery_error());
+        }
+        configure_authority_pragmas(&connection)?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| store_write_error())?;
+        let loaded = self.validate_ready_transaction(&transaction)?;
+        let effective_time = checked_clock(loaded.last_observed_at, request.observed_at_unix_ms)?;
+        utc_millis(effective_time)?;
+        validate_supported_manifest(&transaction, &loaded.snapshot, &request.manifest)?;
+
+        let signer_key_id = match request.manifest.action().policy().required_role {
+            OwnerKeyRole::Owner => loaded.snapshot.owner_key_id,
+            OwnerKeyRole::Recovery => loaded.snapshot.recovery_key_id,
+        };
+        let manifest_snapshot = request.manifest.context();
+        let context_sha256 = authorization_context_digest(
+            request.manifest.action(),
+            request.manifest.context().target.kind(),
+            &request.manifest.context().target.canonical_bytes(),
+            manifest_snapshot.store_id,
+            manifest_snapshot.account_id,
+            request.manifest.sha256(),
+            manifest_snapshot.account_binding_sha256,
+            manifest_snapshot.policy_sha256,
+            signer_key_id,
+            loaded.snapshot.minimum_epoch,
+            loaded.snapshot.trust_bundle_sha256,
+        );
+
+        if let Some(existing) = load_pending_challenge(&transaction, context_sha256)? {
+            if effective_time <= existing.expires_at {
+                observe_clock_pair(&transaction, effective_time)?;
+                transaction.commit().map_err(|_| store_write_error())?;
+                secure_authority_files(&self.home.database)?;
+                return challenge_export_from_stored(&existing);
+            }
+            let changed = transaction
+                .execute(
+                    "UPDATE authorization_challenges SET state='expired'
+                     WHERE challenge_id=?1 AND state='pending'",
+                    [existing.challenge_id.as_bytes()],
+                )
+                .map_err(|_| store_write_error())?;
+            if changed != 1 {
+                return Err(recovery_error());
+            }
+            self.test_hooks
+                .fault(TestFaultPoint::OldChallengeExpiredState)?;
+            insert_challenge_event(
+                &transaction,
+                &existing,
+                ChallengeEvent::Expired,
+                None,
+                effective_time,
+            )?;
+            self.test_hooks
+                .fault(TestFaultPoint::OldChallengeExpiredEvent)?;
+        }
+
+        validate_requested_expiry(effective_time, request.expires_at_unix_ms)?;
+
+        let mut grant_bytes = [0_u8; 16];
+        let mut nonce = [0_u8; 32];
+        self.entropy.fill(&mut grant_bytes)?;
+        make_uuid_v4(&mut grant_bytes);
+        self.entropy.fill(&mut nonce)?;
+        let grant_id = AuthorizationGrantId::try_from(Uuid::from_bytes(grant_bytes))?;
+        let payload = AuthorizationPayload::new(
+            &request.manifest,
+            kirje_core::AuthorizationContext {
+                owner_realm: loaded.snapshot.realm_id,
+                trust_bundle_sha256: loaded.snapshot.trust_bundle_sha256,
+                signer_key_id,
+                trust_epoch: loaded.snapshot.minimum_epoch,
+                grant_id,
+                nonce,
+                issued_at_unix_ms: effective_time,
+                expires_at_unix_ms: request.expires_at_unix_ms,
+            },
+        )?;
+        let snapshot = payload.snapshot();
+        let inserted = transaction
+            .execute(
+                "INSERT INTO authorization_challenges
+                 (challenge_id,grant_id,action,target_kind,target_id,store_id,account_id,
+                  context_sha256,manifest,manifest_sha256,signing_payload,signing_sha256,
+                  key_id,trust_epoch,bundle_sha256,binding_sha256,policy_sha256,nonce,
+                  issued_at,expires_at,state,invalidated_at)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,
+                        ?16,?17,?18,?19,?20,'pending',NULL)",
+                params![
+                    payload.challenge_id().as_bytes(),
+                    snapshot.grant_id().as_bytes(),
+                    i64::from(snapshot.action().code()),
+                    i64::from(snapshot.target_kind().code()),
+                    snapshot.target_bytes(),
+                    snapshot.store_id().map(|value| value.as_bytes().to_vec()),
+                    snapshot.account_id().map(|value| value.as_bytes().to_vec()),
+                    context_sha256.as_bytes(),
+                    request.manifest.canonical_bytes(),
+                    snapshot.manifest_sha256().as_bytes(),
+                    snapshot.canonical_bytes(),
+                    payload.challenge_id().as_bytes(),
+                    snapshot.signer_key_id().as_bytes(),
+                    i64::try_from(snapshot.trust_epoch().get()).map_err(|_| recovery_error())?,
+                    snapshot.bundle_sha256().as_bytes(),
+                    snapshot
+                        .binding_sha256()
+                        .map(|value| value.as_bytes().to_vec()),
+                    snapshot
+                        .policy_sha256()
+                        .map(|value| value.as_bytes().to_vec()),
+                    snapshot.nonce(),
+                    snapshot.issued_at_unix_ms(),
+                    snapshot.expires_at_unix_ms(),
+                ],
+            )
+            .map_err(|_| store_write_error())?;
+        if inserted != 1 {
+            return Err(store_write_error());
+        }
+        self.test_hooks.fault(TestFaultPoint::ChallengeInserted)?;
+        observe_clock_pair(&transaction, effective_time)?;
+        self.test_hooks
+            .fault(TestFaultPoint::ChallengeClockUpdated)?;
+        let unlinked = load_unlinked_challenge(&transaction, payload.challenge_id())?;
+        let created_event_sequence = insert_challenge_event(
+            &transaction,
+            &unlinked,
+            ChallengeEvent::Created,
+            None,
+            effective_time,
+        )?;
+        self.test_hooks
+            .fault(TestFaultPoint::ChallengeCreatedEventAppended)?;
+        let linked = transaction
+            .execute(
+                "UPDATE authorization_challenges SET created_event_sequence=?1
+                 WHERE challenge_id=?2 AND created_event_sequence IS NULL",
+                params![created_event_sequence, payload.challenge_id().as_bytes()],
+            )
+            .map_err(|_| store_write_error())?;
+        if linked != 1 {
+            return Err(recovery_error());
+        }
+        self.test_hooks
+            .fault(TestFaultPoint::ChallengeCreatedEvent)?;
+        let stored = load_challenge(&transaction, payload.challenge_id())?;
+        self.test_hooks
+            .fault(TestFaultPoint::ChallengeBeforeCommit)?;
+        transaction.commit().map_err(|_| store_write_error())?;
+        secure_authority_files(&self.home.database)?;
+        self.test_hooks
+            .fault(TestFaultPoint::ChallengeAfterCommit)?;
+        challenge_export_from_stored(&stored)
+    }
+
+    /// Verify one detached proof or exactly recover its immutable receipt.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable malformed, replay, expiry, signature, recovery, clock, or store error.
+    #[allow(clippy::too_many_lines, clippy::needless_pass_by_value)]
+    pub fn verify_proof(
+        &self,
+        request: VerifyProofRequest,
+    ) -> Result<AuthorizationReceiptProjection, MailError> {
+        validate_proof_request(&request)?;
+        if !matches!(self.state, AuthorityOpenState::Ready(_)) {
+            return Err(recovery_error());
+        }
+        let _apply_lock = acquire_apply_lock(&self.home)?;
+        if !authority_database_exists(&self.home.database)? {
+            return Err(recovery_error());
+        }
+        let mut connection = existing_authority_read_connection(&self.home.database)?;
+        if classify_database(&connection)? != DatabaseClass::AuthorityV1 {
+            return Err(recovery_error());
+        }
+        configure_authority_pragmas(&connection)?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| store_write_error())?;
+        let loaded = self.validate_ready_transaction(&transaction)?;
+        let challenge = load_challenge(&transaction, request.proof.challenge_id())?;
+        let effective_time = checked_clock(loaded.last_observed_at, request.observed_at_unix_ms)?;
+        utc_millis(effective_time)?;
+
+        if let Some(receipt) = load_receipt_for_challenge(&transaction, challenge.challenge_id)? {
+            if receipt.canonical_proof != request.proof.canonical_bytes() {
+                return Err(authorization_replayed_error());
+            }
+            observe_clock_pair(&transaction, effective_time)?;
+            transaction.commit().map_err(|_| store_write_error())?;
+            secure_authority_files(&self.home.database)?;
+            return receipt_projection(&challenge, &receipt, effective_time);
+        }
+
+        match challenge.state.as_str() {
+            "expired" => {
+                observe_clock_pair(&transaction, effective_time)?;
+                transaction.commit().map_err(|_| store_write_error())?;
+                secure_authority_files(&self.home.database)?;
+                return Err(authorization_expired_error());
+            }
+            "pending" => {}
+            _ => return Err(recovery_error()),
+        }
+        if effective_time > challenge.expires_at {
+            let changed = transaction
+                .execute(
+                    "UPDATE authorization_challenges SET state='expired'
+                     WHERE challenge_id=?1 AND state='pending'",
+                    [challenge.challenge_id.as_bytes()],
+                )
+                .map_err(|_| store_write_error())?;
+            if changed != 1 {
+                return Err(recovery_error());
+            }
+            self.test_hooks.fault(TestFaultPoint::ExpiredStateUpdated)?;
+            observe_clock_pair(&transaction, effective_time)?;
+            self.test_hooks.fault(TestFaultPoint::ExpiryClockUpdated)?;
+            insert_challenge_event(
+                &transaction,
+                &challenge,
+                ChallengeEvent::Expired,
+                None,
+                effective_time,
+            )?;
+            self.test_hooks.fault(TestFaultPoint::ExpiryEvent)?;
+            self.test_hooks.fault(TestFaultPoint::ExpiryBeforeCommit)?;
+            transaction.commit().map_err(|_| store_write_error())?;
+            secure_authority_files(&self.home.database)?;
+            self.test_hooks.fault(TestFaultPoint::ExpiryAfterCommit)?;
+            return Err(authorization_expired_error());
+        }
+        validate_first_proof(&loaded.snapshot, &challenge, &request.proof)?;
+
+        let mut receipt_bytes = [0_u8; 16];
+        self.entropy.fill(&mut receipt_bytes)?;
+        make_uuid_v4(&mut receipt_bytes);
+        let receipt_id = AuthorizationReceiptId::try_from(Uuid::from_bytes(receipt_bytes))?;
+        let proof_sha256 = request.proof.proof_sha256();
+        let receipt = authorization_receipt(receipt_id, &challenge, proof_sha256, effective_time);
+        let receipt_sha256 = Sha256Digest::digest(&receipt);
+        transaction
+            .execute(
+                "INSERT INTO authorization_receipts
+                 (receipt_id,challenge_id,grant_id,proof_sha256,key_id,signature,
+                  canonical_proof,manifest_sha256,signing_sha256,trust_epoch,bundle_sha256,
+                  receipt,receipt_sha256,verified_at,expires_at)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+                params![
+                    receipt_id.as_bytes(),
+                    challenge.challenge_id.as_bytes(),
+                    challenge.grant_id.as_bytes(),
+                    proof_sha256.as_bytes(),
+                    challenge.key_id.as_bytes(),
+                    request.proof.signature_bytes()?.as_slice(),
+                    request.proof.canonical_bytes(),
+                    challenge.manifest_sha256.as_bytes(),
+                    challenge.signing_sha256.as_bytes(),
+                    i64::try_from(challenge.trust_epoch.get()).map_err(|_| recovery_error())?,
+                    challenge.bundle_sha256.as_bytes(),
+                    &receipt,
+                    receipt_sha256.as_bytes(),
+                    effective_time,
+                    challenge.expires_at,
+                ],
+            )
+            .map_err(|_| store_write_error())?;
+        self.test_hooks.fault(TestFaultPoint::ReceiptInserted)?;
+        transaction
+            .execute(
+                "INSERT INTO nonce_uses(nonce,challenge_id,receipt_id,consumed_at)
+                 VALUES(?1,?2,?3,?4)",
+                params![
+                    &challenge.nonce,
+                    challenge.challenge_id.as_bytes(),
+                    receipt_id.as_bytes(),
+                    effective_time,
+                ],
+            )
+            .map_err(|_| store_write_error())?;
+        self.test_hooks.fault(TestFaultPoint::NonceInserted)?;
+        let changed = transaction
+            .execute(
+                "UPDATE authorization_challenges SET state='authorized'
+                 WHERE challenge_id=?1 AND state='pending'",
+                [challenge.challenge_id.as_bytes()],
+            )
+            .map_err(|_| store_write_error())?;
+        if changed != 1 {
+            return Err(recovery_error());
+        }
+        self.test_hooks
+            .fault(TestFaultPoint::AuthorizedStateUpdated)?;
+        observe_clock_pair(&transaction, effective_time)?;
+        self.test_hooks.fault(TestFaultPoint::ProofClockUpdated)?;
+        let stored_receipt = StoredReceipt {
+            receipt_id,
+            challenge_id: challenge.challenge_id,
+            grant_id: challenge.grant_id,
+            proof_sha256,
+            key_id: challenge.key_id,
+            signature: request.proof.signature_bytes()?,
+            canonical_proof: request.proof.canonical_bytes().to_vec(),
+            manifest_sha256: challenge.manifest_sha256,
+            signing_sha256: challenge.signing_sha256,
+            trust_epoch: challenge.trust_epoch,
+            bundle_sha256: challenge.bundle_sha256,
+            receipt,
+            receipt_sha256,
+            verified_at: effective_time,
+            expires_at: challenge.expires_at,
+        };
+        insert_challenge_event(
+            &transaction,
+            &challenge,
+            ChallengeEvent::Authorized,
+            Some(&stored_receipt),
+            effective_time,
+        )?;
+        self.test_hooks.fault(TestFaultPoint::AuthorizationEvent)?;
+        self.test_hooks.fault(TestFaultPoint::ProofBeforeCommit)?;
+        transaction.commit().map_err(|_| store_write_error())?;
+        secure_authority_files(&self.home.database)?;
+        self.test_hooks.fault(TestFaultPoint::ProofAfterCommit)?;
+        receipt_projection(&challenge, &stored_receipt, effective_time)
+    }
+
+    fn validate_ready_transaction(
+        &self,
+        transaction: &Transaction<'_>,
+    ) -> Result<LoadedSnapshot, MailError> {
+        if classify_database(transaction)? != DatabaseClass::AuthorityV1 {
+            return Err(recovery_error());
+        }
+        ensure_usable_schema(transaction)?;
+        if staged_count(transaction)? != 0 {
+            return Err(recovery_error());
+        }
+        let loaded = load_snapshot(transaction, &AuthorityTestHooks::default())?;
+        let AuthorityOpenState::Ready(opened) = &self.state else {
+            return Err(recovery_error());
+        };
+        let AnchorPresence::Present(anchor) = &self.context.anchor else {
+            return Err(recovery_error());
+        };
+        if loaded.bootstrap_state != "ready"
+            || &loaded.snapshot != opened
+            || anchor != &loaded.snapshot.anchor
+            || loaded.snapshot.journal_location_sha256 != self.context.journal_location_sha256
+        {
+            return Err(recovery_error());
+        }
+        Ok(loaded)
+    }
+
     fn bootstrap_snapshot(&self, input: &BootstrapInput) -> Result<BootstrapSnapshot, MailError> {
         let mut realm = [0_u8; 32];
         let mut journal = [0_u8; 16];
@@ -642,6 +1194,764 @@ struct LoadedSnapshot {
     snapshot: BootstrapSnapshot,
     bootstrap_state: String,
     last_observed_at: i64,
+}
+
+struct StoredChallenge {
+    challenge_id: Sha256Digest,
+    grant_id: AuthorizationGrantId,
+    action: SensitiveAction,
+    target_kind_code: u16,
+    target_id: Vec<u8>,
+    store_id: Option<kirje_core::StoreId>,
+    account_id: Option<kirje_core::AccountId>,
+    context_sha256: Sha256Digest,
+    manifest: Vec<u8>,
+    manifest_sha256: Sha256Digest,
+    signing_payload: Vec<u8>,
+    signing_sha256: Sha256Digest,
+    key_id: Sha256Digest,
+    trust_epoch: NonZeroU64,
+    bundle_sha256: Sha256Digest,
+    binding_sha256: Option<Sha256Digest>,
+    policy_sha256: Option<Sha256Digest>,
+    nonce: [u8; 32],
+    issued_at: i64,
+    expires_at: i64,
+    state: String,
+    invalidated_at: Option<i64>,
+    created_event_sequence: i64,
+}
+
+struct StoredReceipt {
+    receipt_id: AuthorizationReceiptId,
+    challenge_id: Sha256Digest,
+    grant_id: AuthorizationGrantId,
+    proof_sha256: Sha256Digest,
+    key_id: Sha256Digest,
+    signature: [u8; 64],
+    canonical_proof: Vec<u8>,
+    manifest_sha256: Sha256Digest,
+    signing_sha256: Sha256Digest,
+    trust_epoch: NonZeroU64,
+    bundle_sha256: Sha256Digest,
+    receipt: Vec<u8>,
+    receipt_sha256: Sha256Digest,
+    verified_at: i64,
+    expires_at: i64,
+}
+
+fn validate_challenge_request(request: &CreateChallengeRequest) -> Result<(), MailError> {
+    if request.observed_at_unix_ms < 0 || request.expires_at_unix_ms < 0 {
+        return Err(MailError::invalid_input(
+            "authority challenge time must be nonnegative",
+        ));
+    }
+    input_utc_millis(request.observed_at_unix_ms)?;
+    input_utc_millis(request.expires_at_unix_ms)?;
+    Ok(())
+}
+
+fn validate_requested_expiry(effective_time: i64, expires_at: i64) -> Result<(), MailError> {
+    let lifetime = expires_at
+        .checked_sub(effective_time)
+        .ok_or_else(|| MailError::invalid_input("authority challenge time overflowed"))?;
+    if lifetime <= 0 || lifetime > AUTHORIZATION_LIFETIME_MS {
+        return Err(MailError::invalid_input(
+            "authority challenge lifetime is outside the contract",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_proof_request(request: &VerifyProofRequest) -> Result<(), MailError> {
+    if request.observed_at_unix_ms < 0 {
+        return Err(MailError::invalid_input(
+            "authority observation time must be nonnegative",
+        ));
+    }
+    input_utc_millis(request.observed_at_unix_ms)?;
+    if request.proof.canonical_bytes().len() > 4_096
+        || AuthorizationProof::parse_canonical(request.proof.canonical_bytes())? != request.proof
+    {
+        return Err(MailError::stable(
+            MailErrorCode::AuthorizationMalformed,
+            "authorization proof is malformed",
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_t202b_action(action: SensitiveAction) -> Result<(), MailError> {
+    match action {
+        SensitiveAction::StoreEnroll
+        | SensitiveAction::OwnerRotate
+        | SensitiveAction::RecoveryRotate
+        | SensitiveAction::OwnerRecover => Ok(()),
+        SensitiveAction::PolicyUpdate | SensitiveAction::AssuranceUpdate => Err(MailError::stable(
+            MailErrorCode::UnsupportedCapability,
+            "authorization action is not supported",
+        )),
+        _ => Err(authorization_context_stale_error()),
+    }
+}
+
+fn validate_supported_manifest(
+    connection: &Connection,
+    authority: &BootstrapSnapshot,
+    manifest: &ActionManifest,
+) -> Result<(), MailError> {
+    match manifest.payload() {
+        ManifestPayload::StoreEnroll(value) => {
+            if value.expected_store_state != StoreEnrollmentState::Unregistered {
+                return Err(authorization_context_stale_error());
+            }
+            let count: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM registered_stores WHERE store_id=?1",
+                    [value.config_cas.store_id.as_bytes()],
+                    |row| row.get(0),
+                )
+                .map_err(|_| store_read_error())?;
+            if count != 0 {
+                return Err(authorization_context_stale_error());
+            }
+        }
+        ManifestPayload::OwnerRotate(value) => {
+            validate_rotation_manifest(authority, value, OwnerKeyRole::Owner)?;
+        }
+        ManifestPayload::RecoveryRotate(value) => {
+            validate_rotation_manifest(authority, value, OwnerKeyRole::Recovery)?;
+        }
+        ManifestPayload::OwnerRecover(value) => {
+            let next_epoch = authority
+                .minimum_epoch
+                .get()
+                .checked_add(1)
+                .and_then(NonZeroU64::new)
+                .ok_or_else(authorization_context_stale_error)?;
+            let owner = OwnerPublicKey::try_from(value.new_owner_key)
+                .map_err(|_| authorization_context_stale_error())?;
+            let recovery = OwnerPublicKey::try_from(value.new_recovery_key)
+                .map_err(|_| authorization_context_stale_error())?;
+            let active_owner = authority.owner_public_key.as_bytes();
+            let active_recovery = authority.recovery_public_key.as_bytes();
+            let expected_bundle = trust_bundle_digest(
+                authority.realm_id,
+                authority.journal_id,
+                next_epoch,
+                value.new_owner_id,
+                &owner,
+                value.new_recovery_id,
+                &recovery,
+            );
+            if value.journal_id != authority.journal_id
+                || value.old_epoch != authority.minimum_epoch
+                || value.new_epoch != next_epoch
+                || value.old_bundle != authority.trust_bundle_sha256
+                || value.invalidation_scope != kirje_core::InvalidationScope::All
+                || owner == recovery
+                || owner.as_bytes() == active_owner
+                || owner.as_bytes() == active_recovery
+                || recovery.as_bytes() == active_owner
+                || recovery.as_bytes() == active_recovery
+                || value.new_owner_id != owner_key_id(OwnerKeyRole::Owner, owner.as_bytes())
+                || value.new_recovery_id
+                    != owner_key_id(OwnerKeyRole::Recovery, recovery.as_bytes())
+                || value.new_bundle != expected_bundle
+            {
+                return Err(authorization_context_stale_error());
+            }
+        }
+        _ => return Err(authorization_context_stale_error()),
+    }
+    Ok(())
+}
+
+fn validate_rotation_manifest(
+    authority: &BootstrapSnapshot,
+    value: &kirje_core::TrustRotationManifest,
+    expected_role: OwnerKeyRole,
+) -> Result<(), MailError> {
+    let next_epoch = authority
+        .minimum_epoch
+        .get()
+        .checked_add(1)
+        .and_then(NonZeroU64::new)
+        .ok_or_else(authorization_context_stale_error)?;
+    let proposed = OwnerPublicKey::try_from(value.new_public_key)
+        .map_err(|_| authorization_context_stale_error())?;
+    let (old_id, old_key, permission, owner, recovery) = match expected_role {
+        OwnerKeyRole::Owner => (
+            authority.owner_key_id,
+            authority.owner_public_key.as_bytes(),
+            TrustPermissionMask::Owner,
+            proposed.clone(),
+            authority.recovery_public_key.clone(),
+        ),
+        OwnerKeyRole::Recovery => (
+            authority.recovery_key_id,
+            authority.recovery_public_key.as_bytes(),
+            TrustPermissionMask::Recovery,
+            authority.owner_public_key.clone(),
+            proposed.clone(),
+        ),
+    };
+    let expected_bundle = trust_bundle_digest(
+        authority.realm_id,
+        authority.journal_id,
+        next_epoch,
+        owner_key_id(OwnerKeyRole::Owner, owner.as_bytes()),
+        &owner,
+        owner_key_id(OwnerKeyRole::Recovery, recovery.as_bytes()),
+        &recovery,
+    );
+    if value.role != expected_role
+        || value.permissions != permission
+        || value.old_key_id != old_id
+        || value.old_public_key.as_slice() != old_key
+        || value.old_epoch != authority.minimum_epoch
+        || value.new_epoch != next_epoch
+        || value.old_bundle != authority.trust_bundle_sha256
+        || proposed.as_bytes() == authority.owner_public_key.as_bytes()
+        || proposed.as_bytes() == authority.recovery_public_key.as_bytes()
+        || value.new_key_id != owner_key_id(expected_role, proposed.as_bytes())
+        || value.new_bundle != expected_bundle
+    {
+        return Err(authorization_context_stale_error());
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn authorization_context_digest(
+    action: SensitiveAction,
+    target_kind: TargetKind,
+    target_bytes: &[u8],
+    store_id: Option<kirje_core::StoreId>,
+    account_id: Option<kirje_core::AccountId>,
+    manifest_sha256: Sha256Digest,
+    binding_sha256: Option<Sha256Digest>,
+    policy_sha256: Option<Sha256Digest>,
+    key_id: Sha256Digest,
+    trust_epoch: NonZeroU64,
+    bundle_sha256: Sha256Digest,
+) -> Sha256Digest {
+    let action = action.code().to_be_bytes();
+    let target_kind = target_kind.code().to_be_bytes();
+    let store_id = store_id
+        .map(|value| value.as_bytes().to_vec())
+        .unwrap_or_default();
+    let account_id = account_id
+        .map(|value| value.as_bytes().to_vec())
+        .unwrap_or_default();
+    let binding = binding_sha256
+        .map(|value| value.as_bytes().to_vec())
+        .unwrap_or_default();
+    let policy = policy_sha256
+        .map(|value| value.as_bytes().to_vec())
+        .unwrap_or_default();
+    let epoch = trust_epoch.get().to_be_bytes();
+    Sha256Digest::digest(&encode_transcript(
+        AUTHORIZATION_CONTEXT_DOMAIN,
+        &[
+            &action,
+            &target_kind,
+            target_bytes,
+            &store_id,
+            &account_id,
+            manifest_sha256.as_bytes(),
+            &binding,
+            &policy,
+            key_id.as_bytes(),
+            &epoch,
+            bundle_sha256.as_bytes(),
+        ],
+    ))
+}
+
+fn observe_clock_pair(transaction: &Transaction<'_>, effective: i64) -> Result<(), MailError> {
+    let changed = transaction
+        .execute(
+            "UPDATE authority_meta SET last_observed_at=?1,updated_at=?1 WHERE singleton=1",
+            [effective],
+        )
+        .map_err(|_| store_write_error())?;
+    if changed != 1 {
+        return Err(recovery_error());
+    }
+    Ok(())
+}
+
+fn make_uuid_v4(bytes: &mut [u8; 16]) {
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+}
+
+fn authorization_receipt(
+    receipt_id: AuthorizationReceiptId,
+    challenge: &StoredChallenge,
+    proof_sha256: Sha256Digest,
+    verified_at: i64,
+) -> Vec<u8> {
+    let epoch = challenge.trust_epoch.get().to_be_bytes();
+    let verified = verified_at.to_be_bytes();
+    let expires = challenge.expires_at.to_be_bytes();
+    encode_transcript(
+        AUTHORIZATION_RECEIPT_DOMAIN,
+        &[
+            receipt_id.as_bytes(),
+            challenge.challenge_id.as_bytes(),
+            challenge.grant_id.as_bytes(),
+            proof_sha256.as_bytes(),
+            challenge.key_id.as_bytes(),
+            challenge.manifest_sha256.as_bytes(),
+            challenge.signing_sha256.as_bytes(),
+            &epoch,
+            challenge.bundle_sha256.as_bytes(),
+            &verified,
+            &expires,
+        ],
+    )
+}
+
+fn load_pending_challenge(
+    connection: &Connection,
+    context_sha256: Sha256Digest,
+) -> Result<Option<StoredChallenge>, MailError> {
+    let challenge = connection
+        .query_row(
+            "SELECT challenge_id FROM authorization_challenges
+             WHERE context_sha256=?1 AND state='pending'",
+            [context_sha256.as_bytes()],
+            |row| row.get::<_, Vec<u8>>(0),
+        )
+        .optional()
+        .map_err(|_| store_read_error())?;
+    challenge
+        .map(|bytes| load_challenge(connection, digest_from_blob(&bytes)?))
+        .transpose()
+}
+
+#[allow(clippy::too_many_lines)]
+fn load_challenge(
+    connection: &Connection,
+    challenge_id: Sha256Digest,
+) -> Result<StoredChallenge, MailError> {
+    challenge_preflight(connection, Some(challenge_id))?;
+    connection
+        .query_row(
+            "SELECT challenge_id,grant_id,action,target_kind,target_id,store_id,account_id,
+                    context_sha256,manifest,manifest_sha256,signing_payload,signing_sha256,
+                    key_id,trust_epoch,bundle_sha256,binding_sha256,policy_sha256,nonce,
+                    issued_at,expires_at,state,invalidated_at,created_event_sequence
+             FROM authorization_challenges WHERE challenge_id=?1",
+            [challenge_id.as_bytes()],
+            stored_challenge_from_row,
+        )
+        .optional()
+        .map_err(|_| store_read_error())?
+        .ok_or_else(|| {
+            MailError::stable(
+                MailErrorCode::AuthorizationMalformed,
+                "authorization challenge is unknown",
+            )
+        })
+}
+
+fn load_unlinked_challenge(
+    connection: &Connection,
+    challenge_id: Sha256Digest,
+) -> Result<StoredChallenge, MailError> {
+    connection
+        .query_row(
+            "SELECT challenge_id,grant_id,action,target_kind,target_id,store_id,account_id,
+                    context_sha256,manifest,manifest_sha256,signing_payload,signing_sha256,
+                    key_id,trust_epoch,bundle_sha256,binding_sha256,policy_sha256,nonce,
+                    issued_at,expires_at,state,invalidated_at,0
+             FROM authorization_challenges
+             WHERE challenge_id=?1 AND created_event_sequence IS NULL",
+            [challenge_id.as_bytes()],
+            stored_challenge_from_row,
+        )
+        .optional()
+        .map_err(|_| store_read_error())?
+        .ok_or_else(recovery_error)
+}
+
+fn stored_challenge_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredChallenge> {
+    let action_code = row.get::<_, i64>(2)?;
+    let action_u16 = u16::try_from(action_code).map_err(|_| rusqlite::Error::InvalidQuery)?;
+    let action =
+        SensitiveAction::from_code(action_u16).map_err(|_| rusqlite::Error::InvalidQuery)?;
+    let target_kind_code =
+        u16::try_from(row.get::<_, i64>(3)?).map_err(|_| rusqlite::Error::InvalidQuery)?;
+    let trust_epoch = u64::try_from(row.get::<_, i64>(13)?)
+        .ok()
+        .and_then(NonZeroU64::new)
+        .ok_or(rusqlite::Error::InvalidQuery)?;
+    Ok(StoredChallenge {
+        challenge_id: digest_from_blob_sql(row.get::<_, Vec<u8>>(0)?)?,
+        grant_id: uuid_from_blob_sql(row.get::<_, Vec<u8>>(1)?)?,
+        action,
+        target_kind_code,
+        target_id: row.get(4)?,
+        store_id: optional_uuid_from_blob_sql(row.get(5)?)?,
+        account_id: optional_uuid_from_blob_sql(row.get(6)?)?,
+        context_sha256: digest_from_blob_sql(row.get(7)?)?,
+        manifest: row.get(8)?,
+        manifest_sha256: digest_from_blob_sql(row.get(9)?)?,
+        signing_payload: row.get(10)?,
+        signing_sha256: digest_from_blob_sql(row.get(11)?)?,
+        key_id: digest_from_blob_sql(row.get(12)?)?,
+        trust_epoch,
+        bundle_sha256: digest_from_blob_sql(row.get(14)?)?,
+        binding_sha256: optional_digest_from_blob_sql(row.get(15)?)?,
+        policy_sha256: optional_digest_from_blob_sql(row.get(16)?)?,
+        nonce: row
+            .get::<_, Vec<u8>>(17)?
+            .try_into()
+            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+        issued_at: row.get(18)?,
+        expires_at: row.get(19)?,
+        state: row.get(20)?,
+        invalidated_at: row.get(21)?,
+        created_event_sequence: row.get(22)?,
+    })
+}
+
+fn challenge_preflight(
+    connection: &Connection,
+    challenge_id: Option<Sha256Digest>,
+) -> Result<(), MailError> {
+    let malformed: i64 = if let Some(challenge_id) = challenge_id {
+        connection.query_row(
+            "SELECT COUNT(*) FROM authorization_challenges WHERE challenge_id=?1 AND (
+             typeof(challenge_id)<>'blob' OR length(challenge_id)<>32 OR
+             typeof(grant_id)<>'blob' OR length(grant_id)<>16 OR
+             typeof(action)<>'integer' OR typeof(target_kind)<>'integer' OR
+             typeof(target_id)<>'blob' OR length(target_id)>256 OR
+             (store_id IS NOT NULL AND (typeof(store_id)<>'blob' OR length(store_id)<>16)) OR
+             (account_id IS NOT NULL AND (typeof(account_id)<>'blob' OR length(account_id)<>16)) OR
+             typeof(context_sha256)<>'blob' OR length(context_sha256)<>32 OR
+             typeof(manifest)<>'blob' OR length(manifest) NOT BETWEEN 1 AND 4194304 OR
+             typeof(manifest_sha256)<>'blob' OR length(manifest_sha256)<>32 OR
+             typeof(signing_payload)<>'blob' OR length(signing_payload) NOT BETWEEN 1 AND 4194304 OR
+             typeof(signing_sha256)<>'blob' OR length(signing_sha256)<>32 OR
+             typeof(key_id)<>'blob' OR length(key_id)<>32 OR
+             typeof(trust_epoch)<>'integer' OR trust_epoch<=0 OR
+             typeof(bundle_sha256)<>'blob' OR length(bundle_sha256)<>32 OR
+             (binding_sha256 IS NOT NULL AND
+              (typeof(binding_sha256)<>'blob' OR length(binding_sha256)<>32)) OR
+             (policy_sha256 IS NOT NULL AND
+              (typeof(policy_sha256)<>'blob' OR length(policy_sha256)<>32)) OR
+             typeof(nonce)<>'blob' OR length(nonce)<>32 OR
+             typeof(issued_at)<>'integer' OR issued_at<0 OR
+             typeof(expires_at)<>'integer' OR expires_at<=issued_at OR
+             typeof(state)<>'text' OR length(state) NOT BETWEEN 7 AND 11 OR
+             state NOT IN ('pending','authorized','expired','invalidated') OR
+             typeof(created_event_sequence)<>'integer' OR created_event_sequence<=0 OR
+             (state='invalidated' AND
+              (typeof(invalidated_at)<>'integer' OR invalidated_at<issued_at)) OR
+             (state<>'invalidated' AND invalidated_at IS NOT NULL))",
+            [challenge_id.as_bytes()],
+            |row| row.get(0),
+        )
+    } else {
+        connection.query_row(
+            "SELECT COUNT(*) FROM authorization_challenges WHERE
+             typeof(challenge_id)<>'blob' OR length(challenge_id)<>32 OR
+             typeof(grant_id)<>'blob' OR length(grant_id)<>16 OR
+             typeof(action)<>'integer' OR typeof(target_kind)<>'integer' OR
+             typeof(target_id)<>'blob' OR length(target_id)>256 OR
+             (store_id IS NOT NULL AND (typeof(store_id)<>'blob' OR length(store_id)<>16)) OR
+             (account_id IS NOT NULL AND (typeof(account_id)<>'blob' OR length(account_id)<>16)) OR
+             typeof(context_sha256)<>'blob' OR length(context_sha256)<>32 OR
+             typeof(manifest)<>'blob' OR length(manifest) NOT BETWEEN 1 AND 4194304 OR
+             typeof(manifest_sha256)<>'blob' OR length(manifest_sha256)<>32 OR
+             typeof(signing_payload)<>'blob' OR length(signing_payload) NOT BETWEEN 1 AND 4194304 OR
+             typeof(signing_sha256)<>'blob' OR length(signing_sha256)<>32 OR
+             typeof(key_id)<>'blob' OR length(key_id)<>32 OR
+             typeof(trust_epoch)<>'integer' OR trust_epoch<=0 OR
+             typeof(bundle_sha256)<>'blob' OR length(bundle_sha256)<>32 OR
+             (binding_sha256 IS NOT NULL AND
+              (typeof(binding_sha256)<>'blob' OR length(binding_sha256)<>32)) OR
+             (policy_sha256 IS NOT NULL AND
+              (typeof(policy_sha256)<>'blob' OR length(policy_sha256)<>32)) OR
+             typeof(nonce)<>'blob' OR length(nonce)<>32 OR
+             typeof(issued_at)<>'integer' OR issued_at<0 OR
+             typeof(expires_at)<>'integer' OR expires_at<=issued_at OR
+             typeof(state)<>'text' OR length(state) NOT BETWEEN 7 AND 11 OR
+             state NOT IN ('pending','authorized','expired','invalidated') OR
+             typeof(created_event_sequence)<>'integer' OR created_event_sequence<=0 OR
+             (state='invalidated' AND
+              (typeof(invalidated_at)<>'integer' OR invalidated_at<issued_at)) OR
+             (state<>'invalidated' AND invalidated_at IS NOT NULL)",
+            [],
+            |row| row.get(0),
+        )
+    }
+    .map_err(|_| store_read_error())?;
+    if malformed != 0 {
+        return Err(recovery_error());
+    }
+    Ok(())
+}
+
+fn load_receipt_for_challenge(
+    connection: &Connection,
+    challenge_id: Sha256Digest,
+) -> Result<Option<StoredReceipt>, MailError> {
+    receipt_preflight(connection, Some(challenge_id))?;
+    connection
+        .query_row(
+            "SELECT receipt_id,challenge_id,grant_id,proof_sha256,key_id,signature,
+                    canonical_proof,manifest_sha256,signing_sha256,trust_epoch,bundle_sha256,
+                    receipt,receipt_sha256,verified_at,expires_at
+             FROM authorization_receipts WHERE challenge_id=?1",
+            [challenge_id.as_bytes()],
+            stored_receipt_from_row,
+        )
+        .optional()
+        .map_err(|_| store_read_error())
+}
+
+fn stored_receipt_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredReceipt> {
+    let trust_epoch = u64::try_from(row.get::<_, i64>(9)?)
+        .ok()
+        .and_then(NonZeroU64::new)
+        .ok_or(rusqlite::Error::InvalidQuery)?;
+    Ok(StoredReceipt {
+        receipt_id: uuid_from_blob_sql(row.get(0)?)?,
+        challenge_id: digest_from_blob_sql(row.get(1)?)?,
+        grant_id: uuid_from_blob_sql(row.get(2)?)?,
+        proof_sha256: digest_from_blob_sql(row.get(3)?)?,
+        key_id: digest_from_blob_sql(row.get(4)?)?,
+        signature: row
+            .get::<_, Vec<u8>>(5)?
+            .try_into()
+            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+        canonical_proof: row.get(6)?,
+        manifest_sha256: digest_from_blob_sql(row.get(7)?)?,
+        signing_sha256: digest_from_blob_sql(row.get(8)?)?,
+        trust_epoch,
+        bundle_sha256: digest_from_blob_sql(row.get(10)?)?,
+        receipt: row.get(11)?,
+        receipt_sha256: digest_from_blob_sql(row.get(12)?)?,
+        verified_at: row.get(13)?,
+        expires_at: row.get(14)?,
+    })
+}
+
+fn receipt_preflight(
+    connection: &Connection,
+    challenge_id: Option<Sha256Digest>,
+) -> Result<(), MailError> {
+    let malformed_condition = "
+        typeof(receipt_id)<>'blob' OR length(receipt_id)<>16 OR
+        typeof(challenge_id)<>'blob' OR length(challenge_id)<>32 OR
+        typeof(grant_id)<>'blob' OR length(grant_id)<>16 OR
+        typeof(proof_sha256)<>'blob' OR length(proof_sha256)<>32 OR
+        typeof(key_id)<>'blob' OR length(key_id)<>32 OR
+        typeof(signature)<>'blob' OR length(signature)<>64 OR
+        typeof(canonical_proof)<>'blob' OR length(canonical_proof) NOT BETWEEN 1 AND 4096 OR
+        typeof(manifest_sha256)<>'blob' OR length(manifest_sha256)<>32 OR
+        typeof(signing_sha256)<>'blob' OR length(signing_sha256)<>32 OR
+        typeof(trust_epoch)<>'integer' OR trust_epoch<=0 OR
+        typeof(bundle_sha256)<>'blob' OR length(bundle_sha256)<>32 OR
+        typeof(receipt)<>'blob' OR length(receipt) NOT BETWEEN 1 AND 16384 OR
+        typeof(receipt_sha256)<>'blob' OR length(receipt_sha256)<>32 OR
+        typeof(verified_at)<>'integer' OR verified_at<0 OR
+        typeof(expires_at)<>'integer' OR expires_at<verified_at";
+    let malformed: i64 = if let Some(challenge_id) = challenge_id {
+        connection
+            .query_row(
+                &format!(
+                    "SELECT COUNT(*) FROM authorization_receipts
+                     WHERE challenge_id=?1 AND ({malformed_condition})"
+                ),
+                [challenge_id.as_bytes()],
+                |row| row.get(0),
+            )
+            .map_err(|_| store_read_error())?
+    } else {
+        connection
+            .query_row(
+                &format!(
+                    "SELECT COUNT(*) FROM authorization_receipts
+                     WHERE {malformed_condition}"
+                ),
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|_| store_read_error())?
+    };
+    if malformed != 0 {
+        return Err(recovery_error());
+    }
+    Ok(())
+}
+
+fn challenge_export_from_stored(
+    challenge: &StoredChallenge,
+) -> Result<AuthorizationChallengeExport, MailError> {
+    let manifest = ActionManifest::parse(&challenge.manifest).map_err(|_| recovery_error())?;
+    let payload =
+        AuthorizationPayload::parse(&challenge.signing_payload).map_err(|_| recovery_error())?;
+    let snapshot = payload.snapshot();
+    Ok(AuthorizationChallengeExport {
+        contract_version: "kirje.authorization.v1".to_owned(),
+        challenge_id: challenge.challenge_id,
+        action: challenge.action,
+        target_kind: snapshot.target_kind(),
+        target_id: snapshot.target_display().as_str().to_owned(),
+        key_id: challenge.key_id,
+        trust_epoch: challenge.trust_epoch,
+        issued_at: utc_millis(challenge.issued_at)?,
+        expires_at: utc_millis(challenge.expires_at)?,
+        manifest_sha256: manifest.sha256(),
+        signing_payload_sha256: challenge.signing_sha256,
+        signing_payload_base64url: base64url(&challenge.signing_payload),
+        manifest_base64url: base64url(&challenge.manifest),
+        review: ChallengeReview {
+            bounded: true,
+            authoritative: false,
+        },
+    })
+}
+
+fn validate_first_proof(
+    authority: &BootstrapSnapshot,
+    challenge: &StoredChallenge,
+    proof: &AuthorizationProof,
+) -> Result<(), MailError> {
+    if proof.challenge_id() != challenge.challenge_id
+        || proof.key_id() != challenge.key_id
+        || proof.signing_payload_sha256() != challenge.signing_sha256
+    {
+        return Err(MailError::stable(
+            MailErrorCode::AuthorizationMalformed,
+            "authorization proof does not match the challenge",
+        ));
+    }
+    let expected_key = match challenge.action.policy().required_role {
+        OwnerKeyRole::Owner => (
+            authority.owner_key_id,
+            authority.owner_public_key.as_bytes(),
+        ),
+        OwnerKeyRole::Recovery => (
+            authority.recovery_key_id,
+            authority.recovery_public_key.as_bytes(),
+        ),
+    };
+    if challenge.key_id != expected_key.0
+        || challenge.trust_epoch != authority.minimum_epoch
+        || challenge.bundle_sha256 != authority.trust_bundle_sha256
+    {
+        return Err(recovery_error());
+    }
+    verify_authorization_signature(
+        expected_key.1,
+        &challenge.signing_payload,
+        &proof.signature_bytes()?,
+    )
+}
+
+fn receipt_projection(
+    challenge: &StoredChallenge,
+    receipt: &StoredReceipt,
+    effective_time: i64,
+) -> Result<AuthorizationReceiptProjection, MailError> {
+    let payload =
+        AuthorizationPayload::parse(&challenge.signing_payload).map_err(|_| recovery_error())?;
+    let snapshot = payload.snapshot();
+    Ok(AuthorizationReceiptProjection {
+        contract_version: "kirje.authorization-receipt.v1".to_owned(),
+        receipt_id: receipt.receipt_id,
+        challenge_id: challenge.challenge_id,
+        action: challenge.action,
+        target_kind: snapshot.target_kind(),
+        target_id: snapshot.target_display().as_str().to_owned(),
+        key_fingerprint: challenge.key_id.fingerprint(),
+        trust_epoch: challenge.trust_epoch,
+        manifest_sha256: challenge.manifest_sha256,
+        receipt_sha256: receipt.receipt_sha256,
+        verified_at: utc_millis(receipt.verified_at)?,
+        expires_at: utc_millis(receipt.expires_at)?,
+        state: if effective_time > receipt.expires_at {
+            AuthorizationReceiptState::Expired
+        } else {
+            AuthorizationReceiptState::Unclaimed
+        },
+    })
+}
+
+fn utc_millis(value: i64) -> Result<DateTime<Utc>, MailError> {
+    Utc.timestamp_millis_opt(value)
+        .single()
+        .ok_or_else(recovery_error)
+}
+
+fn input_utc_millis(value: i64) -> Result<(), MailError> {
+    Utc.timestamp_millis_opt(value)
+        .single()
+        .map(|_| ())
+        .ok_or_else(|| MailError::invalid_input("authority timestamp is outside the contract"))
+}
+
+fn base64url(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut output = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let first = chunk[0];
+        let second = chunk.get(1).copied().unwrap_or(0);
+        let third = chunk.get(2).copied().unwrap_or(0);
+        output.push(char::from(ALPHABET[usize::from(first >> 2)]));
+        output.push(char::from(
+            ALPHABET[usize::from(((first & 0x03) << 4) | (second >> 4))],
+        ));
+        if chunk.len() > 1 {
+            output.push(char::from(
+                ALPHABET[usize::from(((second & 0x0f) << 2) | (third >> 6))],
+            ));
+        }
+        if chunk.len() > 2 {
+            output.push(char::from(ALPHABET[usize::from(third & 0x3f)]));
+        }
+    }
+    output
+}
+
+fn digest_from_blob(bytes: &[u8]) -> Result<Sha256Digest, MailError> {
+    Ok(Sha256Digest::from_bytes(exact::<32>(bytes)?))
+}
+
+fn digest_from_blob_sql(bytes: Vec<u8>) -> rusqlite::Result<Sha256Digest> {
+    Ok(Sha256Digest::from_bytes(
+        bytes
+            .try_into()
+            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+    ))
+}
+
+fn optional_digest_from_blob_sql(bytes: Option<Vec<u8>>) -> rusqlite::Result<Option<Sha256Digest>> {
+    bytes.map(digest_from_blob_sql).transpose()
+}
+
+fn uuid_from_blob_sql<T>(bytes: Vec<u8>) -> rusqlite::Result<T>
+where
+    T: TryFrom<Uuid>,
+{
+    let bytes: [u8; 16] = bytes
+        .try_into()
+        .map_err(|_| rusqlite::Error::InvalidQuery)?;
+    T::try_from(Uuid::from_bytes(bytes)).map_err(|_| rusqlite::Error::InvalidQuery)
+}
+
+fn optional_uuid_from_blob_sql<T>(bytes: Option<Vec<u8>>) -> rusqlite::Result<Option<T>>
+where
+    T: TryFrom<Uuid>,
+{
+    bytes.map(uuid_from_blob_sql).transpose()
 }
 
 fn inspect_home(
@@ -757,6 +2067,7 @@ fn ensure_usable_schema(connection: &Connection) -> Result<(), MailError> {
     if !schema_inventory_matches(connection)? {
         return Err(recovery_error());
     }
+    preflight_authorization_storage(connection)?;
     let foreign_failures: i64 = connection
         .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
             row.get(0)
@@ -769,6 +2080,13 @@ fn ensure_usable_schema(connection: &Connection) -> Result<(), MailError> {
         return Err(recovery_error());
     }
     Ok(())
+}
+
+fn preflight_authorization_storage(connection: &Connection) -> Result<(), MailError> {
+    challenge_preflight(connection, None)?;
+    receipt_preflight(connection, None)?;
+    nonce_preflight(connection)?;
+    event_preflight(connection)
 }
 
 fn schema_inventory_matches(connection: &Connection) -> Result<bool, MailError> {
@@ -971,15 +2289,6 @@ fn load_snapshot(
     if bundle != epoch_bundle || bundle != expected_bundle {
         return Err(recovery_error());
     }
-    validate_events(
-        connection,
-        &row.0,
-        realm_id.as_bytes(),
-        bundle,
-        row.7,
-        row.9,
-    )?;
-
     let anchor = AnchorSnapshot {
         version: AuthorityAnchorVersion::V1,
         realm_id,
@@ -993,19 +2302,30 @@ fn load_snapshot(
         trust_bundle_sha256: bundle,
         state: AuthorityAnchorState::Normal,
     };
+    let snapshot = BootstrapSnapshot {
+        realm_id,
+        journal_id,
+        minimum_epoch: epoch,
+        owner_key_id: owner_id,
+        owner_public_key: owner_public,
+        recovery_key_id: recovery_id,
+        recovery_public_key: recovery_public,
+        trust_bundle_sha256: bundle,
+        journal_location_sha256: location,
+        anchor,
+    };
+    validate_authorization_history(connection, &row.0, &snapshot, row.6)?;
+    validate_events(
+        connection,
+        &row.0,
+        snapshot.realm_id.as_bytes(),
+        bundle,
+        row.7,
+        row.9,
+        row.6,
+    )?;
     Ok(LoadedSnapshot {
-        snapshot: BootstrapSnapshot {
-            realm_id,
-            journal_id,
-            minimum_epoch: epoch,
-            owner_key_id: owner_id,
-            owner_public_key: owner_public,
-            recovery_key_id: recovery_id,
-            recovery_public_key: recovery_public,
-            trust_bundle_sha256: bundle,
-            journal_location_sha256: location,
-            anchor,
-        },
+        snapshot,
         bootstrap_state: row.0,
         last_observed_at: row.6,
     })
@@ -1018,15 +2338,12 @@ fn validate_t202a_initial_row_counts(connection: &Connection) -> Result<(), Mail
     let trust_epochs: i64 = connection
         .query_row("SELECT COUNT(*) FROM trust_epochs", [], |row| row.get(0))
         .map_err(|_| store_read_error())?;
-    let later_rows: i64 = connection
+    let forbidden_rows: i64 = connection
         .query_row(
             "SELECT
                 (SELECT COUNT(*) FROM registered_stores) +
                 (SELECT COUNT(*) FROM registered_accounts) +
-                (SELECT COUNT(*) FROM authorization_challenges) +
                 (SELECT COUNT(*) FROM challenge_effects) +
-                (SELECT COUNT(*) FROM authorization_receipts) +
-                (SELECT COUNT(*) FROM nonce_uses) +
                 (SELECT COUNT(*) FROM grant_uses) +
                 (SELECT COUNT(*) FROM account_transitions) +
                 (SELECT COUNT(*) FROM credential_cleanup) +
@@ -1038,10 +2355,255 @@ fn validate_t202a_initial_row_counts(connection: &Connection) -> Result<(), Mail
             |row| row.get(0),
         )
         .map_err(|_| store_read_error())?;
-    if authority_keys != 2 || trust_epochs != 1 || later_rows != 0 {
+    if authority_keys != 2 || trust_epochs != 1 || forbidden_rows != 0 {
         return Err(recovery_error());
     }
     Ok(())
+}
+
+fn validate_authorization_history(
+    connection: &Connection,
+    bootstrap_state: &str,
+    authority: &BootstrapSnapshot,
+    last_observed_at: i64,
+) -> Result<(), MailError> {
+    let challenge_count: i64 = connection
+        .query_row("SELECT COUNT(*) FROM authorization_challenges", [], |row| {
+            row.get(0)
+        })
+        .map_err(|_| store_read_error())?;
+    let receipt_count: i64 = connection
+        .query_row("SELECT COUNT(*) FROM authorization_receipts", [], |row| {
+            row.get(0)
+        })
+        .map_err(|_| store_read_error())?;
+    let nonce_count: i64 = connection
+        .query_row("SELECT COUNT(*) FROM nonce_uses", [], |row| row.get(0))
+        .map_err(|_| store_read_error())?;
+    if bootstrap_state != "ready" {
+        if challenge_count != 0 || receipt_count != 0 || nonce_count != 0 {
+            return Err(recovery_error());
+        }
+        return Ok(());
+    }
+    challenge_preflight(connection, None)?;
+    receipt_preflight(connection, None)?;
+    nonce_preflight(connection)?;
+
+    let mut statement = connection
+        .prepare(
+            "SELECT challenge_id,grant_id,action,target_kind,target_id,store_id,account_id,
+                    context_sha256,manifest,manifest_sha256,signing_payload,signing_sha256,
+                    key_id,trust_epoch,bundle_sha256,binding_sha256,policy_sha256,nonce,
+                    issued_at,expires_at,state,invalidated_at,created_event_sequence
+             FROM authorization_challenges ORDER BY challenge_id",
+        )
+        .map_err(|_| store_read_error())?;
+    let mut rows = statement.query([]).map_err(|_| store_read_error())?;
+    let mut seen = 0_i64;
+    let mut authorized = 0_i64;
+    while let Some(row) = rows.next().map_err(|_| store_read_error())? {
+        let challenge = stored_challenge_from_row(row).map_err(|_| recovery_error())?;
+        validate_stored_challenge(connection, authority, &challenge, last_observed_at)?;
+        seen = seen.checked_add(1).ok_or_else(recovery_error)?;
+        if challenge.state == "authorized" {
+            authorized = authorized.checked_add(1).ok_or_else(recovery_error)?;
+        }
+    }
+    if seen != challenge_count || authorized != receipt_count || receipt_count != nonce_count {
+        return Err(recovery_error());
+    }
+    Ok(())
+}
+
+fn validate_stored_challenge(
+    connection: &Connection,
+    authority: &BootstrapSnapshot,
+    challenge: &StoredChallenge,
+    last_observed_at: i64,
+) -> Result<(), MailError> {
+    utc_millis(challenge.issued_at)?;
+    utc_millis(challenge.expires_at)?;
+    if !matches!(
+        challenge.state.as_str(),
+        "pending" | "authorized" | "expired"
+    ) || challenge.invalidated_at.is_some()
+        || challenge.issued_at < 0
+        || challenge.expires_at <= challenge.issued_at
+        || challenge
+            .expires_at
+            .checked_sub(challenge.issued_at)
+            .is_none_or(|lifetime| lifetime > AUTHORIZATION_LIFETIME_MS)
+        || challenge.issued_at > last_observed_at
+    {
+        return Err(recovery_error());
+    }
+    ensure_t202b_action(challenge.action).map_err(|_| recovery_error())?;
+    let manifest = ActionManifest::parse(&challenge.manifest).map_err(|_| recovery_error())?;
+    let payload =
+        AuthorizationPayload::parse(&challenge.signing_payload).map_err(|_| recovery_error())?;
+    let snapshot = payload.snapshot();
+    if manifest.canonical_bytes() != challenge.manifest
+        || manifest.sha256() != challenge.manifest_sha256
+        || manifest.action() != challenge.action
+        || payload.canonical_bytes() != challenge.signing_payload
+        || payload.challenge_id() != challenge.challenge_id
+        || challenge.signing_sha256 != challenge.challenge_id
+        || snapshot.owner_realm() != authority.realm_id
+        || snapshot.action() != challenge.action
+        || snapshot.target_kind().code() != challenge.target_kind_code
+        || snapshot.target_bytes() != challenge.target_id
+        || snapshot.store_id() != challenge.store_id
+        || snapshot.account_id() != challenge.account_id
+        || snapshot.manifest_sha256() != challenge.manifest_sha256
+        || snapshot.binding_sha256() != challenge.binding_sha256
+        || snapshot.policy_sha256() != challenge.policy_sha256
+        || snapshot.bundle_sha256() != challenge.bundle_sha256
+        || snapshot.signer_key_id() != challenge.key_id
+        || snapshot.trust_epoch() != challenge.trust_epoch
+        || snapshot.grant_id() != challenge.grant_id
+        || snapshot.nonce() != &challenge.nonce
+        || snapshot.issued_at_unix_ms() != challenge.issued_at
+        || snapshot.expires_at_unix_ms() != challenge.expires_at
+        || snapshot.effect().is_some()
+    {
+        return Err(recovery_error());
+    }
+    let expected_signer = match challenge.action.policy().required_role {
+        OwnerKeyRole::Owner => authority.owner_key_id,
+        OwnerKeyRole::Recovery => authority.recovery_key_id,
+    };
+    let expected_context = authorization_context_digest(
+        challenge.action,
+        snapshot.target_kind(),
+        snapshot.target_bytes(),
+        snapshot.store_id(),
+        snapshot.account_id(),
+        snapshot.manifest_sha256(),
+        snapshot.binding_sha256(),
+        snapshot.policy_sha256(),
+        expected_signer,
+        authority.minimum_epoch,
+        authority.trust_bundle_sha256,
+    );
+    if challenge.key_id != expected_signer
+        || challenge.trust_epoch != authority.minimum_epoch
+        || challenge.bundle_sha256 != authority.trust_bundle_sha256
+        || challenge.context_sha256 != expected_context
+    {
+        return Err(recovery_error());
+    }
+    validate_supported_manifest(connection, authority, &manifest).map_err(|_| recovery_error())?;
+    let receipt = load_receipt_for_challenge(connection, challenge.challenge_id)?;
+    let nonce = load_nonce_use(connection, challenge.challenge_id)?;
+    match challenge.state.as_str() {
+        "authorized" => {
+            let receipt = receipt.ok_or_else(recovery_error)?;
+            let nonce = nonce.ok_or_else(recovery_error)?;
+            validate_stored_receipt(authority, challenge, &receipt, &nonce)?;
+        }
+        "pending" | "expired" if receipt.is_none() && nonce.is_none() => {}
+        _ => return Err(recovery_error()),
+    }
+    Ok(())
+}
+
+fn validate_stored_receipt(
+    authority: &BootstrapSnapshot,
+    challenge: &StoredChallenge,
+    receipt: &StoredReceipt,
+    nonce: &StoredNonceUse,
+) -> Result<(), MailError> {
+    utc_millis(receipt.verified_at)?;
+    utc_millis(receipt.expires_at)?;
+    let proof = AuthorizationProof::parse_canonical(&receipt.canonical_proof)
+        .map_err(|_| recovery_error())?;
+    let expected_receipt = authorization_receipt(
+        receipt.receipt_id,
+        challenge,
+        receipt.proof_sha256,
+        receipt.verified_at,
+    );
+    let public_key = match challenge.action.policy().required_role {
+        OwnerKeyRole::Owner => authority.owner_public_key.as_bytes(),
+        OwnerKeyRole::Recovery => authority.recovery_public_key.as_bytes(),
+    };
+    if receipt.challenge_id != challenge.challenge_id
+        || receipt.grant_id != challenge.grant_id
+        || receipt.proof_sha256 != proof.proof_sha256()
+        || receipt.key_id != challenge.key_id
+        || receipt.signature != proof.signature_bytes().map_err(|_| recovery_error())?
+        || proof.challenge_id() != challenge.challenge_id
+        || proof.key_id() != challenge.key_id
+        || proof.signing_payload_sha256() != challenge.signing_sha256
+        || receipt.manifest_sha256 != challenge.manifest_sha256
+        || receipt.signing_sha256 != challenge.signing_sha256
+        || receipt.trust_epoch != challenge.trust_epoch
+        || receipt.bundle_sha256 != challenge.bundle_sha256
+        || receipt.receipt != expected_receipt
+        || receipt.receipt_sha256 != Sha256Digest::digest(&expected_receipt)
+        || receipt.verified_at < challenge.issued_at
+        || receipt.verified_at > challenge.expires_at
+        || receipt.expires_at != challenge.expires_at
+        || nonce.nonce != challenge.nonce
+        || nonce.challenge_id != challenge.challenge_id
+        || nonce.receipt_id != receipt.receipt_id
+        || nonce.consumed_at != receipt.verified_at
+    {
+        return Err(recovery_error());
+    }
+    verify_authorization_signature(public_key, &challenge.signing_payload, &receipt.signature)
+        .map_err(|_| recovery_error())
+}
+
+struct StoredNonceUse {
+    nonce: [u8; 32],
+    challenge_id: Sha256Digest,
+    receipt_id: AuthorizationReceiptId,
+    consumed_at: i64,
+}
+
+fn nonce_preflight(connection: &Connection) -> Result<(), MailError> {
+    let malformed: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM nonce_uses WHERE
+             typeof(nonce)<>'blob' OR length(nonce)<>32 OR
+             typeof(challenge_id)<>'blob' OR length(challenge_id)<>32 OR
+             typeof(receipt_id)<>'blob' OR length(receipt_id)<>16 OR
+             typeof(consumed_at)<>'integer' OR consumed_at<0",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| store_read_error())?;
+    if malformed != 0 {
+        return Err(recovery_error());
+    }
+    Ok(())
+}
+
+fn load_nonce_use(
+    connection: &Connection,
+    challenge_id: Sha256Digest,
+) -> Result<Option<StoredNonceUse>, MailError> {
+    connection
+        .query_row(
+            "SELECT nonce,challenge_id,receipt_id,consumed_at
+             FROM nonce_uses WHERE challenge_id=?1",
+            [challenge_id.as_bytes()],
+            |row| {
+                Ok(StoredNonceUse {
+                    nonce: row
+                        .get::<_, Vec<u8>>(0)?
+                        .try_into()
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    challenge_id: digest_from_blob_sql(row.get(1)?)?,
+                    receipt_id: uuid_from_blob_sql(row.get(2)?)?,
+                    consumed_at: row.get(3)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|_| store_read_error())
 }
 
 struct StoredAuthorityEvent {
@@ -1062,35 +2624,50 @@ fn validate_events(
     bundle: Sha256Digest,
     created_at: i64,
     anchor_confirmed_at: Option<i64>,
+    last_observed_at: i64,
 ) -> Result<(), MailError> {
+    event_preflight(connection)?;
     let mut statement = connection
         .prepare(
             "SELECT sequence,entity_kind,entity_id,event_code,source,occurred_at,
                     detail,detail_sha256
-             FROM authority_events ORDER BY sequence LIMIT 3",
+             FROM authority_events ORDER BY sequence",
         )
         .map_err(|_| store_read_error())?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok(StoredAuthorityEvent {
-                sequence: row.get(0)?,
-                entity_kind: row.get(1)?,
-                entity_id: row.get(2)?,
-                event_code: row.get(3)?,
-                source: row.get(4)?,
-                occurred_at: row.get(5)?,
-                detail: row.get(6)?,
-                detail_sha256: row.get(7)?,
-            })
-        })
-        .map_err(|_| store_read_error())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| store_read_error())?;
-    let expected_count = match bootstrap_state {
-        "pending_anchor" => 1,
-        "ready" => 2,
+    let mut rows = statement.query([]).map_err(|_| store_read_error())?;
+    let expected_prefix = match bootstrap_state {
+        "pending_anchor" => 1_i64,
+        "ready" => 2_i64,
         _ => return Err(recovery_error()),
     };
+    let mut expected_sequence = 1_i64;
+    while let Some(row) = rows.next().map_err(|_| store_read_error())? {
+        let row = stored_authority_event_from_row(row).map_err(|_| store_read_error())?;
+        if row.sequence != expected_sequence {
+            return Err(recovery_error());
+        }
+        match row.sequence {
+            1 => validate_event_row(&row, 1, realm_id, 1, 0, 0x0101, bundle, created_at)?,
+            2 if expected_prefix == 2 => validate_event_row(
+                &row,
+                2,
+                realm_id,
+                2,
+                0x0101,
+                0x0102,
+                bundle,
+                anchor_confirmed_at.ok_or_else(recovery_error)?,
+            )?,
+            sequence if sequence > expected_prefix => {
+                validate_challenge_event(connection, &row, last_observed_at)?;
+            }
+            _ => return Err(recovery_error()),
+        }
+        expected_sequence = expected_sequence
+            .checked_add(1)
+            .ok_or_else(recovery_error)?;
+    }
+    let count = expected_sequence - 1;
     let sequence_high_water: Option<i64> = connection
         .query_row(
             "SELECT seq FROM sqlite_sequence WHERE name='authority_events'",
@@ -1099,25 +2676,235 @@ fn validate_events(
         )
         .optional()
         .map_err(|_| store_read_error())?;
-    if rows.len() != expected_count
-        || sequence_high_water != Some(i64::try_from(expected_count).map_err(|_| recovery_error())?)
+    if count < expected_prefix || sequence_high_water != Some(count) {
+        return Err(recovery_error());
+    }
+    if expected_prefix == 1 && count != 1 {
+        return Err(recovery_error());
+    }
+    validate_challenge_lifecycles(connection)?;
+    Ok(())
+}
+
+fn event_preflight(connection: &Connection) -> Result<(), MailError> {
+    let malformed: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM authority_events WHERE
+             typeof(sequence)<>'integer' OR sequence<=0 OR
+             typeof(entity_kind)<>'integer' OR entity_kind NOT BETWEEN 1 AND 13 OR
+             typeof(entity_id)<>'blob' OR length(entity_id) NOT BETWEEN 1 AND 32 OR
+             typeof(event_code)<>'integer' OR event_code NOT BETWEEN 1 AND 26 OR
+             typeof(source)<>'integer' OR source NOT BETWEEN 1 AND 6 OR
+             typeof(occurred_at)<>'integer' OR occurred_at<0 OR
+             typeof(detail)<>'blob' OR length(detail) NOT BETWEEN 1 AND 65536 OR
+             typeof(detail_sha256)<>'blob' OR length(detail_sha256)<>32",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| store_read_error())?;
+    if malformed != 0 {
+        return Err(recovery_error());
+    }
+    Ok(())
+}
+
+fn stored_authority_event_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<StoredAuthorityEvent> {
+    Ok(StoredAuthorityEvent {
+        sequence: row.get(0)?,
+        entity_kind: row.get(1)?,
+        entity_id: row.get(2)?,
+        event_code: row.get(3)?,
+        source: row.get(4)?,
+        occurred_at: row.get(5)?,
+        detail: row.get(6)?,
+        detail_sha256: row.get(7)?,
+    })
+}
+
+fn validate_challenge_event(
+    connection: &Connection,
+    row: &StoredAuthorityEvent,
+    last_observed_at: i64,
+) -> Result<(), MailError> {
+    if row.entity_kind != 8 || row.entity_id.len() != 32 {
+        return Err(recovery_error());
+    }
+    let challenge_id = digest_from_blob(&row.entity_id)?;
+    let challenge = match load_challenge(connection, challenge_id) {
+        Ok(challenge) => challenge,
+        Err(error) if error.code == MailErrorCode::AuthorizationMalformed => {
+            return Err(recovery_error());
+        }
+        Err(error) => return Err(error),
+    };
+    let (event, source, occurred_at) = match row.event_code {
+        3 => (ChallengeEvent::Created, 1_i64, challenge.issued_at),
+        4 => {
+            let receipt = load_receipt_for_challenge(connection, challenge.challenge_id)?
+                .ok_or_else(recovery_error)?;
+            (ChallengeEvent::Authorized, 3, receipt.verified_at)
+        }
+        5 if row.occurred_at > challenge.expires_at && row.occurred_at <= last_observed_at => {
+            (ChallengeEvent::Expired, 1, row.occurred_at)
+        }
+        _ => return Err(recovery_error()),
+    };
+    let receipt = if matches!(event, ChallengeEvent::Authorized) {
+        load_receipt_for_challenge(connection, challenge.challenge_id)?
+    } else {
+        None
+    };
+    let (related_kind, related_id, prior_state, next_state, context, receipt_id) = match event {
+        ChallengeEvent::Created => (
+            10_u16,
+            challenge.grant_id.as_bytes().as_slice(),
+            0_u16,
+            0x0801_u16,
+            challenge.context_sha256,
+            None,
+        ),
+        ChallengeEvent::Authorized => {
+            let receipt = receipt.as_ref().ok_or_else(recovery_error)?;
+            (
+                9,
+                receipt.receipt_id.as_bytes().as_slice(),
+                0x0801,
+                0x0802,
+                receipt.receipt_sha256,
+                Some(receipt.receipt_id),
+            )
+        }
+        ChallengeEvent::Expired => (
+            0,
+            &[] as &[u8],
+            0x0801,
+            0x0803,
+            challenge.context_sha256,
+            None,
+        ),
+    };
+    let expected_detail = authority_event_detail(
+        u16::try_from(row.event_code).map_err(|_| recovery_error())?,
+        8,
+        challenge.challenge_id.as_bytes(),
+        u8::try_from(source).map_err(|_| recovery_error())?,
+        related_kind,
+        related_id,
+        prior_state,
+        next_state,
+        context,
+        receipt_id,
+        occurred_at,
+    );
+    if row.source != source
+        || row.occurred_at != occurred_at
+        || (matches!(event, ChallengeEvent::Created)
+            && row.sequence != challenge.created_event_sequence)
+        || row.detail != expected_detail
+        || row.detail_sha256.as_slice() != Sha256::digest(&expected_detail).as_slice()
     {
         return Err(recovery_error());
     }
-    validate_event_row(&rows[0], 1, realm_id, 1, 0, 0x0101, bundle, created_at)?;
-    if expected_count == 2 {
-        validate_event_row(
-            &rows[1],
-            2,
-            realm_id,
-            2,
-            0x0101,
-            0x0102,
-            bundle,
-            anchor_confirmed_at.ok_or_else(recovery_error)?,
+    Ok(())
+}
+
+struct PreviousChallengeLifecycle {
+    context_sha256: Sha256Digest,
+    state: String,
+    terminal_event_sequence: Option<i64>,
+}
+
+fn validate_challenge_lifecycles(connection: &Connection) -> Result<(), MailError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT context_sha256,created_event_sequence,challenge_id,state
+             FROM authorization_challenges
+                  INDEXED BY authorization_challenges_context_created_sequence
+             ORDER BY context_sha256,created_event_sequence,challenge_id",
+        )
+        .map_err(|_| store_read_error())?;
+    let mut rows = statement.query([]).map_err(|_| store_read_error())?;
+    let mut previous: Option<PreviousChallengeLifecycle> = None;
+    while let Some(row) = rows.next().map_err(|_| store_read_error())? {
+        let context_bytes = row.get::<_, Vec<u8>>(0).map_err(|_| recovery_error())?;
+        let context_sha256 = digest_from_blob(&context_bytes)?;
+        let created_event_sequence = row.get::<_, i64>(1).map_err(|_| recovery_error())?;
+        let challenge_bytes = row.get::<_, Vec<u8>>(2).map_err(|_| recovery_error())?;
+        let challenge_id = digest_from_blob(&challenge_bytes)?;
+        let state = row.get::<_, String>(3).map_err(|_| recovery_error())?;
+        let terminal_event_sequence = validate_challenge_event_graph(
+            connection,
+            challenge_id,
+            created_event_sequence,
+            &state,
         )?;
+
+        if let Some(prior) = &previous
+            && prior.context_sha256 == context_sha256
+            && (!matches!(prior.state.as_str(), "authorized" | "expired")
+                || prior
+                    .terminal_event_sequence
+                    .is_none_or(|sequence| sequence >= created_event_sequence))
+        {
+            return Err(recovery_error());
+        }
+        previous = Some(PreviousChallengeLifecycle {
+            context_sha256,
+            state,
+            terminal_event_sequence,
+        });
     }
     Ok(())
+}
+
+fn validate_challenge_event_graph(
+    connection: &Connection,
+    challenge_id: Sha256Digest,
+    created_event_sequence: i64,
+    state: &str,
+) -> Result<Option<i64>, MailError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT sequence,event_code FROM authority_events
+                  INDEXED BY authority_events_entity_sequence
+             WHERE entity_kind=8 AND entity_id=?1 AND event_code IN (3,4,5)
+             ORDER BY sequence LIMIT 4",
+        )
+        .map_err(|_| store_read_error())?;
+    let mut rows = statement
+        .query([challenge_id.as_bytes()])
+        .map_err(|_| store_read_error())?;
+    let mut created = None;
+    let mut authorized = None;
+    let mut expired = None;
+    while let Some(row) = rows.next().map_err(|_| store_read_error())? {
+        let sequence = row.get::<_, i64>(0).map_err(|_| recovery_error())?;
+        let event_code = row.get::<_, i64>(1).map_err(|_| recovery_error())?;
+        let slot = match event_code {
+            3 => &mut created,
+            4 => &mut authorized,
+            5 => &mut expired,
+            _ => return Err(recovery_error()),
+        };
+        if slot.replace(sequence).is_some() {
+            return Err(recovery_error());
+        }
+    }
+    if created != Some(created_event_sequence) {
+        return Err(recovery_error());
+    }
+    let terminal = match state {
+        "pending" if authorized.is_none() && expired.is_none() => None,
+        "authorized" if authorized.is_some() && expired.is_none() => authorized,
+        "expired" if authorized.is_none() && expired.is_some() => expired,
+        _ => return Err(recovery_error()),
+    };
+    if terminal.is_some_and(|sequence| sequence <= created_event_sequence) {
+        return Err(recovery_error());
+    }
+    Ok(terminal)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1262,6 +3049,145 @@ fn insert_event(
     Ok(())
 }
 
+#[derive(Clone, Copy)]
+enum ChallengeEvent {
+    Created,
+    Authorized,
+    Expired,
+}
+
+fn insert_challenge_event(
+    transaction: &Transaction<'_>,
+    challenge: &StoredChallenge,
+    event: ChallengeEvent,
+    receipt: Option<&StoredReceipt>,
+    occurred_at: i64,
+) -> Result<i64, MailError> {
+    let (
+        event_code,
+        source,
+        related_kind,
+        related_id,
+        prior_state,
+        next_state,
+        context,
+        receipt_id,
+    ) = match event {
+        ChallengeEvent::Created => (
+            3_u16,
+            1_u8,
+            10_u16,
+            challenge.grant_id.as_bytes().as_slice(),
+            0_u16,
+            0x0801_u16,
+            challenge.context_sha256,
+            None,
+        ),
+        ChallengeEvent::Authorized => {
+            let receipt = receipt.ok_or_else(recovery_error)?;
+            (
+                4,
+                3,
+                9,
+                receipt.receipt_id.as_bytes().as_slice(),
+                0x0801,
+                0x0802,
+                receipt.receipt_sha256,
+                Some(receipt.receipt_id),
+            )
+        }
+        ChallengeEvent::Expired => (
+            5,
+            1,
+            0,
+            &[] as &[u8],
+            0x0801,
+            0x0803,
+            challenge.context_sha256,
+            None,
+        ),
+    };
+    let detail = authority_event_detail(
+        event_code,
+        8,
+        challenge.challenge_id.as_bytes(),
+        source,
+        related_kind,
+        related_id,
+        prior_state,
+        next_state,
+        context,
+        receipt_id,
+        occurred_at,
+    );
+    let detail_sha256 = Sha256::digest(&detail);
+    let inserted = transaction
+        .execute(
+            "INSERT INTO authority_events
+             (entity_kind,entity_id,event_code,source,occurred_at,detail,detail_sha256)
+             VALUES(8,?1,?2,?3,?4,?5,?6)",
+            params![
+                challenge.challenge_id.as_bytes(),
+                i64::from(event_code),
+                i64::from(source),
+                occurred_at,
+                detail,
+                detail_sha256.as_slice(),
+            ],
+        )
+        .map_err(|_| store_write_error())?;
+    if inserted != 1 {
+        return Err(store_write_error());
+    }
+    let sequence = transaction.last_insert_rowid();
+    if sequence <= 0 {
+        return Err(recovery_error());
+    }
+    Ok(sequence)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn authority_event_detail(
+    event_code: u16,
+    entity_kind: u16,
+    entity_id: &[u8],
+    source: u8,
+    related_kind: u16,
+    related_id: &[u8],
+    prior_state: u16,
+    next_state: u16,
+    context_digest: Sha256Digest,
+    receipt_id: Option<AuthorizationReceiptId>,
+    occurred_at: i64,
+) -> Vec<u8> {
+    let event_code = event_code.to_be_bytes();
+    let entity_kind = entity_kind.to_be_bytes();
+    let source = [source];
+    let related_kind = related_kind.to_be_bytes();
+    let prior_state = prior_state.to_be_bytes();
+    let next_state = next_state.to_be_bytes();
+    let receipt = receipt_id
+        .map(|value| value.as_bytes().to_vec())
+        .unwrap_or_default();
+    let occurred_at = occurred_at.to_be_bytes();
+    encode_transcript(
+        EVENT_DETAIL_DOMAIN,
+        &[
+            &event_code,
+            &entity_kind,
+            entity_id,
+            &source,
+            &related_kind,
+            related_id,
+            &prior_state,
+            &next_state,
+            context_digest.as_bytes(),
+            &receipt,
+            &occurred_at,
+        ],
+    )
+}
+
 fn event_detail(
     realm_id: &[u8; 32],
     event_code: u16,
@@ -1270,27 +3196,19 @@ fn event_detail(
     context_digest: Sha256Digest,
     occurred_at: i64,
 ) -> Vec<u8> {
-    let event_code_bytes = event_code.to_be_bytes();
-    let entity_kind = 1_u16.to_be_bytes();
-    let source = [2_u8];
-    let no_related_kind = 0_u16.to_be_bytes();
-    let prior_state = prior_state.to_be_bytes();
-    let next_state = next_state.to_be_bytes();
-    let occurred_at_bytes = occurred_at.to_be_bytes();
-    let fields: [&[u8]; 11] = [
-        &event_code_bytes,
-        &entity_kind,
+    authority_event_detail(
+        event_code,
+        1,
         realm_id,
-        &source,
-        &no_related_kind,
+        2,
+        0,
         &[],
-        &prior_state,
-        &next_state,
-        context_digest.as_bytes(),
-        &[],
-        &occurred_at_bytes,
-    ];
-    encode_transcript(EVENT_DETAIL_DOMAIN, &fields)
+        prior_state,
+        next_state,
+        context_digest,
+        None,
+        occurred_at,
+    )
 }
 
 fn trust_bundle_digest(
@@ -1615,5 +3533,26 @@ fn entropy_error() -> MailError {
     MailError::stable(
         MailErrorCode::Internal,
         "secure authority entropy is unavailable",
+    )
+}
+
+fn authorization_context_stale_error() -> MailError {
+    MailError::stable(
+        MailErrorCode::AuthorizationContextStale,
+        "authorization context is stale",
+    )
+}
+
+fn authorization_expired_error() -> MailError {
+    MailError::stable(
+        MailErrorCode::AuthorizationExpired,
+        "authorization challenge has expired",
+    )
+}
+
+fn authorization_replayed_error() -> MailError {
+    MailError::stable(
+        MailErrorCode::AuthorizationReplayed,
+        "authorization proof conflicts with an immutable receipt",
     )
 }
