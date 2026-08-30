@@ -588,10 +588,10 @@ Additional security gates include:
 
 Confirmed on 2026-08-28 under the user's delegated project-owner authority.
 T202 is a serial umbrella. T202A and T202B are Accepted. T202C is a Draft
-acceptance umbrella split into strict serial T202C1-T202C4. T202C1 is Ready
-after `T202C1_A002_PACKET_REVIEW_PASS` and is the sole production task allowed
-to execute.
-T202C2-T202C4 and T202D-E remain Draft until their predecessor is Accepted. T204 and every
+acceptance umbrella split into strict serial T202C1-T202C4. T202C1 is Accepted
+at production commit `aa53efb` after `T202C1_A003_CODE_REVIEW_PASS` and fresh
+packet/workspace gates. T202C2 is Draft pending packetization; T202C3-T202C4 and
+T202D-E remain Draft until their predecessor is Accepted. T204 and every
 later production task additionally require the T202 umbrella to be Accepted.
 Execution still requires one self-contained packet per ready task, verified RED
 evidence, and review.

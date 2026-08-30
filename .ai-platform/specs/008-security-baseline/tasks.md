@@ -456,11 +456,12 @@ Evidence required:
 
 ### T202C1: Grant Use And Store Enrollment
 
-Status: Ready
+Status: Accepted
 Priority: P0
 Story / Requirement: US-003; FR-003, FR-016, FR-018; NFR-001-NFR-003,
 NFR-006, NFR-007
 Depends on: T202B Accepted at production commit `43f0788`
+Accepted at: production commit `aa53efb`; evidence in `.ai-platform/evidence/T202C1/`
 Blocks: T202C2; T202C umbrella acceptance
 Parallel: No
 Conflicts with: T202C2-T202C4/T202D-T202E and every grant-use, store registry,
