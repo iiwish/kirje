@@ -3,7 +3,7 @@
 ## Metadata
 
 - Feature ID: `008-security-baseline`
-- Status: T202A_Accepted_T202B_A003_Ready
+- Status: T202A_T202B_Accepted_T202C_Packetization
 - Updated: 2026-08-30
 - Inputs: `spec.md`, `checklists/requirements.md`, `plan.md`, `research.md`,
   `data-model.md`, `contracts/**`, `tasks.md`, project constitution and AGENTS
@@ -36,9 +36,9 @@ reports even though its exact byte hash is required. The generated unified-diff
 evidence is excluded from whitespace lint because its context lines use the
 standard single-space patch marker.
 - Execution decision: T201 and T202A are Accepted. T202 remains a Draft
-  acceptance umbrella split into strict serial T202A-T202E. T202B-A003 is the
-  only Ready production task. T202C-T202E and T203-T212 remain Draft. T204 and
-  every
+  acceptance umbrella split into strict serial T202A-T202E. T202B is Accepted
+  at production commit `43f0788`; T202C-T202E and T203-T212 remain Draft, so no
+  production task is Ready. T204 and every
   later task directly require the T202 umbrella to be Accepted.
 
 The product requirements remain confirmed and do not add a remote mailbox
@@ -481,13 +481,14 @@ its digest.
 
 ## Execution Gate
 
-`APPROVED_FOR_T202B_A003_EXECUTION`
+`APPROVED_FOR_T202C_PACKETIZATION`
 
 T202A is accepted from four test-first attempts, independent security and QA
 review, its bootstrap-schema digest, and fresh packet/workspace gates. A003
 retains the A001/A002 RED evidence and implementation as a hash-pinned baseline,
 then adds only lifecycle linkage/schema REDs and their minimum implementation.
-Its amended packet must receive an independent no-Critical/High/Medium pass
-before execution. That pass is recorded as `T202B_A003_PACKET_REVIEW_PASS`;
-T202B-A003 may execute only its hash-pinned lifecycle/schema amendment. The T202
-umbrella remains non-Accepted.
+Its amended packet received `T202B_A003_PACKET_REVIEW_PASS`. Four test-first
+attempts, fresh packet/workspace gates, and `T202B_A004_CODE_REVIEW_PASS`
+support evidence-based T202B acceptance at `43f0788`. T202C may be packetized
+but remains Draft until its own independent packet review. The T202 umbrella
+remains non-Accepted.

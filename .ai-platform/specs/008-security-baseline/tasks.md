@@ -312,7 +312,7 @@ Evidence required:
 
 ### T202B: Challenges, Proofs, And Receipts
 
-Status: Ready
+Status: Accepted
 Priority: P0
 Story / Requirement: US-003; FR-013-FR-015, FR-018; NFR-001-NFR-003,
 NFR-006, NFR-007
@@ -1562,8 +1562,9 @@ Evidence required:
 
 Confirmed on 2026-08-28 under the user's explicit standing project-owner
 delegation and instruction to continue without per-step approval. T202A is
-Accepted and T202B-A003 is the only Ready production task after independent
-packet review. T202C-T202E and T203-T212 are Draft; the T202
+Accepted, and T202B is Accepted at `43f0788` from four test-first attempts and
+independent final review. T202C-T202E and T203-T212 are Draft; no production
+task is Ready. The T202
 umbrella is Draft and cannot become Accepted before T202E evidence and recorded
 delegated acceptance. Individual task acceptance remains evidence-based rather
 than inferred from this graph confirmation; a failed or missing gate still stops

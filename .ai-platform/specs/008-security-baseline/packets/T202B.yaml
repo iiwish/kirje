@@ -4,7 +4,7 @@ task_id: T202B
 feature_id: 008-security-baseline
 mode: execute_one_task
 adapter: codex_worker
-status: ready
+status: accepted
 
 governance_inputs:
   constitution: .ai-platform/memory/constitution.md
@@ -479,7 +479,7 @@ evidence_contract:
   summary: .ai-platform/evidence/T202B/summary.md
   diff: .ai-platform/evidence/T202B/diff.patch
   test_results: .ai-platform/evidence/T202B/test-results.md
-  attempt: .ai-platform/evidence/T202B/attempts/T202B-A003.md
+  attempt: .ai-platform/evidence/T202B/attempts/T202B-A004.md
   required:
     - exact changed-file scope and diff summary
     - retained A001/A002 RED command/exit references plus separate A003 schema and lifecycle RED commands, exit signals, and contract-relevant failures
@@ -523,7 +523,7 @@ handoff:
   external_issue: null
   pull_request: null
   finish_options:
-    - accept T202B and packetize T202C
+    - packetize T202C
     - create a bounded review-fix attempt within the same allowed files
     - stop on a governance, dependency, environment, or security blocker
 
