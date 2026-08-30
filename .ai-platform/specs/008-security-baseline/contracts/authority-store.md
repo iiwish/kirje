@@ -1320,7 +1320,8 @@ cleanup_claimed: entity cleanup, event 16, source runtime (4),
 ```
 
 Only the transaction winner receives an opaque `CleanupDeletePermit`. The
-permit owns the fixed cleanup apply lock and private `DeleteOnlyLocator`; it is
+permit owns the fixed cleanup apply lock and validated private locator source;
+it is
 non-`Clone`, non-`Debug`, non-serializable, and exposes no raw bytes, service,
 username, digest, conversion, read, probe, copy, export, set, or rebind
 capability. A concurrent different grant loses with
@@ -1339,14 +1340,27 @@ historical and is checked before expiry.
 
 #### Consuming Delete Boundary
 
-The only deletion API is one combined operation that consumes
-`CleanupDeletePermit`, invokes the lower credential crate's sealed delete-only
-janitor, and, after success, commits `claimed -> deleted`. There is no caller-accessible
-`mark_deleted` method. The janitor receives only `DeleteOnlyLocator`, performs
-one idempotent delete, and collapses `Deleted` and `NoEntry` into the same
-success with no presence signal. A007 proves this boundary with the credential
-crate's deterministic test janitor; T204 owns its real keyring implementation,
-legacy runtime-store migration, and end-to-end crash integration.
+The only deletion API is one combined public `AuthorityStore`/cleanup service
+operation that consumes `CleanupDeletePermit`. Under its apply lock, store
+constructs the opaque `DeleteOnlyLocator`, invokes
+`kirje_credential::delete_only` exactly once, and, after `Ok(())`, commits
+`claimed -> deleted`. There is no caller-accessible `mark_deleted` method.
+Deleted and `NoEntry` both map to `Ok(())`; there is no outcome enum or presence
+signal. Authority open, read, challenge, claim validation, and recovery-
+validation paths never call the keyring. This explicit consuming apply method
+is the sole adapter-call boundary, and store does not re-export any low-level
+credential crate item.
+
+`kirje-credential` is unpublished and only `kirje-store` may list it as a
+direct Cargo dependency. The Rust-visible constructor and function exist only
+for that sole consumer; the enforceable workspace boundary is the dependency
+allowlist because Rust provides no friend-crate visibility. A007 creates the
+low-level crate, opaque locator, store dependency, and store-private fake
+deletion hook. A008 adds the real low-level keyring delete implementation and
+the sole production call in the combined store method. T204 calls only the
+high-level store API while migrating/removing legacy runtime `SecretStore`
+paths; runtime never imports, names, receives, or re-exports the low-level crate
+or locator.
 
 Backend failure returns its existing stable backend error, retains `claimed`,
 sets no `deleted_at`, and appends no event. Success sets `deleted_at` to the
@@ -1359,11 +1373,12 @@ cleanup_deleted: entity cleanup, event 17, source runtime (4),
 ```
 
 Event 17 follows the one event 16 for that cleanup and never precedes or
-duplicates it. A crash before janitor invocation leaves claimed state. A crash
-during or after janitor success but before the terminal transaction also leaves
+duplicates it. A crash before low-level delete invocation leaves claimed state.
+A crash during or after low-level delete success but before the terminal
+transaction also leaves
 claimed state, so exact recovery reacquires the lock and repeats the idempotent
 delete. A crash after the terminal commit returns the deleted projection on
-exact retry without calling the janitor. A changed same-grant retry is
+exact retry without calling the low-level backend. A changed same-grant retry is
 `grant_already_used`; a different-grant retry against an occupied target is
 `credential_cleanup_invalid`.
 
@@ -1405,7 +1420,7 @@ Credential cleanup uses this closed failure precedence:
    store is `owner_recovery_required`.
 7. Target lifecycle, locator kind, locator/tombstone digest, origin graph, or a
    different-grant occupied target mismatch is `credential_cleanup_invalid`.
-8. Authority-store read/write and janitor backend failures retain their existing
+8. Authority-store read/write and low-level keyring backend failures retain their existing
    stable codes.
 
 No failure contains a private locator value, account address, endpoint,

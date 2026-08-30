@@ -141,8 +141,11 @@ explicit user decision on 2026-08-30. The user approved the T202C3 cleanup
 security-contract amendment. The first independent A006 review rejected the
 packet with three High findings. The revised contract makes cleanup the explicit
 historical-binding exception, limits exact reuse/recovery to paired-clock-only
-mutation, introduces the lower shared `kirje-credential` capability crate, and
-hardens locator reservation/prepare before row insertion. `T202C3-A006` remains
+mutation, hardens locator reservation/prepare before row insertion, and defines
+the lower `kirje-credential` crate. Repeat review found one remaining High in
+the shared public deletion surface; the focused repair makes the unpublished
+crate a direct dependency of store only and the combined store apply method its
+sole production call site. `T202C3-A006` remains
 `ready_for_review` with production permission `none`; A007 claim and A008 delete
 completion remain non-executable just-in-time outlines.
 Priority: P0
@@ -224,8 +227,11 @@ Evidence required:
    three High findings from the first A006 review. `T202C3-A006` owns locator
    reservation/prepare hardening and effect-free challenge issuance and is ready
    for repeat independent packet review with production permission `none`.
-   A007 owns the shared credential capability crate, test janitor, store permit,
-   claim and event 16. A008 owns test-janitor delete completion and event 17.
+   A007 owns the unpublished credential crate/opaque locator, store-only direct
+   dependency, store-private fake deletion hook, permit, claim, and event 16.
+   A008 owns the real low-level keyring delete, sole combined-store call site,
+   dependency boundary checks, delete completion, and event 17. T204 owns only
+   high-level runtime/CLI integration and legacy `SecretStore` path removal.
    Both remain non-executable JIT outlines until their serial predecessor passes.
 2. `T202C4`: remote challenge registry binding and planner-owned effect row.
 3. `T202D`: effect claim, invocation permit, observation, and ambiguity.

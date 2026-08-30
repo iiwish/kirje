@@ -18,12 +18,13 @@ content-addressed evidence, adversarial review, complete checkpoint gates, and
 human acceptance.
 
 The confirmed checkpoint plan remains internally consistent. The first A006
-review failed on three High contradictions/implementability gaps. The revised
-amendment addresses those findings through historical-binding precedence,
-clock-only exact recovery, a lower shared credential capability crate,
-reservation/prepare canonicality, and complete issuance race/replacement
-matrices. The A006 challenge packet is ready for repeat independent review with
-production permission `none`; A007
+review failed on three High contradictions/implementability gaps. Repeat review
+accepted the historical-binding and clock-only repairs but found one remaining
+High in the shared public deletion surface. The focused amendment specifies an
+unpublished low-level credential crate directly depended on only by store, a
+single combined store adapter-call boundary, reservation/prepare canonicality,
+and complete issuance race/replacement matrices. The A006 challenge packet is
+ready for another independent review with production permission `none`; A007
 claim and A008 delete completion remain non-executable just-in-time outlines,
 not Ready packets or implementation permission. One separate Medium
 implementation finding is assigned: the unchanged branch dependency graph contains yanked
@@ -221,15 +222,17 @@ clock. A006 also validates the canonical transcript at reservation and
 rederives it from realm plus signed origin-before context before row insertion.
 
 The same contract reserves serial ownership for later attempts. A007 owns the
-new lower `kirje-credential` workspace crate, its opaque locator, sealed janitor
-trait and deterministic test janitor, root/store dependency entries, the
-store-owned lock permit and consuming method, atomic grant-use/ready-to-claimed
-transaction, exact/changed retry, expiry, response loss, concurrency, and event
-16 adjacent after event 7. A008 owns test-janitor delete completion,
-deleted/no-entry indistinguishability, claimed recovery across backend and crash
-windows, terminal retry, and exactly one later event 17. T204 owns the concrete
-keyring janitor, migration from legacy runtime `SecretStore`, runtime wiring,
-and end-to-end integration.
+new unpublished `kirje-credential` workspace crate, its opaque locator,
+root/store-only dependency entries, the store-private fake deletion hook,
+store-owned lock permit and combined-method foundation, atomic grant-use/ready-
+to-claimed transaction, exact/changed retry, expiry, response loss,
+concurrency, and event 16 adjacent after event 7. A008 owns the concrete
+low-level keyring delete, sole production call site in the combined store
+method, deleted/no-entry `Ok(())` indistinguishability, claimed recovery across
+backend and crash windows, dependency/no-re-export/compile-fail enforcement,
+terminal retry, and exactly one later event 17. T204 migrates/removes legacy
+runtime `SecretStore` paths, wires runtime/CLI only to the high-level store API,
+and proves end-to-end integration without low-level access.
 
 Restart validation rederives origin, locator, tombstone, grant count, event
 cardinality/order/source/context/receipt/time, and privacy invariants. The
@@ -280,18 +283,22 @@ None.
 
 ### High
 
-Three A006 review findings remain open pending repeat independent review:
+The first A006 review returned three High findings:
 
 - H-A006-R1-001: current-binding text contradicted historical cleanup origin;
   revised authorization/FR-013 text makes cleanup the sole exception.
 - H-A006-R1-002: exact pending and claimed recovery lacked a closed mutation
   set; the revision permits paired-clock-only advancement and requires tests.
-- H-A006-R1-003: the janitor capability crossed store/runtime crates without an
-  implementable owner; the approved lower `kirje-credential` architecture gives
-  A007 and T204 explicit acyclic ownership.
+- H-A006-R1-003: the deletion capability crossed store/runtime crates without an
+  implementable owner.
 
-These are proposed fixes, not closed findings. A006 cannot execute until repeat
-review passes.
+Repeat review accepted the binding and clock repairs but returned one remaining
+High, H-A006-R2-001: the public constructor plus pluggable public deletion
+method still let runtime bypass authority. The proposed focused repair makes
+the low-level crate unpublished and directly depended on only by store, removes
+the trait/plugin surface, fixes `Result<(), MailError>` success semantics, and
+makes the combined store apply method the sole call site. It remains open until
+another independent review passes. A006 cannot execute before that pass.
 
 ### Medium
 

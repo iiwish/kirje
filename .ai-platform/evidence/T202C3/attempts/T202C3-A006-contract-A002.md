@@ -16,11 +16,10 @@ protocol, CLI, MCP, network, or external provider behavior.
    paired authority clock high-water. They change no lifecycle/event timestamp
    and append no event. A006 owns discriminating pending-reuse tests; A007 owns
    the claimed-recovery equivalent.
-3. A lower `crates/kirje-credential` boundary makes deletion implementable
-   without a store/runtime dependency cycle. It owns opaque locator and sealed
-   janitors. Store owns the lock-holding permit and consuming method. A007 owns
-   the crate/type/trait/test-janitor/workspace foundation; T204 owns the real
-   keyring janitor, legacy runtime-store migration, and end-to-end wiring.
+3. A lower `crates/kirje-credential` boundary was proposed to avoid a
+   store/runtime dependency cycle. Repeat review found that its shared public
+   constructor and pluggable deletion surface still allowed a runtime bypass.
+   The focused A003 governance attempt supersedes that formulation.
 
 ## Additional Packet Hardening
 
@@ -54,5 +53,6 @@ artifact and does not claim implementation. A007 remains non-executable.
 ## Result
 
 The revised A006 packet remains `ready_for_review` with production and test
-permissions closed. The three High findings are addressed but remain open until
-repeat independent review passes. A007 and A008 remain non-executable outlines.
+permissions closed. Repeat independent review accepted the binding and
+clock-only repairs but returned one High on the low-level capability boundary.
+That finding is carried by A003; A007 and A008 remain non-executable outlines.

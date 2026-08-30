@@ -370,8 +370,11 @@ transition returns a stable conflict before any keyring call.
 
 Active and cleanup capabilities are separate. `ActiveSecretStore` remains a
 runtime-facing port. The lower-level workspace crate `crates/kirje-credential`
-is jointly consumed by `kirje-store` and `kirje-runtime` and owns the cleanup
-capability types:
+has `publish = false`, is a direct dependency of `kirje-store` only, and owns
+the cleanup locator and concrete delete-only keyring backend. `kirje-runtime`,
+`kirje-core`, `kirje-cli`, `kirje-mcp`, `kirje-protocol`, and every other
+workspace crate neither depends directly on nor receives or re-exports this
+crate.
 
 ```rust
 trait ActiveSecretStore {
@@ -383,33 +386,41 @@ trait ActiveSecretStore {
 
 pub struct DeleteOnlyLocator { /* private canonical fields */ }
 
-pub trait CredentialJanitor: private::Sealed + Send + Sync {
-    fn delete_only(&self, locator: DeleteOnlyLocator) -> Result<DeleteOutcome, MailError>;
-}
+pub fn delete_only(locator: DeleteOnlyLocator) -> Result<(), MailError>;
 ```
 
 `DeleteOnlyLocator` is opaque, non-`Clone`, non-`Debug`, non-serializable, and
 has no raw field/byte export or conversion to `ActiveCredentialLocator`.
-`kirje-credential` exposes the checked constructor needed by store from the
-complete canonical locator transcript plus its expected kind/digest; successful
-construction retains the private parsed service/username for janitor use. The
-runtime contract prohibits calling that constructor, and dependency/source
-tests reject constructor or raw-locator imports from runtime.
-`CredentialJanitor` is public only so the store's consuming generic boundary can
-accept it, but its private supertrait permits implementations solely inside
-`kirje-credential`. A007 introduces the type, sealed trait, deterministic test
-janitor, workspace member, and store dependency. T204 adds the concrete keyring
-janitor and moves real credential-store ownership from the legacy runtime
-`SecretStore` implementation into this crate.
+`kirje-credential` exposes the checked locator constructor and `delete_only`
+only as the Rust-visible surface required by its sole direct Cargo consumer;
+the crate remains unpublished and these items are not product/workspace APIs.
+Rust has no friend-crate visibility, so the enforceable boundary is the exact
+workspace Cargo direct-dependency allowlist, not a claim of Rust privacy. The
+constructor accepts the complete canonical locator transcript plus expected
+kind/digest and retains only the private parsed service/username needed by the
+backend. There is no public or sealed janitor trait and no pluggable deletion
+surface. Both deletion and an already-absent keyring entry return `Ok(())`;
+there is no presence bit or outcome enum.
 
 `kirje-store` owns opaque `CleanupDeletePermit`, including the fixed apply-lock
-guard and one `DeleteOnlyLocator`. Its only terminal API consumes that permit
-and accepts `&impl CredentialJanitor`; it calls delete and records terminal
-authority state as one boundary. Runtime provides the concrete janitor without
-accessing, constructing, inspecting, or exporting the locator and cannot mark
-cleanup deleted independently; source/compile contract tests enforce those
-forbidden imports and calls. `delete_only` treats a deleted entry
-and an entry that was already absent as one indistinguishable success result.
+guard and the validated private locator source. The sole public cleanup deletion
+API is one combined `AuthorityStore`/cleanup service method. Under the permit's
+apply lock it constructs `DeleteOnlyLocator`, calls
+`kirje_credential::delete_only` exactly once, and records terminal authority
+state after success. Authority open, read, challenge, claim validation, and
+recovery-validation paths never call the keyring; this explicit consuming apply
+method is the only adapter-call boundary. Runtime calls only that high-level
+store API and cannot construct, inspect, export, or receive a locator, call the
+low-level function, or mark cleanup deleted independently. `kirje-store` does
+not re-export the locator, constructor, function, module, or crate.
+
+A007 creates the unpublished low-level crate and opaque locator, adds the root
+workspace and store-only dependency entries, and adds a store-private fake
+deletion hook for authority state-machine tests. A008 adds the real low-level
+keyring delete implementation and the sole production call site in the store's
+combined method. T204 wires runtime and CLI application services only to the
+high-level store cleanup API and migrates/removes legacy runtime `SecretStore`
+paths; runtime never sees the locator or low-level backend.
 
 ## Credential Locator Transcripts
 
@@ -448,7 +459,7 @@ An `active_v2` cleanup rederives the documented V2 digest from the immutable
 historical-before tuple. A `legacy_v1` cleanup never substitutes a current or
 recreated account's display ID. Any other service, username shape, uppercase
 hexadecimal character, locator kind, or digest relationship is
-`credential_cleanup_invalid` before janitor access.
+`credential_cleanup_invalid` before low-level backend access.
 
 ## Locator V2
 
@@ -595,15 +606,16 @@ corruption. The schema remains unchanged and the core optional transcript field
 remains parseable, but no supported v1 operation accepts the absent form.
 
 Claim yields an opaque `CleanupDeletePermit` that owns the fixed cleanup apply
-lock and the private `DeleteOnlyLocator`. The permit is non-`Clone`,
+lock and the validated private locator source. The permit is non-`Clone`,
 non-`Debug`, non-serializable, and has no byte, service, username, or locator
-export. Only the combined consuming cleanup apply service may accept it. That
-service invokes the crate-private janitor and records terminal authority state
-after an indistinguishable delete/already-absent success; there is no public or
-caller-owned `mark_deleted` operation. A janitor failure leaves authority state
+export. Only the combined consuming cleanup apply service may accept it. Under
+that lock the service constructs the opaque locator, invokes the low-level
+delete function exactly once, and records terminal authority state after an
+indistinguishable delete/already-absent `Ok(())`; there is no public or
+caller-owned `mark_deleted` operation. A backend failure leaves authority state
 claimed. An exact retry may obtain another permit only after reacquiring the
 same apply lock; a deleted retry returns only the terminal projection and never
-calls the janitor again.
+calls the low-level backend again.
 
 ## Readiness Snapshot
 
@@ -739,8 +751,13 @@ presence in another account/store.
 - credential set/delete/update crash windows and unreachable orphan behavior
 - canonical active-v2/legacy-v1 reservation constructor and origin-rederived
   prepare rejection before row insertion
-- lower credential crate dependency direction, opaque locator trait negatives,
-  sealed external-implementation failure, test/keyring janitor ownership, and
+- lower credential crate `publish = false` and direct-dependency allowlist:
+  Cargo metadata/tree proves only `kirje-store` directly depends on it
+- exactly one production `kirje_credential::delete_only(` call site, located in
+  the store's combined apply method, and no store re-export of low-level APIs
+- compile-fail fixture proves runtime cannot import or name
+  `kirje_credential` because it is not a dependency
+- opaque locator negative tests, store-private fake deletion-hook tests, and
   runtime no-constructor/no-raw-locator source scan
 - delete-only combined permit method and idempotent absence behavior
 - remove/recreate same display ID with no old operation/index inheritance

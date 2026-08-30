@@ -236,14 +236,15 @@ granting mailbox access.
   credential, binding, and locator transcript; later account state cannot
   redirect it. Challenge is effect-free. Claim atomically consumes one grant
   and yields only an opaque lock-owning delete permit. One combined consuming
-  boundary performs the idempotent janitor call and terminal authority update,
+  boundary performs the idempotent low-level delete call and terminal authority update,
   while delete and already-absent outcomes remain indistinguishable. Crashes or
   backend failure leave a safely retryable claimed tombstone, and an exact
-  deleted retry performs no second janitor call. A lower shared credential
-  component owns the opaque locator and sealed janitor implementations; the
-  authority store owns the lock-holding permit and only consuming terminal
-  method, while runtime wires the approved concrete janitor without raw locator
-  access.
+  deleted retry performs no second backend call. An unpublished lower credential
+  crate, directly depended on only by the store, owns the opaque locator and
+  concrete delete-only keyring function. The authority store owns the
+  lock-holding permit and the only combined consuming terminal method; runtime
+  calls only that high-level store method and never sees or re-exports the
+  locator or low-level crate.
 - FR-009: Account status and doctor output expose orthogonal bounded
   `store_state`, `owner_state`, `binding_state`, and `credential_state` fields
   with deterministic combinations, including unregistered, not configured,

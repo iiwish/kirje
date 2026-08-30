@@ -27,13 +27,20 @@ governance_inputs:
     cleanup_contract: approved by user on 2026-08-30
     material_architecture: >-
       Approved by the orchestrator on 2026-08-31 under the user's standing
-      delegated authority; this approves the future kirje-credential workspace
-      boundary, not implementation and not personal user review of this packet.
+      delegated authority; the approved decision specifies an unpublished
+      kirje-credential crate directly depended on only by kirje-store and
+      supersedes the flawed shared runtime/pluggable deletion formulation. It
+      approves future architecture, not implementation and not personal user
+      review of this packet.
     delegated_acceptance: >-
       The orchestrator may accept later artifacts only after required TDD,
       validation, evidence, and three reviews; no record may claim the user
       personally reviewed unseen work.
-    packet_review: first review failed with three High findings; revised packet pending repeat independent review
+    packet_review: >-
+      First review failed with three High findings. Repeat review accepted the
+      binding and clock repairs but found one High in the public low-level
+      deletion surface; this focused revision is pending another independent
+      review.
 
 work_unit:
   title: Issue an exact effect-free credential-cleanup challenge
@@ -46,7 +53,7 @@ work_unit:
     realm and historical-before origin can be inserted, then implement exact
     effect-free credential_cleanup challenge issuance, replacement, concurrency,
     restart, and pending reuse from one transition-bound ready tombstone. Add no
-    transition state-machine change, grant use, claim, delete permit, janitor,
+    transition state-machine change, grant use, claim, delete permit, deletion backend,
     keyring, runtime, or external-effect capability.
   depends_on:
     - T202C3-A005 Accepted at production commit 316dae0
@@ -73,7 +80,7 @@ codebase_context:
   review_failures_addressed:
     - cleanup common binding is historical origin-before, while account remove and credential delete retain current signed-before binding
     - exact pending reuse and claimed recovery may mutate only the paired authority clock high-water
-    - A007 uses an acyclic shared kirje-credential crate for the opaque locator and sealed janitor boundary
+    - the unpublished kirje-credential crate is a direct dependency of kirje-store only; no public trait/plugin surface lets runtime bypass authority
 
 contract_snapshot:
   locator:
@@ -124,7 +131,7 @@ contract_snapshot:
     - Malformed constructor input is invalid_input; canonical wrong-origin prepare is authorization_context_stale with zero mutation.
     - No prepare, commit, finalize, abort, recovery, account, store, event, or clock state-machine rule changes.
   challenge:
-    - Issuance and exact pending reuse create zero grant uses, cleanup mutations, effects, invocations, janitor calls, or external calls.
+    - Issuance and exact pending reuse create zero grant uses, cleanup mutations, effects, invocations, keyring calls, or external calls.
     - Exact pending reuse consumes no entropy, returns the same challenge, appends no event, changes no lifecycle/event timestamp, and may advance only the paired authority clock.
     - Valid expired-pending replacement records one predecessor event 5 before one successor event 3 and creates exactly one fresh grant UUID and nonce.
     - Invalid-target replacement rolls back expiry, successor, events, clock, and entropy; concurrent exact issuance has one creator and clock-only losers.
@@ -134,8 +141,9 @@ later_attempt_outlines:
   T202C3_A007:
     status: non_executable
     owns:
-      - new crates/kirje-credential workspace member, root/store dependencies, opaque DeleteOnlyLocator, privately sealed CredentialJanitor, and deterministic test janitor
-      - store-owned CleanupDeletePermit and consuming combined method accepting the sealed janitor; runtime has no raw locator access
+      - new unpublished crates/kirje-credential workspace member, root/store-only direct dependency entries, and opaque non-Clone/non-Debug/non-Serialize DeleteOnlyLocator
+      - checked locator construction exposed only as required by the sole direct Cargo consumer; no janitor trait and no store re-export
+      - store-private fake deletion hook, store-owned CleanupDeletePermit, and combined high-level store method foundation; runtime has no low-level access
       - atomic grant use plus ready-to-claimed transition and exact/changed retry, expiry, response loss, and concurrency
       - opaque non-Clone, non-Debug, non-Serialize, no-export CleanupDeletePermit holding the apply lock
       - event 16 source runtime, related grant, use_sha256 context, same receipt/time, adjacent after event 7
@@ -143,13 +151,16 @@ later_attempt_outlines:
   T202C3_A008:
     status: non_executable
     owns:
-      - combined consuming credential-crate test-janitor delete boundary with no caller mark_deleted
-      - deleted/no-entry indistinguishability, backend-failure claimed state, crash recovery, and terminal no-recall retry
+      - concrete low-level keyring delete function returning `Result<(), MailError>` and the sole production call in the combined store method
+      - combined consuming delete boundary with no caller mark_deleted; authority open/read/validation paths make zero keyring calls
+      - deleted/no-entry Ok(()) indistinguishability, backend-failure claimed state, crash recovery, and terminal no-recall retry
+      - Cargo metadata/tree direct-dependency allowlist, exactly-one production call-site scan, runtime compile-fail import fixture, and store no-re-export check
       - event 17 source runtime, same grant/use/receipt, exactly once after event 16
   integration_owner: >-
-    T204 owns the kirje-credential concrete keyring janitor, migration from the
-    legacy runtime SecretStore, runtime wiring without raw locator access, and
-    end-to-end integration.
+    T204 owns migration/removal of legacy runtime SecretStore paths, runtime/CLI
+    wiring only to the high-level store cleanup API, and end-to-end integration.
+    Runtime must not directly depend on, import, receive, or re-export
+    kirje-credential or locator material.
 
 execution_constraints:
   production_permission: none_pending_independent_packet_review
@@ -160,7 +171,7 @@ execution_constraints:
     - crates/kirje-store/tests/fixtures/authority/registry/account_credential_cleanup/**
   forbidden_changes:
     - authority schema, application ID, user version, Cargo graph, or core transcript bytes/types
-    - cleanup claim/delete, permit, janitor, runtime, config, keyring, protocol, CLI, MCP, network, or remote-effect behavior
+    - cleanup claim/delete, permit, deletion backend, runtime, config, keyring, protocol, CLI, MCP, network, or remote-effect behavior
     - transition state-machine behavior outside locator input hardening before cleanup insertion
   write_rules:
     - No production or test edit may begin until independent packet review changes both permissions.

@@ -22,10 +22,12 @@ external provider behavior is changed.
   closed; later account changes cannot rebind the cleanup.
 - A007 owns atomic grant use/claim, exact recovery, expiry/concurrency, opaque
   apply-lock permit, and event 16 immediately after event 7.
-- A008 owns the combined consuming fake-janitor delete boundary, crash/backend
+- A008 owns the combined consuming delete boundary, store-private fake hook,
+  crash/backend
   recovery, terminal no-recall retry, and event 17 after event 16.
 - Restart validates origin/transcript/grant/event/cardinality/privacy invariants
-  under a closed error precedence. T204 owns real runtime/keyring integration.
+  under a closed error precedence. T204 owns only high-level runtime/CLI
+  integration and legacy `SecretStore` path removal.
 
 ## Governance Result
 
@@ -51,5 +53,7 @@ The first independent spec/engineering/QA review failed this amendment with
 three High findings: contradictory current-versus-historical cleanup binding,
 incomplete clock-only reuse/recovery semantics, and a cross-crate delete
 capability that could not be implemented under Rust visibility/dependency
-rules. The follow-up governance fix is recorded in
-`T202C3-A006-contract-A002.md`. Implementation remains prohibited.
+rules. The first follow-up governance fix is recorded in
+`T202C3-A006-contract-A002.md`; repeat review found one remaining public-surface
+High, whose focused repair is recorded in `T202C3-A006-contract-A003.md`.
+Implementation remains prohibited.

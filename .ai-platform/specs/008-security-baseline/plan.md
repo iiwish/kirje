@@ -78,22 +78,26 @@ through the explicit non-default `test-support` feature.
 
 ### Credential Capability Boundary
 
-`kirje-credential` is a lower-level workspace crate jointly consumed by
-`kirje-store` and `kirje-runtime`. It owns the opaque non-`Clone`, non-`Debug`,
-non-serializable `DeleteOnlyLocator`, the privately sealed delete-only janitor
-trait, and the only approved concrete janitors. A007 introduces the crate,
-locator/trait foundation, deterministic test janitor, root workspace/dependency
-entries, and the store dependency. T204 adds the concrete keyring janitor and
-migrates real credential-store ownership out of the legacy runtime
-`SecretStore` implementation.
+`kirje-credential` is a lower-level unpublished (`publish = false`) workspace
+crate and a direct dependency of `kirje-store` only. It owns the opaque
+non-`Clone`, non-`Debug`, non-serializable `DeleteOnlyLocator` and the concrete
+delete-only keyring function/backend. No public or sealed janitor trait exists.
+Every other workspace crate, including runtime, core, CLI, MCP, and protocol,
+must not directly depend on, receive, or re-export the crate or locator. The
+constructor and function may be Rust-public only because cross-crate use
+requires it; the enforceable boundary is the Cargo dependency allowlist, not a
+friend-visibility claim.
 
 `kirje-store` owns `CleanupDeletePermit` and the fixed authority apply lock. Its
-only deletion surface consumes the permit and accepts the sealed janitor, so it
-performs janitor deletion plus terminal authority commit as one API. Runtime
-wires the credential crate's concrete janitor into this method without reading,
-constructing from raw fields, inspecting, or exporting locator material. This
-dependency direction is acyclic: credential is lower than store/runtime; store
-depends on credential; runtime depends on both.
+only public deletion surface consumes the permit, constructs the locator, calls
+`kirje_credential::delete_only` exactly once under that lock, and commits the
+terminal state after `Ok(())`. Deleted and `NoEntry` have the same success;
+there is no outcome enum or presence signal. Open/read/validation paths never
+call the keyring, and store never re-exports low-level APIs. A007 introduces the
+crate, opaque locator, root/store dependency entries, and store-private fake
+deletion hook. A008 adds the concrete low-level keyring delete and sole
+production store call site. T204 wires runtime/CLI only to the high-level store
+API and migrates/removes legacy runtime `SecretStore` paths.
 
 ### Runtime
 
@@ -326,13 +330,15 @@ tombstone is one domain-separated 14-field transcript bound to the finalized
 origin transition's historical-before account, credential, and binding. All v1
 tombstones are transition-bound, including legacy locators. Claim consumes one
 grant and returns an opaque apply-lock-owning delete permit. A combined service
-consumes the permit, calls only the delete-only janitor, and commits deletion;
+consumes the permit, calls only the low-level delete function, and commits deletion;
 it exposes neither a standalone terminal marker nor a deleted-versus-absent
-result. A007 creates the lower-level credential crate, opaque locator, sealed
-janitor boundary, deterministic test janitor, store-owned permit, and combined
-store method. T204 adds the credential crate's real keyring janitor, migrates
-the legacy runtime `SecretStore`, and proves end-to-end crash recovery. No
-schema or core transcript changes are part of this architecture decision.
+result. A007 creates the unpublished lower-level credential crate, opaque
+locator, store-only direct dependency, store-private fake deletion hook,
+store-owned permit, and combined store contract. A008 adds the real low-level
+keyring delete and sole production store call site. T204 migrates/removes legacy
+runtime `SecretStore` paths, wires runtime/CLI only to the high-level store API,
+and proves end-to-end crash recovery. No schema or core transcript changes are
+part of this architecture decision.
 
 ### D-009 Unified Same-Handle Bounded Input
 
@@ -629,7 +635,9 @@ Execution still requires one self-contained packet per risky batch, verified
 RED evidence, and all required reviews. On 2026-08-31 the orchestrator exercised
 the user's standing delegated acceptance authority to approve the material
 `kirje-credential` workspace/dependency architecture needed to make the cleanup
-capability implementable. This is an architecture decision, not an
+capability implementable. That decision specifies one unpublished low-level
+crate with `kirje-store` as its only direct dependent and supersedes any shared
+store/runtime or pluggable deletion formulation. This is an architecture decision, not an
 implementation claim and not a claim that the user personally reviewed the
 resulting artifact. Production remains closed until the applicable packet and
 evidence gates pass.

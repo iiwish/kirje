@@ -36,8 +36,11 @@
 - On 2026-08-31 the orchestrator exercised that delegated authority to approve
   the material `kirje-credential` workspace/dependency architecture after the
   first A006 packet review proved the prior cross-crate capability impossible.
-  The decision is not implementation evidence; A006/A007 remain closed until
-  their independent packet and execution gates pass.
+  The same delegated decision specifies an unpublished crate with
+  `kirje-store` as its sole direct dependent and supersedes the flawed shared
+  runtime/pluggable deletion formulation identified by repeat review. The
+  decision is not implementation evidence; A006/A007 remain closed until their
+  independent packet and execution gates pass.
 - No task may expose credentials, owner private keys, signatures, mailbox
   content, account addresses, endpoints, UIDs, or raw provider responses in
   committed fixtures/evidence.
@@ -730,7 +733,10 @@ immutable after versions, and the no-cleanup/no-keyring boundary. The user
 explicitly accepted A005 on 2026-08-30 and approved the cleanup security-
 contract amendment. The first independent A006 packet review found three High
 gaps: a current-binding contradiction, incomplete clock-only recovery rules,
-and a non-implementable cross-crate janitor capability. This amendment defines the canonical locator and
+and a non-implementable cross-crate deletion capability. Repeat review accepted
+the first two repairs but found one High in the shared public deletion surface.
+The focused amendment makes the unpublished low-level crate store-only. The
+amendment defines the canonical locator and
 tombstone transcripts, historical origin, transition-bound legacy ownership,
 challenge eligibility, claim identity/retry/expiry/concurrency, opaque permit,
 combined deletion boundary, crash recovery, events 16/17, restart/cardinality/
@@ -777,15 +783,18 @@ Test targets:
   historical-before binding across later update/remove/recreation
 - Claim response loss/concurrency/expiry/exact-versus-changed grant retry,
   opaque permit compile negatives, and adjacent grant/event-16 cardinality
-- Fake-janitor pre-call/post-call/pre-terminal crash windows, backend failure,
+- Fake-deletion-hook pre-call/post-call/pre-terminal crash windows, backend failure,
   deleted/no-entry indistinguishability, terminal no-recall, and exact event-17
   order/cardinality
 - Reservation constructor and pre-insert prepare rejection for malformed or
   wrong-origin active-v2/legacy-v1 transcripts with zero durable mutation
 - Exact pending-reuse and claimed-recovery clock-only mutation; expired-pending
   replacement and concurrent exact issuance entropy/event/restart matrices
-- A007 workspace/dependency-cycle check, opaque-type compile negatives, sealed
-  external-implementation failure, and deterministic credential-crate janitor
+- Cargo metadata/tree direct-dependency allowlist proving only `kirje-store`
+  directly depends on unpublished `kirje-credential`
+- Exactly one production `kirje_credential::delete_only(` call in the combined
+  store method; no store re-export; runtime compile-fail import/name fixture
+- Opaque-type compile negatives and deterministic store-private fake deletion
   call log
 
 Validation commands:
@@ -809,15 +818,18 @@ there is no separate `008-security-baseline/packets/T202C3.yaml`.
 
 Attempt ownership is serial: A006 owns canonical locator validation at
 reservation/prepare plus effect-free cleanup challenge issuance, without
-changing transition state-machine behavior. A007 owns the new lower-level
-`kirje-credential` workspace crate, root/store dependency entries, opaque
-locator, sealed janitor trait and deterministic test janitor, store-owned permit
-and combined method, atomic grant use, ready-to-claimed transition, and event
-16. A008 owns the combined test-janitor delete/terminal behavior and event 17.
-Only a reviewed predecessor may unlock the next outline. T202C3 owns no real
-keyring janitor. T204 owns the credential crate's real keyring implementation,
-legacy runtime `SecretStore` migration, runtime wiring, and end-to-end
-integration and must preserve every final 1.0 cleanup invariant.
+changing transition state-machine behavior. A007 owns the new unpublished
+`kirje-credential` workspace crate, root/store-only dependency entries, opaque
+locator, store-private fake deletion hook, store-owned permit and combined
+method foundation, atomic grant use, ready-to-claimed transition, and event 16.
+A008 owns the real low-level keyring delete, the sole production store call
+site, combined delete/terminal behavior, dependency/no-re-export/compile-fail
+enforcement, and event 17. Only a reviewed predecessor may unlock the next
+outline. T204 migrates/removes legacy runtime `SecretStore` paths, wires runtime
+and CLI only to the high-level store cleanup API, and proves end-to-end
+integration without directly depending on or receiving/re-exporting
+`kirje-credential` or locator material. It must preserve every final 1.0 cleanup
+invariant.
 
 Evidence required:
 - `.ai-platform/evidence/T202C3/summary.md`
@@ -1163,16 +1175,16 @@ Goal:
 Replace display-ID upsert and credential addressing with strict config v2,
 stable store/account/credential IDs, v1 quarantine migration, locked CAS writes,
 pinned store/account registry transitions, active/delete-only keyring ports, and
-stable account references in the local message index. Add the concrete keyring
-janitor inside `kirje-credential`, migrate real credential-store ownership from
-the legacy runtime `SecretStore`, and wire runtime to the store's consuming
-cleanup method without raw locator access. The task also constructs the
+stable account references in the local message index. Migrate/remove legacy
+runtime `SecretStore` paths and wire runtime/CLI only to the store's high-level
+consuming cleanup method without any direct `kirje-credential` dependency or
+raw locator access. T202C3-A008 already owns the low-level concrete keyring
+delete and sole production store adapter call. This task also constructs the
 immutable `LedgerV3MigrationContext` consumed by T205.
 
 Allowed files:
 - `Cargo.toml`
 - `Cargo.lock`
-- `crates/kirje-credential/**`
 - `crates/kirje-core/src/account.rs`
 - `crates/kirje-core/src/lib.rs`
 - `crates/kirje-core/src/mail.rs`
@@ -1192,8 +1204,10 @@ Forbidden changes:
 - Display-ID upsert or mutation
 - Credential bytes in config, manifest, arguments, output, logs, tests, or
   evidence
-- A second locator type, unsealed janitor implementation surface, caller-owned
-  terminal marker, or runtime raw-locator constructor/export
+- Any direct runtime/CLI/MCP/protocol/core dependency on, import of, receipt of,
+  or re-export from `kirje-credential`
+- A second locator type, pluggable deletion implementation surface,
+  caller-owned terminal marker, or runtime raw-locator constructor/export
 
 Test targets:
 - Strict config v2 parsing/state/duplicates/unrecognized fields/size/newer version
@@ -1208,11 +1222,10 @@ Test targets:
 - Active locator digest and zero active use of legacy locator
 - Set/delete/binding-change crash order and delete-only cleanup capability
 - Runtime/keyring wiring for the reviewed cleanup claim/permit/combined-apply
-  contract, including concrete `kirje-credential` keyring janitor, legacy
-  runtime-store migration, and exact retry after every janitor/terminal crash
-  window
+  contract, including legacy runtime-store migration and exact retry after
+  every low-level-delete/terminal crash window through the high-level store API
 - Runtime dependency/source scan proving no locator constructor, canonical raw
-  transcript, direct janitor delete, or terminal marker access
+  transcript, direct low-level delete, or terminal marker access
 - Status orthogonal states/privacy
 - Message-index migration to stable account ID and same-display-ID recreation
   isolation
@@ -1223,9 +1236,9 @@ Deliverables:
 - Config v2 repository/migration, account service, bound secret ports, registry
   integration, and stable message-index migration
 - Config/account/status and fake-keyring contract fixtures
-- Concrete keyring janitor implemented only inside `kirje-credential`, plus
-  runtime wiring for the T202C3 authority cleanup state machine; no second
-  claim, locator, permit, janitor trait, or terminal-state API
+- Runtime/CLI wiring for the T202C3 high-level authority cleanup API and removal
+  of legacy runtime `SecretStore` paths; no direct low-level crate dependency,
+  second claim, locator, permit, deletion trait, or terminal-state API
 
 Acceptance criteria:
 - Every legacy account is quarantined with zero legacy read/presence calls.

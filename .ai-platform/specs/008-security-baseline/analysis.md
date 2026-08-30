@@ -13,16 +13,20 @@
 ## Gate Result
 
 - Critical findings: 0 unresolved.
-- High findings: 3 open pending repeat independent review. The first A006
+- High findings: 1 open pending another repeat independent review. The first A006
   review rejected the current-binding contradiction, incomplete clock-only
   recovery rule, and non-implementable cross-crate delete capability. The
   revised amendment makes cleanup the explicit historical-before exception,
-  limits exact pending/claimed recovery to the paired clock, introduces the
-  lower shared `kirje-credential` crate and acyclic store/runtime ownership,
-  hardens reservation/prepare canonicality, and adds complete replacement/race
-  and synthetic-vector contracts. These fixes are proposed, not independently
-  closed. A006 remains `ready_for_review` with production permission `none`;
-  A007/A008 remain non-executable JIT outlines. The 3 A001 T202C1 findings are closed by A002
+  limits exact pending/claimed recovery to the paired clock, hardens
+  reservation/prepare canonicality, and adds complete replacement/race and
+  synthetic-vector contracts. Repeat review found one remaining High: the
+  shared public constructor/deletion surface still allowed runtime to bypass
+  authority. The focused revision makes the unpublished low-level crate a
+  direct dependency of store only, removes the trait/plugin surface, and makes
+  the combined store apply method the sole production call site. This fix is
+  proposed, not independently closed. A006 remains `ready_for_review` with
+  production permission `none`; A007/A008 remain non-executable JIT outlines.
+  The 3 A001 T202C1 findings are closed by A002
   and `T202C1_A002_PACKET_REVIEW_PASS`. Historical challenge validation is now
   intrinsic, lifecycle replacement and final-state terminals are distinct, and
   durable grant/event time is store-derived effective authority time with a
@@ -68,8 +72,9 @@ must preserve that placement or add an explicit counter before loop expansion.
   Accepted. T202C3 has a revised contract under review and remains non-executable after the user's
   acceptance of `T202C3-A005` at production commit `316dae0` and approval of the
   cleanup security-contract amendment on 2026-08-30. The orchestrator approved
-  the material shared-credential-crate architecture under delegated authority on
-  2026-08-31. The next attempt, T202C3-A006, awaits repeat independent packet
+  the material unpublished store-only credential-crate architecture under
+  delegated authority on 2026-08-31, superseding the flawed shared formulation.
+  The next attempt, T202C3-A006, awaits another independent packet
   review and has no production execution permission.
   T202C4, T202D-T202E, and T203-T212 remain dependency-gated Draft work. T204
   and every later task directly require the T202 umbrella to be Accepted.
@@ -145,11 +150,14 @@ The spec, plan, data model, and contracts all state the same guarantee:
 - Config location binds open parent identity and final native component.
 - Authority registry provides store/location and account/binding uniqueness.
 - Keyring locator binds realm/store/account/credential/binding.
-- The acyclic credential capability boundary is implementable: lower
-  `kirje-credential` owns opaque locator plus sealed janitors, `kirje-store`
-  owns the lock-holding permit and consuming combined method, and runtime wires
-  only the credential crate's concrete keyring janitor without raw locator
-  access. A007 owns the foundation/test janitor; T204 owns real integration.
+- The credential capability boundary is enforceable: unpublished lower
+  `kirje-credential` is a direct dependency of `kirje-store` only and owns the
+  opaque locator plus concrete delete-only backend. Store owns the lock-holding
+  permit, sole production low-level call site, and combined terminal method.
+  Runtime calls only that high-level method and never imports, receives, or
+  re-exports low-level APIs. A007 owns the crate/type/store-only dependency and
+  store-private fake hook; A008 owns the real backend and sole call site; T204
+  owns only high-level runtime/CLI integration and legacy-path removal.
 - Legacy entries are never read/tested/copied; cleanup has delete-only typing.
 - Config v1 migration is locked, bounded, idempotent, quarantined, and
   crash-recoverable on every supported platform without claiming Windows
@@ -179,7 +187,7 @@ The spec, plan, data model, and contracts all state the same guarantee:
 | FR-005 | explicit update/new credential snapshot | T204, T206 | update/CAS/snapshot tests |
 | FR-006 | governed account/credential lifecycle | T202C, T204, T206, T207 | control manifest and crash-order tests |
 | FR-007 | locked restart-safe v1 migration | T203, T204 | interruption/idempotency/permission matrix |
-| FR-008 | legacy quarantine/delete-only cleanup | T204 | fake keyring call log and janitor tests |
+| FR-008 | legacy quarantine/delete-only cleanup | T202C3, T204 | store-private fake deletion log, low-level boundary, and integration tests |
 | FR-009 | orthogonal private status | T204, T207 | status golden/privacy scan |
 | FR-010 | legacy ledger state migration | T205 | all-state v1/v2/v3 fixtures |
 | FR-011 | strict config/ledger migration bounds | T203-T205 | newer/duplicate/malformed/N+1 tests |
