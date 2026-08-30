@@ -6,6 +6,8 @@ use std::{
 };
 
 #[cfg(feature = "test-support")]
+use std::cell::Cell;
+#[cfg(feature = "test-support")]
 use std::sync::{Arc, Barrier, Mutex};
 
 use chrono::{DateTime, SecondsFormat, TimeZone as _, Utc};
@@ -14,8 +16,8 @@ use kirje_core::{
     ActionManifest, AuthorizationGrantId, AuthorizationPayload, AuthorizationProof,
     AuthorizationReceiptId, AuthorizationReceiptProjection, AuthorizationReceiptState, JournalId,
     MailError, MailErrorCode, ManifestPayload, OwnerKeyRole, OwnerPublicKey, OwnerRealmId,
-    SensitiveAction, Sha256Digest, StoreEnrollmentState, TargetKind, TrustPermissionMask,
-    owner_key_id, verify_authorization_signature,
+    PlatformLocationMaterial, SensitiveAction, Sha256Digest, StoreEnrollmentState, StoreId,
+    TargetKind, TrustPermissionMask, owner_key_id, verify_authorization_signature,
 };
 use rusqlite::{
     Connection, OpenFlags, OptionalExtension as _, Transaction, TransactionBehavior, params,
@@ -32,6 +34,8 @@ const TRUST_BUNDLE_DOMAIN: &[u8] = b"KIRJE-TRUST-BUNDLE-V1\0";
 const EVENT_DETAIL_DOMAIN: &[u8] = b"KIRJE-AUTHORITY-EVENT-DETAIL-V1\0";
 const AUTHORIZATION_CONTEXT_DOMAIN: &[u8] = b"KIRJE-AUTHORIZATION-CONTEXT-V1\0";
 const AUTHORIZATION_RECEIPT_DOMAIN: &[u8] = b"KIRJE-AUTHORIZATION-RECEIPT-V1\0";
+const GRANT_USE_DOMAIN: &[u8] = b"KIRJE-GRANT-USE-V1\0";
+const STORE_ENROLLMENT_INTENT_DOMAIN: &[u8] = b"KIRJE-STORE-ENROLLMENT-INTENT-V1\0";
 const AUTHORIZATION_LIFETIME_MS: i64 = 900_000;
 
 const TABLES: [&str; 17] = [
@@ -167,6 +171,123 @@ pub struct CreateChallengeRequest {
 pub struct VerifyProofRequest {
     pub proof: AuthorizationProof,
     pub observed_at_unix_ms: i64,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct GrantUseRequest {
+    grant_id: AuthorizationGrantId,
+    receipt_id: AuthorizationReceiptId,
+    action: SensitiveAction,
+    target_kind: TargetKind,
+    target_bytes: Vec<u8>,
+    manifest_sha256: Sha256Digest,
+}
+
+impl GrantUseRequest {
+    /// Bind one bounded immutable grant-use identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns invalid-input when action, target kind, or target bytes disagree.
+    pub fn new(
+        grant_id: AuthorizationGrantId,
+        receipt_id: AuthorizationReceiptId,
+        action: SensitiveAction,
+        target_kind: TargetKind,
+        target_bytes: Vec<u8>,
+        manifest_sha256: Sha256Digest,
+    ) -> Result<Self, MailError> {
+        if action.policy().target_kind != target_kind
+            || !valid_target_shape(target_kind, &target_bytes)
+        {
+            return Err(MailError::invalid_input(
+                "grant target is outside the authorization contract",
+            ));
+        }
+        Ok(Self {
+            grant_id,
+            receipt_id,
+            action,
+            target_kind,
+            target_bytes,
+            manifest_sha256,
+        })
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct EnrollStoreRequest {
+    grant_use: GrantUseRequest,
+    store_id: StoreId,
+    location_material: PlatformLocationMaterial,
+    location_bytes: Vec<u8>,
+    location_sha256: Sha256Digest,
+    config_generation: NonZeroU64,
+    config_sha256: Sha256Digest,
+    observed_at_unix_ms: i64,
+}
+
+impl EnrollStoreRequest {
+    /// Bind one exact private platform location and initial config identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable input/resource errors before any database access.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        grant_use: GrantUseRequest,
+        store_id: StoreId,
+        location_material: PlatformLocationMaterial,
+        location_sha256: Sha256Digest,
+        config_generation: NonZeroU64,
+        config_sha256: Sha256Digest,
+        observed_at_unix_ms: i64,
+    ) -> Result<Self, MailError> {
+        if observed_at_unix_ms < 0 {
+            return Err(MailError::invalid_input(
+                "authority observation time must be nonnegative",
+            ));
+        }
+        input_utc_millis(observed_at_unix_ms)?;
+        if config_generation.get() > u64::try_from(i64::MAX).unwrap_or(u64::MAX) {
+            return Err(MailError::invalid_input(
+                "config generation is outside the store range",
+            ));
+        }
+        let location_bytes = location_material.canonical_bytes()?;
+        if location_bytes.is_empty()
+            || location_bytes.len() > 4_096
+            || Sha256Digest::digest(&location_bytes) != location_sha256
+        {
+            return Err(MailError::invalid_input(
+                "config location material does not match its digest",
+            ));
+        }
+        Ok(Self {
+            grant_use,
+            store_id,
+            location_material,
+            location_bytes,
+            location_sha256,
+            config_generation,
+            config_sha256,
+            observed_at_unix_ms,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum EnrolledStoreState {
+    Active,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct EnrolledStoreProjection {
+    pub store_id: StoreId,
+    pub state: EnrolledStoreState,
+    pub config_generation: NonZeroU64,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -369,6 +490,91 @@ pub enum AuthorityFaultPoint {
     ExpiryEvent,
     ExpiryBeforeCommit,
     ExpiryAfterCommit,
+    GrantUseInserted,
+    GrantUsedEvent,
+    RegisteredStoreInserted,
+    StoreEnrolledEvent,
+    EnrollmentClockUpdated,
+    EnrollmentBeforeCommit,
+    EnrollmentAfterCommit,
+    EnrollmentExpiredState,
+    EnrollmentExpiryClockUpdated,
+    EnrollmentExpiryEvent,
+    EnrollmentExpiryAfterCommit,
+    EnrollmentChallengeRead,
+}
+
+#[cfg(feature = "test-support")]
+#[derive(Clone, Copy, Default)]
+pub struct AuthorityValidationQueryCounts {
+    pub challenge_preflight: u64,
+    pub receipt_preflight: u64,
+    pub nonce_preflight: u64,
+    pub grant_preflight: u64,
+    pub store_preflight: u64,
+    pub event_preflight: u64,
+    pub registry_stream: u64,
+    pub bounded_keyed: u64,
+}
+
+#[cfg(feature = "test-support")]
+std::thread_local! {
+    static AUTHORITY_VALIDATION_QUERY_COUNTS: Cell<AuthorityValidationQueryCounts> =
+        const { Cell::new(AuthorityValidationQueryCounts {
+            challenge_preflight: 0,
+            receipt_preflight: 0,
+            nonce_preflight: 0,
+            grant_preflight: 0,
+            store_preflight: 0,
+            event_preflight: 0,
+            registry_stream: 0,
+            bounded_keyed: 0,
+        }) };
+}
+
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub fn reset_authority_validation_query_counts() {
+    AUTHORITY_VALIDATION_QUERY_COUNTS.set(AuthorityValidationQueryCounts::default());
+}
+
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+#[must_use]
+pub fn take_authority_validation_query_counts() -> AuthorityValidationQueryCounts {
+    AUTHORITY_VALIDATION_QUERY_COUNTS.replace(AuthorityValidationQueryCounts::default())
+}
+
+#[derive(Clone, Copy)]
+enum ValidationQueryKind {
+    ChallengePreflight,
+    ReceiptPreflight,
+    NoncePreflight,
+    GrantPreflight,
+    StorePreflight,
+    EventPreflight,
+    RegistryStream,
+    BoundedKeyed,
+}
+
+fn record_validation_query(kind: ValidationQueryKind) {
+    #[cfg(feature = "test-support")]
+    AUTHORITY_VALIDATION_QUERY_COUNTS.with(|cell| {
+        let mut counts = cell.get();
+        match kind {
+            ValidationQueryKind::ChallengePreflight => counts.challenge_preflight += 1,
+            ValidationQueryKind::ReceiptPreflight => counts.receipt_preflight += 1,
+            ValidationQueryKind::NoncePreflight => counts.nonce_preflight += 1,
+            ValidationQueryKind::GrantPreflight => counts.grant_preflight += 1,
+            ValidationQueryKind::StorePreflight => counts.store_preflight += 1,
+            ValidationQueryKind::EventPreflight => counts.event_preflight += 1,
+            ValidationQueryKind::RegistryStream => counts.registry_stream += 1,
+            ValidationQueryKind::BoundedKeyed => counts.bounded_keyed += 1,
+        }
+        cell.set(counts);
+    });
+    #[cfg(not(feature = "test-support"))]
+    let _ = kind;
 }
 
 #[derive(Clone, Default)]
@@ -413,6 +619,15 @@ impl AuthorityTestHooks {
         let _ = point;
         Ok(())
     }
+
+    fn read_fault(&self, point: TestFaultPoint) -> Result<(), MailError> {
+        #[cfg(feature = "test-support")]
+        if self.fault == Some(point.into()) {
+            return Err(store_read_error());
+        }
+        let _ = point;
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -437,6 +652,18 @@ enum TestFaultPoint {
     ExpiryEvent,
     ExpiryBeforeCommit,
     ExpiryAfterCommit,
+    GrantUseInserted,
+    GrantUsedEvent,
+    RegisteredStoreInserted,
+    StoreEnrolledEvent,
+    EnrollmentClockUpdated,
+    EnrollmentBeforeCommit,
+    EnrollmentAfterCommit,
+    EnrollmentExpiredState,
+    EnrollmentExpiryClockUpdated,
+    EnrollmentExpiryEvent,
+    EnrollmentExpiryAfterCommit,
+    EnrollmentChallengeRead,
 }
 
 #[cfg(feature = "test-support")]
@@ -463,6 +690,18 @@ impl From<TestFaultPoint> for AuthorityFaultPoint {
             TestFaultPoint::ExpiryEvent => Self::ExpiryEvent,
             TestFaultPoint::ExpiryBeforeCommit => Self::ExpiryBeforeCommit,
             TestFaultPoint::ExpiryAfterCommit => Self::ExpiryAfterCommit,
+            TestFaultPoint::GrantUseInserted => Self::GrantUseInserted,
+            TestFaultPoint::GrantUsedEvent => Self::GrantUsedEvent,
+            TestFaultPoint::RegisteredStoreInserted => Self::RegisteredStoreInserted,
+            TestFaultPoint::StoreEnrolledEvent => Self::StoreEnrolledEvent,
+            TestFaultPoint::EnrollmentClockUpdated => Self::EnrollmentClockUpdated,
+            TestFaultPoint::EnrollmentBeforeCommit => Self::EnrollmentBeforeCommit,
+            TestFaultPoint::EnrollmentAfterCommit => Self::EnrollmentAfterCommit,
+            TestFaultPoint::EnrollmentExpiredState => Self::EnrollmentExpiredState,
+            TestFaultPoint::EnrollmentExpiryClockUpdated => Self::EnrollmentExpiryClockUpdated,
+            TestFaultPoint::EnrollmentExpiryEvent => Self::EnrollmentExpiryEvent,
+            TestFaultPoint::EnrollmentExpiryAfterCommit => Self::EnrollmentExpiryAfterCommit,
+            TestFaultPoint::EnrollmentChallengeRead => Self::EnrollmentChallengeRead,
         }
     }
 }
@@ -781,7 +1020,7 @@ impl AuthorityStore {
         let loaded = self.validate_ready_transaction(&transaction)?;
         let effective_time = checked_clock(loaded.last_observed_at, request.observed_at_unix_ms)?;
         utc_millis(effective_time)?;
-        validate_supported_manifest(&transaction, &loaded.snapshot, &request.manifest)?;
+        validate_intrinsic_manifest(&loaded.snapshot, &request.manifest)?;
 
         let signer_key_id = match request.manifest.action().policy().required_role {
             OwnerKeyRole::Owner => loaded.snapshot.owner_key_id,
@@ -832,6 +1071,7 @@ impl AuthorityStore {
                 .fault(TestFaultPoint::OldChallengeExpiredEvent)?;
         }
 
+        validate_fresh_manifest_context(&transaction, &request.manifest)?;
         validate_requested_expiry(effective_time, request.expires_at_unix_ms)?;
 
         let mut grant_bytes = [0_u8; 16];
@@ -966,9 +1206,11 @@ impl AuthorityStore {
                 return Err(authorization_replayed_error());
             }
             observe_clock_pair(&transaction, effective_time)?;
+            let projection =
+                receipt_projection(&transaction, &challenge, &receipt, effective_time)?;
             transaction.commit().map_err(|_| store_write_error())?;
             secure_authority_files(&self.home.database)?;
-            return receipt_projection(&challenge, &receipt, effective_time);
+            return Ok(projection);
         }
 
         match challenge.state.as_str() {
@@ -1098,10 +1340,207 @@ impl AuthorityStore {
         )?;
         self.test_hooks.fault(TestFaultPoint::AuthorizationEvent)?;
         self.test_hooks.fault(TestFaultPoint::ProofBeforeCommit)?;
+        let projection =
+            receipt_projection(&transaction, &challenge, &stored_receipt, effective_time)?;
         transaction.commit().map_err(|_| store_write_error())?;
         secure_authority_files(&self.home.database)?;
         self.test_hooks.fault(TestFaultPoint::ProofAfterCommit)?;
-        receipt_projection(&challenge, &stored_receipt, effective_time)
+        Ok(projection)
+    }
+
+    /// Consume one immutable store-enrollment receipt and register its exact store.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable replay, expiry, context, identity, recovery, clock, or store errors.
+    #[allow(clippy::too_many_lines, clippy::needless_pass_by_value)]
+    pub fn enroll_store(
+        &self,
+        request: EnrollStoreRequest,
+    ) -> Result<EnrolledStoreProjection, MailError> {
+        validate_enroll_store_request(&request)?;
+        if !matches!(self.state, AuthorityOpenState::Ready(_)) {
+            return Err(recovery_error());
+        }
+        let _apply_lock = acquire_apply_lock(&self.home)?;
+        if !authority_database_exists(&self.home.database)? {
+            return Err(recovery_error());
+        }
+        let mut connection = existing_authority_read_connection(&self.home.database)?;
+        if classify_database(&connection)? != DatabaseClass::AuthorityV1 {
+            return Err(recovery_error());
+        }
+        configure_authority_pragmas(&connection)?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| store_write_error())?;
+        let loaded = self.validate_ready_transaction(&transaction)?;
+
+        if let Some(grant) = load_grant_use(&transaction, request.grant_use.grant_id)? {
+            if !grant.matches_request(&request.grant_use) {
+                return Err(grant_already_used_error());
+            }
+            let receipt = load_receipt_by_id(&transaction, request.grant_use.receipt_id)?
+                .ok_or_else(recovery_error)?;
+            let challenge = load_challenge(&transaction, receipt.challenge_id)?;
+            let enrollment = validate_enrollment_identity(&request, &challenge, &receipt)?;
+            let store = load_registered_store_by_receipt(&transaction, receipt.receipt_id)?
+                .ok_or_else(recovery_error)?;
+            if !store.matches_request(&request, &enrollment) {
+                return Err(authorization_context_stale_error());
+            }
+            let effective_time =
+                checked_clock(loaded.last_observed_at, request.observed_at_unix_ms)?;
+            utc_millis(effective_time)?;
+            observe_clock_pair(&transaction, effective_time)?;
+            transaction.commit().map_err(|_| store_write_error())?;
+            secure_authority_files(&self.home.database)?;
+            return enrolled_store_projection(&store);
+        }
+
+        let receipt = load_receipt_by_id(&transaction, request.grant_use.receipt_id)?
+            .ok_or_else(authorization_context_stale_error)?;
+        let challenge = classify_enrollment_challenge_result(
+            self.test_hooks
+                .read_fault(TestFaultPoint::EnrollmentChallengeRead)
+                .and_then(|()| load_challenge(&transaction, receipt.challenge_id)),
+        )?;
+        let _enrollment = validate_enrollment_identity(&request, &challenge, &receipt)?;
+        let intent_sha256 = enrollment_intent_digest(&request);
+        let effective_time = checked_clock(loaded.last_observed_at, request.observed_at_unix_ms)?;
+        utc_millis(effective_time)?;
+
+        if challenge.state == "expired" {
+            validate_exact_enrollment_expiry(&transaction, &challenge, &receipt, intent_sha256)?;
+            observe_clock_pair(&transaction, effective_time)?;
+            transaction.commit().map_err(|_| store_write_error())?;
+            secure_authority_files(&self.home.database)?;
+            return Err(authorization_expired_error());
+        }
+        if challenge.state != "authorized" {
+            return Err(authorization_context_stale_error());
+        }
+        if effective_time > receipt.expires_at {
+            let changed = transaction
+                .execute(
+                    "UPDATE authorization_challenges SET state='expired'
+                     WHERE challenge_id=?1 AND state='authorized'",
+                    [challenge.challenge_id.as_bytes()],
+                )
+                .map_err(|_| store_write_error())?;
+            if changed != 1 {
+                return Err(recovery_error());
+            }
+            self.test_hooks
+                .fault(TestFaultPoint::EnrollmentExpiredState)?;
+            observe_clock_pair(&transaction, effective_time)?;
+            self.test_hooks
+                .fault(TestFaultPoint::EnrollmentExpiryClockUpdated)?;
+            insert_enrollment_expiry_event(
+                &transaction,
+                &challenge,
+                &receipt,
+                intent_sha256,
+                effective_time,
+            )?;
+            self.test_hooks
+                .fault(TestFaultPoint::EnrollmentExpiryEvent)?;
+            transaction.commit().map_err(|_| store_write_error())?;
+            secure_authority_files(&self.home.database)?;
+            self.test_hooks
+                .fault(TestFaultPoint::EnrollmentExpiryAfterCommit)?;
+            return Err(authorization_expired_error());
+        }
+
+        if store_identity_count(&transaction, request.store_id, request.location_sha256)? != 0 {
+            return Err(config_store_identity_conflict_error());
+        }
+        let use_receipt = grant_use_transcript(&request.grant_use, effective_time);
+        let use_sha256 = Sha256Digest::digest(&use_receipt);
+        let inserted = transaction
+            .execute(
+                "INSERT INTO grant_uses
+                 (grant_id,receipt_id,action,target_kind,target_id,manifest_sha256,
+                  use_receipt,use_sha256,used_at)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+                params![
+                    request.grant_use.grant_id.as_bytes(),
+                    request.grant_use.receipt_id.as_bytes(),
+                    i64::from(request.grant_use.action.code()),
+                    i64::from(request.grant_use.target_kind.code()),
+                    &request.grant_use.target_bytes,
+                    request.grant_use.manifest_sha256.as_bytes(),
+                    &use_receipt,
+                    use_sha256.as_bytes(),
+                    effective_time,
+                ],
+            )
+            .map_err(|_| store_write_error())?;
+        if inserted != 1 {
+            return Err(store_write_error());
+        }
+        self.test_hooks.fault(TestFaultPoint::GrantUseInserted)?;
+        insert_grant_used_event(
+            &transaction,
+            request.grant_use.grant_id,
+            receipt.receipt_id,
+            use_sha256,
+            effective_time,
+        )?;
+        self.test_hooks.fault(TestFaultPoint::GrantUsedEvent)?;
+        let inserted = transaction
+            .execute(
+                "INSERT INTO registered_stores
+                 (store_id,location_material,location_sha256,config_generation,config_sha256,
+                  state,enrolled_receipt_id,created_at,updated_at,removed_at)
+                 VALUES(?1,?2,?3,?4,?5,'active',?6,?7,?7,NULL)",
+                params![
+                    request.store_id.as_bytes(),
+                    &request.location_bytes,
+                    request.location_sha256.as_bytes(),
+                    i64::try_from(request.config_generation.get())
+                        .map_err(|_| authorization_context_stale_error())?,
+                    request.config_sha256.as_bytes(),
+                    receipt.receipt_id.as_bytes(),
+                    effective_time,
+                ],
+            )
+            .map_err(|_| store_write_error())?;
+        if inserted != 1 {
+            return Err(store_write_error());
+        }
+        self.test_hooks
+            .fault(TestFaultPoint::RegisteredStoreInserted)?;
+        insert_store_enrolled_event(
+            &transaction,
+            request.store_id,
+            request.grant_use.grant_id,
+            receipt.receipt_id,
+            use_sha256,
+            effective_time,
+        )?;
+        self.test_hooks.fault(TestFaultPoint::StoreEnrolledEvent)?;
+        observe_clock_pair(&transaction, effective_time)?;
+        self.test_hooks
+            .fault(TestFaultPoint::EnrollmentClockUpdated)?;
+        self.test_hooks
+            .fault(TestFaultPoint::EnrollmentBeforeCommit)?;
+        transaction.commit().map_err(|_| store_write_error())?;
+        secure_authority_files(&self.home.database)?;
+        self.test_hooks
+            .fault(TestFaultPoint::EnrollmentAfterCommit)?;
+        enrolled_store_projection(&StoredRegisteredStore {
+            store_id: request.store_id,
+            location_material: request.location_bytes,
+            location_sha256: request.location_sha256,
+            config_generation: request.config_generation,
+            config_sha256: request.config_sha256,
+            state: "active".to_owned(),
+            enrolled_receipt_id: receipt.receipt_id,
+            created_at: effective_time,
+            updated_at: effective_time,
+            removed_at: None,
+        })
     }
 
     fn validate_ready_transaction(
@@ -1240,6 +1679,97 @@ struct StoredReceipt {
     expires_at: i64,
 }
 
+struct StoredGrantUse {
+    grant_id: AuthorizationGrantId,
+    receipt_id: AuthorizationReceiptId,
+    action: SensitiveAction,
+    target_kind: TargetKind,
+    target_id: Vec<u8>,
+    manifest_sha256: Sha256Digest,
+    use_receipt: Vec<u8>,
+    use_sha256: Sha256Digest,
+    used_at: i64,
+}
+
+impl StoredGrantUse {
+    fn matches_request(&self, request: &GrantUseRequest) -> bool {
+        self.grant_id == request.grant_id
+            && self.receipt_id == request.receipt_id
+            && self.action == request.action
+            && self.target_kind == request.target_kind
+            && self.target_id == request.target_bytes
+            && self.manifest_sha256 == request.manifest_sha256
+    }
+}
+
+struct StoredRegisteredStore {
+    store_id: StoreId,
+    location_material: Vec<u8>,
+    location_sha256: Sha256Digest,
+    config_generation: NonZeroU64,
+    config_sha256: Sha256Digest,
+    state: String,
+    enrolled_receipt_id: AuthorizationReceiptId,
+    created_at: i64,
+    updated_at: i64,
+    removed_at: Option<i64>,
+}
+
+impl StoredRegisteredStore {
+    fn matches_request(
+        &self,
+        request: &EnrollStoreRequest,
+        enrollment: &StoreEnrollmentContext,
+    ) -> bool {
+        self.store_id == request.store_id
+            && self.location_material == request.location_bytes
+            && self.location_sha256 == request.location_sha256
+            && self.config_generation == request.config_generation
+            && self.config_sha256 == request.config_sha256
+            && self.enrolled_receipt_id == request.grant_use.receipt_id
+            && self.store_id == enrollment.store_id
+            && self.location_sha256 == enrollment.location_sha256
+            && self.config_generation == enrollment.config_generation
+            && self.config_sha256 == enrollment.config_sha256
+    }
+}
+
+#[derive(Clone, Copy)]
+struct StoreEnrollmentContext {
+    store_id: StoreId,
+    location_sha256: Sha256Digest,
+    config_generation: NonZeroU64,
+    config_sha256: Sha256Digest,
+}
+
+fn valid_target_shape(kind: TargetKind, bytes: &[u8]) -> bool {
+    match kind {
+        TargetKind::Operation
+        | TargetKind::Store
+        | TargetKind::Account
+        | TargetKind::Credential
+        | TargetKind::Cleanup
+        | TargetKind::RemoteEffect => bytes.len() == 16,
+        TargetKind::TrustEpoch => bytes.len() == 8 && bytes != [0_u8; 8],
+        TargetKind::Policy | TargetKind::Assurance => bytes.is_empty(),
+    }
+}
+
+fn validate_enroll_store_request(request: &EnrollStoreRequest) -> Result<(), MailError> {
+    input_utc_millis(request.observed_at_unix_ms)?;
+    let canonical = request.location_material.canonical_bytes()?;
+    if canonical != request.location_bytes
+        || canonical.len() > 4_096
+        || Sha256Digest::digest(&canonical) != request.location_sha256
+        || request.config_generation.get() > u64::try_from(i64::MAX).unwrap_or(u64::MAX)
+    {
+        return Err(MailError::invalid_input(
+            "store enrollment request is outside the contract",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_challenge_request(request: &CreateChallengeRequest) -> Result<(), MailError> {
     if request.observed_at_unix_ms < 0 || request.expires_at_unix_ms < 0 {
         return Err(MailError::invalid_input(
@@ -1295,24 +1825,36 @@ fn ensure_t202b_action(action: SensitiveAction) -> Result<(), MailError> {
     }
 }
 
-fn validate_supported_manifest(
+fn validate_fresh_manifest_context(
     connection: &Connection,
+    manifest: &ActionManifest,
+) -> Result<(), MailError> {
+    if let ManifestPayload::StoreEnroll(value) = manifest.payload() {
+        let count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM registered_stores
+                 WHERE store_id=?1 OR location_sha256=?2",
+                params![
+                    value.config_cas.store_id.as_bytes(),
+                    value.config_cas.location_sha256.as_bytes()
+                ],
+                |row| row.get(0),
+            )
+            .map_err(|_| store_read_error())?;
+        if count != 0 {
+            return Err(config_store_identity_conflict_error());
+        }
+    }
+    Ok(())
+}
+
+fn validate_intrinsic_manifest(
     authority: &BootstrapSnapshot,
     manifest: &ActionManifest,
 ) -> Result<(), MailError> {
     match manifest.payload() {
         ManifestPayload::StoreEnroll(value) => {
             if value.expected_store_state != StoreEnrollmentState::Unregistered {
-                return Err(authorization_context_stale_error());
-            }
-            let count: i64 = connection
-                .query_row(
-                    "SELECT COUNT(*) FROM registered_stores WHERE store_id=?1",
-                    [value.config_cas.store_id.as_bytes()],
-                    |row| row.get(0),
-                )
-                .map_err(|_| store_read_error())?;
-            if count != 0 {
                 return Err(authorization_context_stale_error());
             }
         }
@@ -1514,6 +2056,327 @@ fn authorization_receipt(
     )
 }
 
+fn grant_use_transcript(request: &GrantUseRequest, used_at: i64) -> Vec<u8> {
+    let action = request.action.code().to_be_bytes();
+    let target_kind = request.target_kind.code().to_be_bytes();
+    let used_at = used_at.to_be_bytes();
+    encode_transcript(
+        GRANT_USE_DOMAIN,
+        &[
+            request.grant_id.as_bytes(),
+            request.receipt_id.as_bytes(),
+            &action,
+            &target_kind,
+            &request.target_bytes,
+            request.manifest_sha256.as_bytes(),
+            &used_at,
+        ],
+    )
+}
+
+fn enrollment_intent_digest(request: &EnrollStoreRequest) -> Sha256Digest {
+    let action = request.grant_use.action.code().to_be_bytes();
+    let target_kind = request.grant_use.target_kind.code().to_be_bytes();
+    let generation = request.config_generation.get().to_be_bytes();
+    Sha256Digest::digest(&encode_transcript(
+        STORE_ENROLLMENT_INTENT_DOMAIN,
+        &[
+            request.grant_use.grant_id.as_bytes(),
+            request.grant_use.receipt_id.as_bytes(),
+            &action,
+            &target_kind,
+            &request.grant_use.target_bytes,
+            request.grant_use.manifest_sha256.as_bytes(),
+            request.store_id.as_bytes(),
+            request.location_sha256.as_bytes(),
+            &generation,
+            request.config_sha256.as_bytes(),
+        ],
+    ))
+}
+
+fn enrollment_intent_from_rows(
+    challenge: &StoredChallenge,
+    receipt: &StoredReceipt,
+    enrollment: StoreEnrollmentContext,
+) -> Sha256Digest {
+    let action = challenge.action.code().to_be_bytes();
+    let target_kind = challenge.target_kind_code.to_be_bytes();
+    let generation = enrollment.config_generation.get().to_be_bytes();
+    Sha256Digest::digest(&encode_transcript(
+        STORE_ENROLLMENT_INTENT_DOMAIN,
+        &[
+            challenge.grant_id.as_bytes(),
+            receipt.receipt_id.as_bytes(),
+            &action,
+            &target_kind,
+            &challenge.target_id,
+            challenge.manifest_sha256.as_bytes(),
+            enrollment.store_id.as_bytes(),
+            enrollment.location_sha256.as_bytes(),
+            &generation,
+            enrollment.config_sha256.as_bytes(),
+        ],
+    ))
+}
+
+fn store_enrollment_context(
+    manifest: &ActionManifest,
+) -> Result<StoreEnrollmentContext, MailError> {
+    let ManifestPayload::StoreEnroll(value) = manifest.payload() else {
+        return Err(authorization_context_stale_error());
+    };
+    if value.expected_store_state != StoreEnrollmentState::Unregistered {
+        return Err(authorization_context_stale_error());
+    }
+    Ok(StoreEnrollmentContext {
+        store_id: value.config_cas.store_id,
+        location_sha256: value.config_cas.location_sha256,
+        config_generation: value.config_cas.generation,
+        config_sha256: value.config_cas.exact_content_sha256,
+    })
+}
+
+fn validate_enrollment_identity(
+    request: &EnrollStoreRequest,
+    challenge: &StoredChallenge,
+    receipt: &StoredReceipt,
+) -> Result<StoreEnrollmentContext, MailError> {
+    let manifest = ActionManifest::parse(&challenge.manifest)
+        .map_err(|_| authorization_context_stale_error())?;
+    let enrollment = store_enrollment_context(&manifest)?;
+    if request.grant_use.grant_id != challenge.grant_id
+        || request.grant_use.receipt_id != receipt.receipt_id
+        || receipt.challenge_id != challenge.challenge_id
+        || receipt.grant_id != challenge.grant_id
+        || request.grant_use.action != SensitiveAction::StoreEnroll
+        || request.grant_use.action != challenge.action
+        || request.grant_use.target_kind.code() != challenge.target_kind_code
+        || request.grant_use.target_bytes != challenge.target_id
+        || request.grant_use.manifest_sha256 != challenge.manifest_sha256
+        || request.store_id != enrollment.store_id
+        || request.location_sha256 != enrollment.location_sha256
+        || request.config_generation != enrollment.config_generation
+        || request.config_sha256 != enrollment.config_sha256
+        || request.location_bytes != request.location_material.canonical_bytes()?
+    {
+        return Err(authorization_context_stale_error());
+    }
+    Ok(enrollment)
+}
+
+fn classify_enrollment_challenge_result(
+    result: Result<StoredChallenge, MailError>,
+) -> Result<StoredChallenge, MailError> {
+    match result {
+        Ok(challenge) => Ok(challenge),
+        Err(error) if error.code == MailErrorCode::AuthorizationMalformed => {
+            Err(authorization_context_stale_error())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn grant_preflight(connection: &Connection) -> Result<(), MailError> {
+    record_validation_query(ValidationQueryKind::GrantPreflight);
+    let malformed: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM grant_uses WHERE
+             typeof(grant_id)<>'blob' OR length(grant_id)<>16 OR
+             typeof(receipt_id)<>'blob' OR length(receipt_id)<>16 OR
+             typeof(action)<>'integer' OR
+             typeof(target_kind)<>'integer' OR
+             typeof(target_id)<>'blob' OR length(target_id)>256 OR
+             typeof(manifest_sha256)<>'blob' OR length(manifest_sha256)<>32 OR
+             typeof(use_receipt)<>'blob' OR length(use_receipt) NOT BETWEEN 1 AND 16384 OR
+             typeof(use_sha256)<>'blob' OR length(use_sha256)<>32 OR
+             typeof(used_at)<>'integer' OR used_at<0",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| store_read_error())?;
+    if malformed != 0 {
+        return Err(recovery_error());
+    }
+    Ok(())
+}
+
+fn store_preflight(connection: &Connection) -> Result<(), MailError> {
+    record_validation_query(ValidationQueryKind::StorePreflight);
+    let malformed: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM registered_stores WHERE
+             typeof(store_id)<>'blob' OR length(store_id)<>16 OR
+             typeof(location_material)<>'blob' OR length(location_material) NOT BETWEEN 1 AND 4096 OR
+             typeof(location_sha256)<>'blob' OR length(location_sha256)<>32 OR
+             typeof(config_generation)<>'integer' OR config_generation<=0 OR
+             typeof(config_sha256)<>'blob' OR length(config_sha256)<>32 OR
+             typeof(state)<>'text' OR state NOT IN ('active','blocked','removed','recovery_required') OR
+             typeof(enrolled_receipt_id)<>'blob' OR length(enrolled_receipt_id)<>16 OR
+             typeof(created_at)<>'integer' OR created_at<0 OR
+             typeof(updated_at)<>'integer' OR updated_at<created_at OR
+             (removed_at IS NOT NULL AND (typeof(removed_at)<>'integer' OR removed_at<created_at))",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| store_read_error())?;
+    if malformed != 0 {
+        return Err(recovery_error());
+    }
+    Ok(())
+}
+
+fn load_grant_use(
+    connection: &Connection,
+    grant_id: AuthorizationGrantId,
+) -> Result<Option<StoredGrantUse>, MailError> {
+    record_validation_query(ValidationQueryKind::BoundedKeyed);
+    connection
+        .query_row(
+            "SELECT grant_id,receipt_id,action,target_kind,target_id,manifest_sha256,
+                    use_receipt,use_sha256,used_at
+             FROM grant_uses WHERE grant_id=?1",
+            [grant_id.as_bytes()],
+            stored_grant_from_row,
+        )
+        .optional()
+        .map_err(|_| store_read_error())
+}
+
+fn stored_grant_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredGrantUse> {
+    let action = SensitiveAction::from_code(
+        u16::try_from(row.get::<_, i64>(2)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
+    )
+    .map_err(|_| rusqlite::Error::InvalidQuery)?;
+    let target_kind = target_kind_from_code(
+        u16::try_from(row.get::<_, i64>(3)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
+    )
+    .map_err(|_| rusqlite::Error::InvalidQuery)?;
+    Ok(StoredGrantUse {
+        grant_id: uuid_from_blob_sql(row.get(0)?)?,
+        receipt_id: uuid_from_blob_sql(row.get(1)?)?,
+        action,
+        target_kind,
+        target_id: row.get(4)?,
+        manifest_sha256: digest_from_blob_sql(row.get(5)?)?,
+        use_receipt: row.get(6)?,
+        use_sha256: digest_from_blob_sql(row.get(7)?)?,
+        used_at: row.get(8)?,
+    })
+}
+
+fn target_kind_from_code(code: u16) -> Result<TargetKind, MailError> {
+    SensitiveAction::ALL
+        .into_iter()
+        .map(|action| action.policy().target_kind)
+        .find(|kind| kind.code() == code)
+        .ok_or_else(|| MailError::invalid_input("authorization target kind is unknown"))
+}
+
+fn load_receipt_by_id(
+    connection: &Connection,
+    receipt_id: AuthorizationReceiptId,
+) -> Result<Option<StoredReceipt>, MailError> {
+    record_validation_query(ValidationQueryKind::BoundedKeyed);
+    connection
+        .query_row(
+            "SELECT receipt_id,challenge_id,grant_id,proof_sha256,key_id,signature,
+                    canonical_proof,manifest_sha256,signing_sha256,trust_epoch,bundle_sha256,
+                    receipt,receipt_sha256,verified_at,expires_at
+             FROM authorization_receipts WHERE receipt_id=?1",
+            [receipt_id.as_bytes()],
+            stored_receipt_from_row,
+        )
+        .optional()
+        .map_err(|_| store_read_error())
+}
+
+fn load_registered_store_by_receipt(
+    connection: &Connection,
+    receipt_id: AuthorizationReceiptId,
+) -> Result<Option<StoredRegisteredStore>, MailError> {
+    record_validation_query(ValidationQueryKind::BoundedKeyed);
+    connection
+        .query_row(
+            "SELECT store_id,location_material,location_sha256,config_generation,
+                    config_sha256,state,enrolled_receipt_id,created_at,updated_at,removed_at
+             FROM registered_stores WHERE enrolled_receipt_id=?1",
+            [receipt_id.as_bytes()],
+            stored_registered_store_from_row,
+        )
+        .optional()
+        .map_err(|_| store_read_error())
+}
+
+fn load_registered_store_by_id(
+    connection: &Connection,
+    store_id: StoreId,
+) -> Result<Option<StoredRegisteredStore>, MailError> {
+    record_validation_query(ValidationQueryKind::BoundedKeyed);
+    connection
+        .query_row(
+            "SELECT store_id,location_material,location_sha256,config_generation,
+                    config_sha256,state,enrolled_receipt_id,created_at,updated_at,removed_at
+             FROM registered_stores WHERE store_id=?1",
+            [store_id.as_bytes()],
+            stored_registered_store_from_row,
+        )
+        .optional()
+        .map_err(|_| store_read_error())
+}
+
+fn stored_registered_store_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<StoredRegisteredStore> {
+    let generation = u64::try_from(row.get::<_, i64>(3)?)
+        .ok()
+        .and_then(NonZeroU64::new)
+        .ok_or(rusqlite::Error::InvalidQuery)?;
+    Ok(StoredRegisteredStore {
+        store_id: uuid_from_blob_sql(row.get(0)?)?,
+        location_material: row.get(1)?,
+        location_sha256: digest_from_blob_sql(row.get(2)?)?,
+        config_generation: generation,
+        config_sha256: digest_from_blob_sql(row.get(4)?)?,
+        state: row.get(5)?,
+        enrolled_receipt_id: uuid_from_blob_sql(row.get(6)?)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
+        removed_at: row.get(9)?,
+    })
+}
+
+fn store_identity_count(
+    connection: &Connection,
+    store_id: StoreId,
+    location_sha256: Sha256Digest,
+) -> Result<i64, MailError> {
+    connection
+        .query_row(
+            "SELECT COUNT(*) FROM registered_stores
+             WHERE store_id=?1 OR location_sha256=?2",
+            params![store_id.as_bytes(), location_sha256.as_bytes()],
+            |row| row.get(0),
+        )
+        .map_err(|_| store_read_error())
+}
+
+fn enrolled_store_projection(
+    store: &StoredRegisteredStore,
+) -> Result<EnrolledStoreProjection, MailError> {
+    if store.state != "active" || store.removed_at.is_some() || store.created_at != store.updated_at
+    {
+        return Err(recovery_error());
+    }
+    Ok(EnrolledStoreProjection {
+        store_id: store.store_id,
+        state: EnrolledStoreState::Active,
+        config_generation: store.config_generation,
+        created_at: utc_millis(store.created_at)?,
+        updated_at: utc_millis(store.updated_at)?,
+    })
+}
+
 fn load_pending_challenge(
     connection: &Connection,
     context_sha256: Sha256Digest,
@@ -1537,7 +2400,7 @@ fn load_challenge(
     connection: &Connection,
     challenge_id: Sha256Digest,
 ) -> Result<StoredChallenge, MailError> {
-    challenge_preflight(connection, Some(challenge_id))?;
+    record_validation_query(ValidationQueryKind::BoundedKeyed);
     connection
         .query_row(
             "SELECT challenge_id,grant_id,action,target_kind,target_id,store_id,account_id,
@@ -1623,6 +2486,7 @@ fn challenge_preflight(
     connection: &Connection,
     challenge_id: Option<Sha256Digest>,
 ) -> Result<(), MailError> {
+    record_validation_query(ValidationQueryKind::ChallengePreflight);
     let malformed: i64 = if let Some(challenge_id) = challenge_id {
         connection.query_row(
             "SELECT COUNT(*) FROM authorization_challenges WHERE challenge_id=?1 AND (
@@ -1701,7 +2565,7 @@ fn load_receipt_for_challenge(
     connection: &Connection,
     challenge_id: Sha256Digest,
 ) -> Result<Option<StoredReceipt>, MailError> {
-    receipt_preflight(connection, Some(challenge_id))?;
+    record_validation_query(ValidationQueryKind::BoundedKeyed);
     connection
         .query_row(
             "SELECT receipt_id,challenge_id,grant_id,proof_sha256,key_id,signature,
@@ -1746,6 +2610,7 @@ fn receipt_preflight(
     connection: &Connection,
     challenge_id: Option<Sha256Digest>,
 ) -> Result<(), MailError> {
+    record_validation_query(ValidationQueryKind::ReceiptPreflight);
     let malformed_condition = "
         typeof(receipt_id)<>'blob' OR length(receipt_id)<>16 OR
         typeof(challenge_id)<>'blob' OR length(challenge_id)<>32 OR
@@ -1857,6 +2722,7 @@ fn validate_first_proof(
 }
 
 fn receipt_projection(
+    connection: &Connection,
     challenge: &StoredChallenge,
     receipt: &StoredReceipt,
     effective_time: i64,
@@ -1877,7 +2743,17 @@ fn receipt_projection(
         receipt_sha256: receipt.receipt_sha256,
         verified_at: utc_millis(receipt.verified_at)?,
         expires_at: utc_millis(receipt.expires_at)?,
-        state: if effective_time > receipt.expires_at {
+        state: if connection
+            .query_row(
+                "SELECT COUNT(*) FROM grant_uses WHERE receipt_id=?1",
+                [receipt.receipt_id.as_bytes()],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|_| store_read_error())?
+            == 1
+        {
+            AuthorizationReceiptState::Used
+        } else if challenge.state == "expired" || effective_time > receipt.expires_at {
             AuthorizationReceiptState::Expired
         } else {
             AuthorizationReceiptState::Unclaimed
@@ -2086,6 +2962,8 @@ fn preflight_authorization_storage(connection: &Connection) -> Result<(), MailEr
     challenge_preflight(connection, None)?;
     receipt_preflight(connection, None)?;
     nonce_preflight(connection)?;
+    grant_preflight(connection)?;
+    store_preflight(connection)?;
     event_preflight(connection)
 }
 
@@ -2341,10 +3219,8 @@ fn validate_t202a_initial_row_counts(connection: &Connection) -> Result<(), Mail
     let forbidden_rows: i64 = connection
         .query_row(
             "SELECT
-                (SELECT COUNT(*) FROM registered_stores) +
                 (SELECT COUNT(*) FROM registered_accounts) +
                 (SELECT COUNT(*) FROM challenge_effects) +
-                (SELECT COUNT(*) FROM grant_uses) +
                 (SELECT COUNT(*) FROM account_transitions) +
                 (SELECT COUNT(*) FROM credential_cleanup) +
                 (SELECT COUNT(*) FROM remote_effects) +
@@ -2381,15 +3257,19 @@ fn validate_authorization_history(
         .query_row("SELECT COUNT(*) FROM nonce_uses", [], |row| row.get(0))
         .map_err(|_| store_read_error())?;
     if bootstrap_state != "ready" {
-        if challenge_count != 0 || receipt_count != 0 || nonce_count != 0 {
+        let registry_count: i64 = connection
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM grant_uses)
+                      + (SELECT COUNT(*) FROM registered_stores)",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|_| store_read_error())?;
+        if challenge_count != 0 || receipt_count != 0 || nonce_count != 0 || registry_count != 0 {
             return Err(recovery_error());
         }
         return Ok(());
     }
-    challenge_preflight(connection, None)?;
-    receipt_preflight(connection, None)?;
-    nonce_preflight(connection)?;
-
     let mut statement = connection
         .prepare(
             "SELECT challenge_id,grant_id,action,target_kind,target_id,store_id,account_id,
@@ -2401,19 +3281,15 @@ fn validate_authorization_history(
         .map_err(|_| store_read_error())?;
     let mut rows = statement.query([]).map_err(|_| store_read_error())?;
     let mut seen = 0_i64;
-    let mut authorized = 0_i64;
     while let Some(row) = rows.next().map_err(|_| store_read_error())? {
         let challenge = stored_challenge_from_row(row).map_err(|_| recovery_error())?;
         validate_stored_challenge(connection, authority, &challenge, last_observed_at)?;
         seen = seen.checked_add(1).ok_or_else(recovery_error)?;
-        if challenge.state == "authorized" {
-            authorized = authorized.checked_add(1).ok_or_else(recovery_error)?;
-        }
     }
-    if seen != challenge_count || authorized != receipt_count || receipt_count != nonce_count {
+    if seen != challenge_count || receipt_count != nonce_count {
         return Err(recovery_error());
     }
-    Ok(())
+    validate_registry_history(connection)
 }
 
 fn validate_stored_challenge(
@@ -2493,7 +3369,7 @@ fn validate_stored_challenge(
     {
         return Err(recovery_error());
     }
-    validate_supported_manifest(connection, authority, &manifest).map_err(|_| recovery_error())?;
+    validate_intrinsic_manifest(authority, &manifest).map_err(|_| recovery_error())?;
     let receipt = load_receipt_for_challenge(connection, challenge.challenge_id)?;
     let nonce = load_nonce_use(connection, challenge.challenge_id)?;
     match challenge.state.as_str() {
@@ -2501,6 +3377,21 @@ fn validate_stored_challenge(
             let receipt = receipt.ok_or_else(recovery_error)?;
             let nonce = nonce.ok_or_else(recovery_error)?;
             validate_stored_receipt(authority, challenge, &receipt, &nonce)?;
+        }
+        "expired" if receipt.is_some() && nonce.is_some() => {
+            let receipt = receipt.ok_or_else(recovery_error)?;
+            let nonce = nonce.ok_or_else(recovery_error)?;
+            validate_stored_receipt(authority, challenge, &receipt, &nonce)?;
+            let grants: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM grant_uses WHERE receipt_id=?1",
+                    [receipt.receipt_id.as_bytes()],
+                    |row| row.get(0),
+                )
+                .map_err(|_| store_read_error())?;
+            if grants != 0 {
+                return Err(recovery_error());
+            }
         }
         "pending" | "expired" if receipt.is_none() && nonce.is_none() => {}
         _ => return Err(recovery_error()),
@@ -2556,6 +3447,228 @@ fn validate_stored_receipt(
         .map_err(|_| recovery_error())
 }
 
+fn validate_registry_history(connection: &Connection) -> Result<(), MailError> {
+    record_validation_query(ValidationQueryKind::RegistryStream);
+    let grant_count: i64 = connection
+        .query_row("SELECT COUNT(*) FROM grant_uses", [], |row| row.get(0))
+        .map_err(|_| store_read_error())?;
+    record_validation_query(ValidationQueryKind::RegistryStream);
+    let store_count: i64 = connection
+        .query_row("SELECT COUNT(*) FROM registered_stores", [], |row| {
+            row.get(0)
+        })
+        .map_err(|_| store_read_error())?;
+    if grant_count != store_count {
+        return Err(recovery_error());
+    }
+
+    record_validation_query(ValidationQueryKind::RegistryStream);
+    let mut statement = connection
+        .prepare(
+            "SELECT grant_id,receipt_id,action,target_kind,target_id,manifest_sha256,
+                    use_receipt,use_sha256,used_at
+             FROM grant_uses ORDER BY grant_id",
+        )
+        .map_err(|_| store_read_error())?;
+    let mut rows = statement.query([]).map_err(|_| store_read_error())?;
+    let mut seen = 0_i64;
+    while let Some(row) = rows.next().map_err(|_| store_read_error())? {
+        let grant = stored_grant_from_row(row).map_err(|_| recovery_error())?;
+        validate_stored_grant(connection, &grant)?;
+        seen = seen.checked_add(1).ok_or_else(recovery_error)?;
+    }
+    if seen != grant_count {
+        return Err(recovery_error());
+    }
+
+    record_validation_query(ValidationQueryKind::RegistryStream);
+    let mut statement = connection
+        .prepare(
+            "SELECT store_id,location_material,location_sha256,config_generation,
+                    config_sha256,state,enrolled_receipt_id,created_at,updated_at,removed_at
+             FROM registered_stores ORDER BY store_id",
+        )
+        .map_err(|_| store_read_error())?;
+    let mut rows = statement.query([]).map_err(|_| store_read_error())?;
+    let mut seen = 0_i64;
+    while let Some(row) = rows.next().map_err(|_| store_read_error())? {
+        let store = stored_registered_store_from_row(row).map_err(|_| recovery_error())?;
+        validate_stored_store(connection, &store)?;
+        seen = seen.checked_add(1).ok_or_else(recovery_error)?;
+    }
+    if seen != store_count {
+        return Err(recovery_error());
+    }
+    Ok(())
+}
+
+fn validate_stored_grant(connection: &Connection, grant: &StoredGrantUse) -> Result<(), MailError> {
+    utc_millis(grant.used_at)?;
+    if grant.action != SensitiveAction::StoreEnroll
+        || grant.target_kind != TargetKind::Store
+        || !valid_target_shape(grant.target_kind, &grant.target_id)
+        || grant.use_receipt != grant_use_transcript_from_row(grant)
+        || grant.use_sha256 != Sha256Digest::digest(&grant.use_receipt)
+    {
+        return Err(recovery_error());
+    }
+    let receipt = load_receipt_by_id(connection, grant.receipt_id)?.ok_or_else(recovery_error)?;
+    let challenge = load_challenge(connection, receipt.challenge_id)?;
+    let manifest = ActionManifest::parse(&challenge.manifest).map_err(|_| recovery_error())?;
+    let enrollment = store_enrollment_context(&manifest).map_err(|_| recovery_error())?;
+    let store = load_registered_store_by_receipt(connection, receipt.receipt_id)?
+        .ok_or_else(recovery_error)?;
+    if challenge.state != "authorized"
+        || grant.grant_id != challenge.grant_id
+        || grant.receipt_id != receipt.receipt_id
+        || grant.action != challenge.action
+        || grant.target_kind.code() != challenge.target_kind_code
+        || grant.target_id != challenge.target_id
+        || grant.manifest_sha256 != challenge.manifest_sha256
+        || receipt.verified_at > grant.used_at
+        || grant.used_at > receipt.expires_at
+        || store.store_id != enrollment.store_id
+        || store.location_sha256 != enrollment.location_sha256
+        || store.config_generation != enrollment.config_generation
+        || store.config_sha256 != enrollment.config_sha256
+        || store.enrolled_receipt_id != receipt.receipt_id
+        || store.created_at != grant.used_at
+        || store.updated_at != grant.used_at
+    {
+        return Err(recovery_error());
+    }
+    validate_registry_events(connection, grant, &store)
+}
+
+fn validate_stored_store(
+    connection: &Connection,
+    store: &StoredRegisteredStore,
+) -> Result<(), MailError> {
+    utc_millis(store.created_at)?;
+    utc_millis(store.updated_at)?;
+    if store.state != "active"
+        || store.removed_at.is_some()
+        || store.created_at != store.updated_at
+        || Sha256Digest::digest(&store.location_material) != store.location_sha256
+    {
+        return Err(recovery_error());
+    }
+    let receipt =
+        load_receipt_by_id(connection, store.enrolled_receipt_id)?.ok_or_else(recovery_error)?;
+    record_validation_query(ValidationQueryKind::BoundedKeyed);
+    let grant_id: Option<Vec<u8>> = connection
+        .query_row(
+            "SELECT grant_id FROM grant_uses WHERE receipt_id=?1",
+            [receipt.receipt_id.as_bytes()],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|_| store_read_error())?;
+    let grant_id = grant_id.ok_or_else(recovery_error)?;
+    let grant_id = uuid_from_blob_sql(grant_id).map_err(|_| recovery_error())?;
+    let grant = load_grant_use(connection, grant_id)?.ok_or_else(recovery_error)?;
+    if grant.used_at != store.created_at {
+        return Err(recovery_error());
+    }
+    Ok(())
+}
+
+fn grant_use_transcript_from_row(grant: &StoredGrantUse) -> Vec<u8> {
+    let action = grant.action.code().to_be_bytes();
+    let target_kind = grant.target_kind.code().to_be_bytes();
+    let used_at = grant.used_at.to_be_bytes();
+    encode_transcript(
+        GRANT_USE_DOMAIN,
+        &[
+            grant.grant_id.as_bytes(),
+            grant.receipt_id.as_bytes(),
+            &action,
+            &target_kind,
+            &grant.target_id,
+            grant.manifest_sha256.as_bytes(),
+            &used_at,
+        ],
+    )
+}
+
+fn validate_registry_events(
+    connection: &Connection,
+    grant: &StoredGrantUse,
+    store: &StoredRegisteredStore,
+) -> Result<(), MailError> {
+    let grant_event = load_single_entity_event(connection, 10, grant.grant_id.as_bytes(), 7)?;
+    let store_event = load_single_entity_event(connection, 4, store.store_id.as_bytes(), 8)?;
+    let expected_grant = authority_event_detail(
+        7,
+        10,
+        grant.grant_id.as_bytes(),
+        1,
+        9,
+        grant.receipt_id.as_bytes(),
+        0x0901,
+        0x0902,
+        grant.use_sha256,
+        Some(grant.receipt_id),
+        grant.used_at,
+    );
+    let expected_store = authority_event_detail(
+        8,
+        4,
+        store.store_id.as_bytes(),
+        4,
+        10,
+        grant.grant_id.as_bytes(),
+        0,
+        0x0401,
+        grant.use_sha256,
+        Some(grant.receipt_id),
+        grant.used_at,
+    );
+    if grant_event.sequence.checked_add(1) != Some(store_event.sequence)
+        || grant_event.source != 1
+        || store_event.source != 4
+        || grant_event.occurred_at != grant.used_at
+        || store_event.occurred_at != grant.used_at
+        || grant_event.detail != expected_grant
+        || store_event.detail != expected_store
+        || grant_event.detail_sha256.as_slice() != Sha256::digest(&expected_grant).as_slice()
+        || store_event.detail_sha256.as_slice() != Sha256::digest(&expected_store).as_slice()
+    {
+        return Err(recovery_error());
+    }
+    Ok(())
+}
+
+fn load_single_entity_event(
+    connection: &Connection,
+    entity_kind: i64,
+    entity_id: &[u8],
+    event_code: i64,
+) -> Result<StoredAuthorityEvent, MailError> {
+    record_validation_query(ValidationQueryKind::BoundedKeyed);
+    let mut statement = connection
+        .prepare(
+            "SELECT sequence,entity_kind,entity_id,event_code,source,occurred_at,
+                    detail,detail_sha256
+             FROM authority_events INDEXED BY authority_events_entity_sequence
+             WHERE entity_kind=?1 AND entity_id=?2 AND event_code=?3
+             ORDER BY sequence LIMIT 2",
+        )
+        .map_err(|_| store_read_error())?;
+    let mut rows = statement
+        .query(params![entity_kind, entity_id, event_code])
+        .map_err(|_| store_read_error())?;
+    let first = rows
+        .next()
+        .map_err(|_| store_read_error())?
+        .ok_or_else(recovery_error)?;
+    let event = stored_authority_event_from_row(first).map_err(|_| recovery_error())?;
+    if rows.next().map_err(|_| store_read_error())?.is_some() {
+        return Err(recovery_error());
+    }
+    Ok(event)
+}
+
 struct StoredNonceUse {
     nonce: [u8; 32],
     challenge_id: Sha256Digest,
@@ -2564,6 +3677,7 @@ struct StoredNonceUse {
 }
 
 fn nonce_preflight(connection: &Connection) -> Result<(), MailError> {
+    record_validation_query(ValidationQueryKind::NoncePreflight);
     let malformed: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM nonce_uses WHERE
@@ -2585,6 +3699,7 @@ fn load_nonce_use(
     connection: &Connection,
     challenge_id: Sha256Digest,
 ) -> Result<Option<StoredNonceUse>, MailError> {
+    record_validation_query(ValidationQueryKind::BoundedKeyed);
     connection
         .query_row(
             "SELECT nonce,challenge_id,receipt_id,consumed_at
@@ -2626,7 +3741,6 @@ fn validate_events(
     anchor_confirmed_at: Option<i64>,
     last_observed_at: i64,
 ) -> Result<(), MailError> {
-    event_preflight(connection)?;
     let mut statement = connection
         .prepare(
             "SELECT sequence,entity_kind,entity_id,event_code,source,occurred_at,
@@ -2658,9 +3772,11 @@ fn validate_events(
                 bundle,
                 anchor_confirmed_at.ok_or_else(recovery_error)?,
             )?,
-            sequence if sequence > expected_prefix => {
-                validate_challenge_event(connection, &row, last_observed_at)?;
-            }
+            sequence if sequence > expected_prefix => match row.entity_kind {
+                8 => validate_challenge_event(connection, &row, last_observed_at)?,
+                4 | 10 => validate_registry_event_row(connection, &row)?,
+                _ => return Err(recovery_error()),
+            },
             _ => return Err(recovery_error()),
         }
         expected_sequence = expected_sequence
@@ -2687,6 +3803,7 @@ fn validate_events(
 }
 
 fn event_preflight(connection: &Connection) -> Result<(), MailError> {
+    record_validation_query(ValidationQueryKind::EventPreflight);
     let malformed: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM authority_events WHERE
@@ -2739,22 +3856,17 @@ fn validate_challenge_event(
         }
         Err(error) => return Err(error),
     };
+    let receipt = load_receipt_for_challenge(connection, challenge.challenge_id)?;
     let (event, source, occurred_at) = match row.event_code {
         3 => (ChallengeEvent::Created, 1_i64, challenge.issued_at),
         4 => {
-            let receipt = load_receipt_for_challenge(connection, challenge.challenge_id)?
-                .ok_or_else(recovery_error)?;
+            let receipt = receipt.as_ref().ok_or_else(recovery_error)?;
             (ChallengeEvent::Authorized, 3, receipt.verified_at)
         }
         5 if row.occurred_at > challenge.expires_at && row.occurred_at <= last_observed_at => {
             (ChallengeEvent::Expired, 1, row.occurred_at)
         }
         _ => return Err(recovery_error()),
-    };
-    let receipt = if matches!(event, ChallengeEvent::Authorized) {
-        load_receipt_for_challenge(connection, challenge.challenge_id)?
-    } else {
-        None
     };
     let (related_kind, related_id, prior_state, next_state, context, receipt_id) = match event {
         ChallengeEvent::Created => (
@@ -2776,14 +3888,31 @@ fn validate_challenge_event(
                 Some(receipt.receipt_id),
             )
         }
-        ChallengeEvent::Expired => (
-            0,
-            &[] as &[u8],
-            0x0801,
-            0x0803,
-            challenge.context_sha256,
-            None,
-        ),
+        ChallengeEvent::Expired => {
+            if let Some(receipt) = &receipt {
+                let manifest =
+                    ActionManifest::parse(&challenge.manifest).map_err(|_| recovery_error())?;
+                let enrollment =
+                    store_enrollment_context(&manifest).map_err(|_| recovery_error())?;
+                (
+                    9,
+                    receipt.receipt_id.as_bytes().as_slice(),
+                    0x0802,
+                    0x0803,
+                    enrollment_intent_from_rows(&challenge, receipt, enrollment),
+                    Some(receipt.receipt_id),
+                )
+            } else {
+                (
+                    0,
+                    &[] as &[u8],
+                    0x0801,
+                    0x0803,
+                    challenge.context_sha256,
+                    None,
+                )
+            }
+        }
     };
     let expected_detail = authority_event_detail(
         u16::try_from(row.event_code).map_err(|_| recovery_error())?,
@@ -2806,6 +3935,80 @@ fn validate_challenge_event(
         || row.detail_sha256.as_slice() != Sha256::digest(&expected_detail).as_slice()
     {
         return Err(recovery_error());
+    }
+    Ok(())
+}
+
+fn validate_registry_event_row(
+    connection: &Connection,
+    row: &StoredAuthorityEvent,
+) -> Result<(), MailError> {
+    match (row.entity_kind, row.event_code, row.entity_id.len()) {
+        (10, 7, 16) => {
+            let grant_id: AuthorizationGrantId =
+                uuid_from_blob_sql(row.entity_id.clone()).map_err(|_| recovery_error())?;
+            let grant = load_grant_use(connection, grant_id)?.ok_or_else(recovery_error)?;
+            let expected = authority_event_detail(
+                7,
+                10,
+                grant.grant_id.as_bytes(),
+                1,
+                9,
+                grant.receipt_id.as_bytes(),
+                0x0901,
+                0x0902,
+                grant.use_sha256,
+                Some(grant.receipt_id),
+                grant.used_at,
+            );
+            if row.source != 1
+                || row.occurred_at != grant.used_at
+                || row.detail != expected
+                || row.detail_sha256.as_slice() != Sha256::digest(&expected).as_slice()
+            {
+                return Err(recovery_error());
+            }
+        }
+        (4, 8, 16) => {
+            let store_id: StoreId =
+                uuid_from_blob_sql(row.entity_id.clone()).map_err(|_| recovery_error())?;
+            let store =
+                load_registered_store_by_id(connection, store_id)?.ok_or_else(recovery_error)?;
+            let receipt = load_receipt_by_id(connection, store.enrolled_receipt_id)?
+                .ok_or_else(recovery_error)?;
+            record_validation_query(ValidationQueryKind::BoundedKeyed);
+            let grant_bytes: Vec<u8> = connection
+                .query_row(
+                    "SELECT grant_id FROM grant_uses WHERE receipt_id=?1",
+                    [receipt.receipt_id.as_bytes()],
+                    |value| value.get(0),
+                )
+                .map_err(|_| store_read_error())?;
+            let grant_id: AuthorizationGrantId =
+                uuid_from_blob_sql(grant_bytes).map_err(|_| recovery_error())?;
+            let grant = load_grant_use(connection, grant_id)?.ok_or_else(recovery_error)?;
+            let expected = authority_event_detail(
+                8,
+                4,
+                store.store_id.as_bytes(),
+                4,
+                10,
+                grant.grant_id.as_bytes(),
+                0,
+                0x0401,
+                grant.use_sha256,
+                Some(receipt.receipt_id),
+                grant.used_at,
+            );
+            if row.source != 4
+                || row.occurred_at != grant.used_at
+                || row.detail != expected
+                || row.detail_sha256.as_slice() != Sha256::digest(&expected).as_slice()
+            {
+                return Err(recovery_error());
+            }
+        }
+        _ => return Err(recovery_error()),
     }
     Ok(())
 }
@@ -2865,6 +4068,7 @@ fn validate_challenge_event_graph(
     created_event_sequence: i64,
     state: &str,
 ) -> Result<Option<i64>, MailError> {
+    record_validation_query(ValidationQueryKind::BoundedKeyed);
     let mut statement = connection
         .prepare(
             "SELECT sequence,event_code FROM authority_events
@@ -2899,6 +4103,15 @@ fn validate_challenge_event_graph(
         "pending" if authorized.is_none() && expired.is_none() => None,
         "authorized" if authorized.is_some() && expired.is_none() => authorized,
         "expired" if authorized.is_none() && expired.is_some() => expired,
+        "expired"
+            if authorized.is_some()
+                && expired.is_some()
+                && authorized
+                    .zip(expired)
+                    .is_some_and(|(left, right)| left < right) =>
+        {
+            authorized
+        }
         _ => return Err(recovery_error()),
     };
     if terminal.is_some_and(|sequence| sequence <= created_event_sequence) {
@@ -3144,6 +4357,175 @@ fn insert_challenge_event(
         return Err(recovery_error());
     }
     Ok(sequence)
+}
+
+fn insert_enrollment_expiry_event(
+    transaction: &Transaction<'_>,
+    challenge: &StoredChallenge,
+    receipt: &StoredReceipt,
+    intent_sha256: Sha256Digest,
+    occurred_at: i64,
+) -> Result<(), MailError> {
+    insert_typed_event(
+        transaction,
+        8,
+        challenge.challenge_id.as_bytes(),
+        5,
+        1,
+        9,
+        receipt.receipt_id.as_bytes(),
+        0x0802,
+        0x0803,
+        intent_sha256,
+        Some(receipt.receipt_id),
+        occurred_at,
+    )
+}
+
+fn insert_grant_used_event(
+    transaction: &Transaction<'_>,
+    grant_id: AuthorizationGrantId,
+    receipt_id: AuthorizationReceiptId,
+    use_sha256: Sha256Digest,
+    occurred_at: i64,
+) -> Result<(), MailError> {
+    insert_typed_event(
+        transaction,
+        10,
+        grant_id.as_bytes(),
+        7,
+        1,
+        9,
+        receipt_id.as_bytes(),
+        0x0901,
+        0x0902,
+        use_sha256,
+        Some(receipt_id),
+        occurred_at,
+    )
+}
+
+fn insert_store_enrolled_event(
+    transaction: &Transaction<'_>,
+    store_id: StoreId,
+    grant_id: AuthorizationGrantId,
+    receipt_id: AuthorizationReceiptId,
+    use_sha256: Sha256Digest,
+    occurred_at: i64,
+) -> Result<(), MailError> {
+    insert_typed_event(
+        transaction,
+        4,
+        store_id.as_bytes(),
+        8,
+        4,
+        10,
+        grant_id.as_bytes(),
+        0,
+        0x0401,
+        use_sha256,
+        Some(receipt_id),
+        occurred_at,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_typed_event(
+    transaction: &Transaction<'_>,
+    entity_kind: u16,
+    entity_id: &[u8],
+    event_code: u16,
+    source: u8,
+    related_kind: u16,
+    related_id: &[u8],
+    prior_state: u16,
+    next_state: u16,
+    context: Sha256Digest,
+    receipt_id: Option<AuthorizationReceiptId>,
+    occurred_at: i64,
+) -> Result<(), MailError> {
+    let detail = authority_event_detail(
+        event_code,
+        entity_kind,
+        entity_id,
+        source,
+        related_kind,
+        related_id,
+        prior_state,
+        next_state,
+        context,
+        receipt_id,
+        occurred_at,
+    );
+    let digest = Sha256::digest(&detail);
+    let inserted = transaction
+        .execute(
+            "INSERT INTO authority_events
+             (entity_kind,entity_id,event_code,source,occurred_at,detail,detail_sha256)
+             VALUES(?1,?2,?3,?4,?5,?6,?7)",
+            params![
+                i64::from(entity_kind),
+                entity_id,
+                i64::from(event_code),
+                i64::from(source),
+                occurred_at,
+                detail,
+                digest.as_slice(),
+            ],
+        )
+        .map_err(|_| store_write_error())?;
+    if inserted != 1 {
+        return Err(store_write_error());
+    }
+    Ok(())
+}
+
+fn validate_exact_enrollment_expiry(
+    connection: &Connection,
+    challenge: &StoredChallenge,
+    receipt: &StoredReceipt,
+    intent_sha256: Sha256Digest,
+) -> Result<(), MailError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT sequence,entity_kind,entity_id,event_code,source,occurred_at,
+                    detail,detail_sha256
+             FROM authority_events INDEXED BY authority_events_entity_sequence
+             WHERE entity_kind=8 AND entity_id=?1 AND event_code=5
+             ORDER BY sequence LIMIT 2",
+        )
+        .map_err(|_| store_read_error())?;
+    let mut rows = statement
+        .query([challenge.challenge_id.as_bytes()])
+        .map_err(|_| store_read_error())?;
+    let row = rows
+        .next()
+        .map_err(|_| store_read_error())?
+        .ok_or_else(recovery_error)?;
+    let event = stored_authority_event_from_row(row).map_err(|_| recovery_error())?;
+    if rows.next().map_err(|_| store_read_error())?.is_some() {
+        return Err(recovery_error());
+    }
+    let expected = authority_event_detail(
+        5,
+        8,
+        challenge.challenge_id.as_bytes(),
+        1,
+        9,
+        receipt.receipt_id.as_bytes(),
+        0x0802,
+        0x0803,
+        intent_sha256,
+        Some(receipt.receipt_id),
+        event.occurred_at,
+    );
+    if event.source != 1
+        || event.detail != expected
+        || event.detail_sha256.as_slice() != Sha256::digest(&expected).as_slice()
+    {
+        return Err(authorization_context_stale_error());
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3554,5 +4936,19 @@ fn authorization_replayed_error() -> MailError {
     MailError::stable(
         MailErrorCode::AuthorizationReplayed,
         "authorization proof conflicts with an immutable receipt",
+    )
+}
+
+fn grant_already_used_error() -> MailError {
+    MailError::stable(
+        MailErrorCode::GrantAlreadyUsed,
+        "authorization grant was already used with different identity",
+    )
+}
+
+fn config_store_identity_conflict_error() -> MailError {
+    MailError::stable(
+        MailErrorCode::ConfigStoreIdentityConflict,
+        "config store identity conflicts with an existing registration",
     )
 }
