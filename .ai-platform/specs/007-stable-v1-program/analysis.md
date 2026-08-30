@@ -151,13 +151,17 @@ cleanup. Review reproduced and fixed an expired-update restart defect. No
 unresolved Critical, High, or Medium finding remains. The user explicitly
 accepted A002 on 2026-08-30. Account remove is the active bounded attempt.
 
-`T202C3-A003` is Ready with no blocking packet finding. The accepted authority
-contract requires removal to preserve the exact before account tuple, create no
-replacement credential and no after account version, and retain every identity.
-Prepare blocks the account/store and records private provisional cleanup;
-config commit adds only the after store version; finalize removes the current
-account projection and readies cleanup. Abort restores the predecessor receipt,
-while unsafe observation remains fail-closed recovery. Credential transitions,
+`T202C3-A003` completed test-first implementation and three-pass review at
+production commit `703b5a1`. Removal preserves the exact before account tuple,
+creates no replacement credential and no after account version, and retains
+every identity. Prepare blocks the account/store and records private
+provisional cleanup; config commit adds only the after store version; finalize
+removes the current account projection and readies cleanup. Abort restores the
+predecessor receipt, while unsafe observation remains fail-closed recovery.
+Review covers direct removal, create-update-remove history, display reuse only
+with fresh account and credential identities, fault rollback, expiry, restart,
+and tamper recovery. No unresolved Critical, High, or Medium finding remains.
+Credential set stays gated on explicit A003 acceptance; credential delete,
 cleanup claim/delete, config, keyring, runtime, protocol, CLI, MCP, and network
 behavior remain excluded.
 

@@ -104,3 +104,62 @@ event order, query slope, restart corruption, and privacy compile gates.
 - Privacy scan found no private key, seed, proof, nonce, locator material,
   address, endpoint, mailbox content, or provider data in the fixture or
   evidence.
+
+## A003 RED
+
+The focused command was:
+
+```text
+cargo test -p kirje-store --test authority_registry \
+  account_remove_transition_lifecycle_is_exact \
+  --all-features --locked
+```
+
+The first run exited 101 at the cleanup-reservation builder's update-only
+boundary. After admitting the sealed remove descriptor there, the second run
+exited 101 at the intended create/update-only transition gate with
+`authorization_context_stale`. The rejection fingerprint proved zero grant,
+transition, cleanup, event, or clock writes.
+
+## A003 Final GREEN
+
+- Focused account-remove lifecycle: 1 passed, 0 failed after final review
+  additions.
+- Authority registry suite: 38 passed, 0 failed.
+- `cargo test -p kirje-store --all-features --locked`:
+  - crate unit tests: 8 passed;
+  - authority authorization: 33 passed;
+  - authority registry: 38 passed;
+  - authority schema: 31 passed;
+  - outbox: 11 passed;
+  - doc tests: passed.
+- `cargo test -p kirje-store --no-default-features --locked`: 19 passed across
+  the enabled unit and outbox targets; feature-gated authority suites compiled
+  and selected zero tests.
+- `cargo clippy -p kirje-store --all-targets --all-features --locked -- -D warnings`:
+  passed after final review additions.
+- `cargo fmt --all --check`: passed.
+- `git diff --check`: passed.
+
+The package test included the create-update-remove chain. Review then added one
+more negative assertion for historical credential-ID reuse; the final focused
+test and all-target Clippy run passed after that test-only addition.
+
+The lifecycle covers prepare, exact retry, store-only config versioning,
+finalize removal, abort receipt restoration, unsafe recovery, expiry restart,
+cleanup material mismatch, prepare/commit/finalize fault rollback, display
+reuse with fresh identities, old account and credential identity rejection,
+valid removal after update, and cleanup tamper recovery.
+
+## A003 Integrity
+
+- Production commit: `703b5a1`.
+- Authority SQLite v1 schema SHA-256 remains
+  `5d01739b89246a5f495a965e57e416eee9fd0b5016995add41c6edee7f3e970d`.
+- `Cargo.lock` SHA-256 remains
+  `596ddb0071ecb38b0b9429c5d91cdbb83abe6a25bc760cf9588b2764274ff850`.
+- Production scope contains only the packet-authorized authority source,
+  registry test, and synthetic public-signature fixture.
+- Privacy scan found no private key, seed, proof, nonce, real account data,
+  address, endpoint, mailbox content, or provider data in the fixture or
+  evidence.
