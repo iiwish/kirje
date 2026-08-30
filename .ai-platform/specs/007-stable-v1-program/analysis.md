@@ -17,11 +17,12 @@ per-version governance stacks while retaining executor-sized tasks, TDD,
 content-addressed evidence, adversarial review, complete checkpoint gates, and
 human acceptance.
 
-The confirmed checkpoint plan remains internally consistent, but eight High
-cleanup-contract findings block T202C3. Three define the minimum A006 challenge
-contract; three belong to a later A007 claim contract; two belong to a later
-A008 delete-completion contract. A007 and A008 are reserved labels only, not
-Ready packets or implementation permission. One separate Medium
+The confirmed checkpoint plan remains internally consistent. The approved
+cleanup amendment closes the eight recorded A006-A008 High findings and the
+independently identified canonical-locator High finding. The A006 challenge
+packet is ready for independent review with production permission `none`; A007
+claim and A008 delete completion remain non-executable just-in-time outlines,
+not Ready packets or implementation permission. One separate Medium
 implementation finding is assigned: the unchanged branch dependency graph contains yanked
 `chacha20 0.10.1`, which makes `cargo deny check advisories` fail. T111
 owns remediation and Security Alpha cannot be Accepted until the complete
@@ -194,35 +195,41 @@ target mismatch, and kind corruption are covered. No unresolved Critical, High,
 or Medium finding remains. The user explicitly accepted A005 on 2026-08-30;
 cleanup remains excluded from that production commit.
 
-### T202C3-A006 Cleanup Packet Gate
+### T202C3 Cleanup Contract And A006 Packet Gate
 
-`T202C3-A006` is the next consistent attempt ID and its blocked packet is
+`T202C3-A006` is the next consistent attempt ID and its review packet is
 `.ai-platform/specs/007-stable-v1-program/packets/T110-A006.yaml`. The user also
-authorized an unattended cadence in which future internal attempts may continue
-after TDD, full validation, and three-pass review while remaining only
-`review_complete`; this does not waive confirmed security semantics or the major
-human acceptance gates.
+authorized unattended delegation: the orchestrator may accept future artifacts
+only after their required TDD, full validation, evidence, and three-pass review
+succeed. A delegated record never claims the user personally reviewed unseen
+work and never waives a failed gate.
 
-The cleanup challenge packet cannot be made Ready from the current SSOT. Its
-minimum unresolved subset is: the domain/transcript/derivation of signed
-`tombstone_sha256`; whether challenge ownership binds a historical-before or
-current account/binding and how removed accounts plus blocked/recovery stores
-behave; and ownership of legacy tombstones whose manifest has
-`transition_id=None`. No selection among those alternatives is implied.
+The confirmed cleanup contract defines the exact canonical private locator
+transcript and digest, the 14-field tombstone transcript, finalized transition's
+historical-before origin, active/removed account eligibility, blocked/recovery
+failure behavior, and transition-bound legacy locators. Canonical v1 rejects
+transition-less requests and treats a persisted NULL origin as corruption
+without changing schema or core transcript bytes.
 
-Later claim and delete-completion decisions are intentionally not folded into
-A006. A007 must separately define claim identity, exact/changed retry, expiry,
-response loss, concurrency, opaque `DeleteOnlyLocator` ownership and recovery,
-and exact `cleanup_claimed` event 16 semantics. A008 must separately define the
-delete-completion capability and crash protocol, missing-key outcome, terminal
-retry/recovery, and exact `cleanup_deleted` event 17 semantics including its
-order after event 16. A007 and A008 are unpacketized and have no execution
-permission.
+The same contract reserves serial ownership for later attempts. A007 owns one
+atomic grant-use/ready-to-claimed transaction, exact/changed retry, expiry,
+response loss, concurrency, the non-Clone/non-Debug/non-Serialize/no-export
+lock-owning cleanup permit, and event 16 adjacent after event 7. A008 owns the
+combined consuming fake-janitor boundary, deleted/no-entry indistinguishability,
+claimed recovery across backend and crash windows, terminal retry, and exactly
+one later event 17. T202C3 owns authority and store-private fake behavior; T204
+owns actual runtime/keyring wiring and end-to-end integration.
 
-Result: `T202C3_A006_PACKET_BLOCKED`. A006 remains Blocked until all three
-minimum challenge decisions are explicitly confirmed in the security contract
-and a replacement packet passes independent review. This does not resolve or
-authorize A007 or A008.
+Restart validation rederives origin, locator, tombstone, grant count, event
+cardinality/order/source/context/receipt/time, and privacy invariants. The
+closed error precedence puts malformed input first, corruption second, exact or
+changed grant recovery third, signed-context/clock/expiry next, then current
+eligibility and target lifecycle, while existing store/backend codes remain
+stable.
+
+Result: `T202C3_A006_CONTRACT_READY_FOR_PACKET_REVIEW`. A006 retains production
+permission `none` until independent packet review passes. A007 and A008 remain
+unpacketized, non-executable outlines and are not Ready.
 
 ## Current Implementation Evidence Check
 

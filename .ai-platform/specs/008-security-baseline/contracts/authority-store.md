@@ -1192,6 +1192,193 @@ unknown enum/state codes, duplicate/missing/swapped events, broken transition
 chains, dangling cyclic references, impossible current config, and timestamp
 drift all fail the entire open as `owner_recovery_required`.
 
+### Credential Cleanup Authority Contract
+
+Credential cleanup is a transition-bound historical operation. Canonical v1
+admits a cleanup only when its origin is a finalized `account_update` or
+`account_remove` transition whose signed manifest contains the cleanup
+descriptor exactly once in provisional state. The cleanup's account authority
+is the origin manifest's `before` snapshot and its immutable account-version
+row: store ID, account ID, historical account generation, historical credential
+ID, historical binding digest, and historical display ID are never rebound to a
+later current snapshot. A later update, removal, or same-display recreation
+therefore cannot redirect the tombstone.
+
+The private locator row contains exactly the canonical
+`KIRJE-DELETE-ONLY-LOCATOR-V1\0` transcript from the account-config contract.
+`active_v2` rederives the exact V2 service and lowercase username from the
+realm/store/account/historical-credential/historical-binding tuple.
+`legacy_v1` rederives the exact legacy service and origin-before display ID.
+The row's `locator_sha256` hashes that complete transcript. It never hashes raw
+concatenation, only a username, or a mutable current account.
+
+The signed tombstone digest is:
+
+```text
+SHA256(KIRJE-CREDENTIAL-CLEANUP-TOMBSTONE-V1\0
+  0x0001 realm_id:BLOB32
+  0x0002 cleanup_id:UUID16
+  0x0003 transition_id:UUID16
+  0x0004 transition_sha256:BLOB32
+  0x0005 origin_manifest_sha256:BLOB32
+  0x0006 store_id:UUID16
+  0x0007 account_id:UUID16
+  0x0008 historical_account_generation:u64be
+  0x0009 historical_credential_id:UUID16
+  0x000a historical_binding_sha256:BLOB32
+  0x000b locator_kind:u8
+  0x000c locator_sha256:BLOB32
+  0x000d created_at:i64be
+  0x000e origin_expected_state:u8)
+```
+
+The transcript uses the canonical TLV container, exactly 14 strictly ascending
+tags, and `origin_expected_state=0x01` (`provisional`). Raw locator material and
+mutable cleanup `state`, `claim_grant_id`, and `deleted_at` are excluded.
+`created_at` equals the origin transition's `prepared_at`. The authority store
+rederives every field from the realm meta row, cleanup row, finalized origin
+transition and transition digest, origin grant/challenge manifest, descriptor,
+and origin-before account/version graph. No caller supplies a trusted field.
+
+The schema's nullable `credential_cleanup.transition_id` does not create a v1
+legacy branch. A cleanup request with an absent transition is malformed, and a
+persisted NULL transition is `owner_recovery_required`. `legacy_v1` is valid
+only when the exact legacy locator is owned by the same transition-bound origin
+graph. This rule changes no schema and no core transcript bytes.
+
+#### Effect-Free Challenge
+
+Credential-cleanup challenge issuance requires the exact cleanup manifest with
+expected state `ready`, the rederived locator and tombstone digests, one
+finalized origin transition, an active registered store, and the historical
+account's current registry projection in `active` or `removed`. The common
+account binding digest is the historical-before binding. A removed account is
+therefore eligible; a new account with the same display ID is irrelevant.
+Blocked store or account state is `account_update_conflict`, and a recovery-
+required store is `owner_recovery_required`. Provisional, claimed, deleted,
+wrong-kind, wrong-origin, duplicated-descriptor, or mismatched tombstone state
+is `credential_cleanup_invalid`.
+
+Issuance is effect-free: it consumes no grant, changes no cleanup row, and
+creates no effect, invocation, or external-call capability. Exact pending reuse
+returns the same bounded challenge without entropy or mutation after the same
+history and eligibility checks. No public projection, event, log, fixture, or
+error contains the private locator transcript, service, username, or one of its
+raw fields.
+
+#### Claim And Permit
+
+The cleanup claim transaction owns both grant consumption and `ready ->
+claimed`. First claim validates the exact receipt/challenge/manifest, the
+historical origin and tombstone graph, current active store plus active-or-
+removed account eligibility, expiry, and cleanup readiness. It inserts exactly
+one canonical grant-use row, sets `claim_grant_id` to that same grant, and
+updates the cleanup in one transaction at one store-derived effective time.
+There is no second cleanup-claim identity or transcript: the immutable
+`KIRJE-GRANT-USE-V1\0` transcript, its `use_sha256`, and the exact cleanup target
+and manifest are the claim identity.
+
+The transaction appends exactly two adjacent events in this order:
+
+```text
+grant_used: existing canonical event 7
+cleanup_claimed: entity cleanup, event 16, source runtime (4),
+  related grant, cleanup_ready -> cleanup_claimed,
+  context use_sha256, same receipt, same effective time
+```
+
+Only the transaction winner receives an opaque `CleanupDeletePermit`. The
+permit owns the fixed cleanup apply lock and private `DeleteOnlyLocator`; it is
+non-`Clone`, non-`Debug`, non-serializable, and exposes no raw bytes, service,
+username, digest, conversion, read, probe, copy, export, set, or rebind
+capability. A concurrent different grant loses with
+`credential_cleanup_invalid` and writes nothing.
+
+A post-commit response loss is recoverable only by the exact same grant-use and
+cleanup identity. Exact claimed recovery validates the complete durable graph,
+reacquires the same apply lock, and only then may issue a fresh opaque permit;
+it appends no event and changes no row or lifecycle timestamp. Changed reuse of
+the same grant is `grant_already_used`. Exact recovery after deletion returns
+the immutable terminal projection with no permit. First use after expiry
+durably applies the ordinary authorized-unclaimed expiry transaction and
+returns `authorization_expired`; exact committed claim or deletion remains
+historical and is checked before expiry.
+
+#### Consuming Delete Boundary
+
+The only deletion API is one combined operation that consumes
+`CleanupDeletePermit`, invokes the crate-private delete-only janitor, and, after
+success, commits `claimed -> deleted`. There is no caller-accessible
+`mark_deleted` method. The janitor receives only `DeleteOnlyLocator`, performs
+one idempotent delete, and collapses `Deleted` and `NoEntry` into the same
+success with no presence signal. T202C3 proves this boundary with a store-
+private fake janitor; T204 owns real runtime/keyring adapter wiring and the
+end-to-end crash integration.
+
+Backend failure returns its existing stable backend error, retains `claimed`,
+sets no `deleted_at`, and appends no event. Success sets `deleted_at` to the
+store-derived effective time and appends exactly one event:
+
+```text
+cleanup_deleted: entity cleanup, event 17, source runtime (4),
+  related same grant, cleanup_claimed -> cleanup_deleted,
+  context same use_sha256, same receipt, occurred_at=deleted_at
+```
+
+Event 17 follows the one event 16 for that cleanup and never precedes or
+duplicates it. A crash before janitor invocation leaves claimed state. A crash
+during or after janitor success but before the terminal transaction also leaves
+claimed state, so exact recovery reacquires the lock and repeats the idempotent
+delete. A crash after the terminal commit returns the deleted projection on
+exact retry without calling the janitor. A changed same-grant retry is
+`grant_already_used`; a different-grant retry against an occupied target is
+`credential_cleanup_invalid`.
+
+#### Restart, Cardinality, And Failure Order
+
+Restart validation streams every cleanup with its origin transition,
+historical account version, credential, grant, challenge/manifest, private
+locator, and entity events. It rederives both canonical transcripts and digests.
+The lifecycle graph is exact:
+
+| Cleanup state | Claim grant uses | Events | Terminal fields |
+| --- | --- | --- | --- |
+| `provisional` | 0 | no cleanup event before origin finalize | no claim or deletion |
+| `ready` | 0 | exactly one event 15 | no claim or deletion |
+| `claimed` | exactly 1 | one event 15, adjacent event 7 then one event 16 | claim present, no deletion |
+| `deleted` | exactly 1 | claimed graph plus one later event 17 | same claim, one `deleted_at` |
+
+Unknown kind/state, NULL transition, non-finalized or wrong-kind origin,
+duplicate/missing descriptor, wrong historical tuple, malformed locator,
+digest mismatch, timestamp drift, grant-count mismatch, duplicate/missing/
+swapped event, incorrect source/related/context/receipt, or an impossible
+state-field combination fails the entire authority open as
+`owner_recovery_required`. Validation and public/error projection retain O(1)
+additional Rust history memory and never expose locator material.
+
+Credential cleanup uses this closed failure precedence:
+
+1. Request bounds, canonical encoding, and time shape fail as `invalid_input`
+   or `authorization_malformed`.
+2. Schema, anchor, history, transcript, event, or row corruption, including a
+   persisted NULL transition, fails as `owner_recovery_required`.
+3. An existing grant is checked for exact terminal/recovery identity; changed
+   use of the same grant is `grant_already_used`.
+4. Receipt, challenge, manifest, or intent mismatch is
+   `authorization_context_stale`.
+5. Clock rollback is checked before authorization expiry; expiry is durably
+   recorded before mutable target eligibility.
+6. Blocked store/account is `account_update_conflict`; a recovery-required
+   store is `owner_recovery_required`.
+7. Target lifecycle, locator kind, locator/tombstone digest, origin graph, or a
+   different-grant occupied target mismatch is `credential_cleanup_invalid`.
+8. Authority-store read/write and janitor backend failures retain their existing
+   stable codes.
+
+No failure contains a private locator value, account address, endpoint,
+credential presence distinction, digest, backend diagnostic, or other private
+row material.
+
 ### Grant Use, Claim, Invocation, And Observation
 
 ```rust

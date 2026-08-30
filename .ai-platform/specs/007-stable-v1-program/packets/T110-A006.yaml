@@ -2,9 +2,9 @@ schema_version: 1
 packet_id: 007-T110-T202C3-A006
 task_id: T110
 feature_id: 007-stable-v1-program
-mode: governance_blocker
-adapter: none
-status: blocked
+mode: delegated_test_first_execution
+adapter: codex_worker
+status: ready_for_review
 
 governance_inputs:
   constitution: .ai-platform/memory/constitution.md
@@ -20,158 +20,201 @@ governance_inputs:
   authority_contract: .ai-platform/specs/008-security-baseline/contracts/authority-store.md
   authorization_contract: .ai-platform/specs/008-security-baseline/contracts/authorization.md
   account_contract: .ai-platform/specs/008-security-baseline/contracts/account-config-v2.md
+  data_model: .ai-platform/specs/008-security-baseline/data-model.md
   predecessor_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A005.md
   approval_gates:
     T202C3_A005: accepted by user on 2026-08-30 at production commit 316dae0
-    unattended_cadence: authorized for reviewed internal attempts only
-    packet_review: blocked by unresolved cleanup security semantics
+    cleanup_contract: approved by user on 2026-08-30
+    delegated_acceptance: >-
+      The orchestrator may accept later artifacts only after required TDD,
+      validation, evidence, and three reviews; no record may claim the user
+      personally reviewed unseen work.
+    packet_review: pending independent review
 
 work_unit:
-  title: Resolve the credential-cleanup challenge contract
+  title: Issue an exact effect-free credential-cleanup challenge
   attempt: T202C3-A006
-  goal: >-
-    Reserve the next attempt for the minimal credential_cleanup challenge
-    contract only. The attempt may not define or implement challenge issuance
-    until the signed tombstone digest, account and binding selection, store-state
-    eligibility, and transition-less legacy ownership rules are confirmed.
-    Claim and delete are separate, later contract decisions and attempts.
   parent: T110 Complete Authority Lifecycles
   security_task: T202C3 Account Credential And Cleanup Lifecycles
+  goal: >-
+    Implement only exact effect-free credential_cleanup challenge issuance and
+    pending reuse from one transition-bound ready tombstone. Rederive the
+    canonical private locator and 14-field tombstone digests from immutable
+    authority history, bind the signed manifest to the origin-before account,
+    and add no grant use, claim, delete permit, janitor, keyring, runtime, or
+    external-effect capability.
   depends_on:
     - T202C3-A005 Accepted at production commit 316dae0
+    - approved cleanup security contract in 008 canonical artifacts
+    - independent review of this packet before production permission
   blocks:
-    - any cleanup production or test execution
-    - A007 cleanup claim packetization
-    - A008 cleanup delete-completion packetization
+    - T202C3-A007 cleanup claim packetization
     - T202C3 completion
   parallel: false
-
-known_boundaries:
-  - CredentialCleanupManifest is owner-authorized, targets CleanupId, and has no authorization effect.
-  - Cleanup locator material is private and delete-only; it never enters public output, events, fixtures, evidence, or logs.
-  - A006 is limited to challenge-contract resolution and eventual effect-free issuance; it does not consume a grant or mutate cleanup state.
-  - A007 and A008 are reserved labels for later claim and delete-completion decisions only; neither is Ready or packetized here.
-  - No cleanup behavior may be implemented from this blocked packet.
-
-blocking_findings:
-  a006_minimum_challenge_contract:
-    - id: H-A006-001
-      severity: High
-      finding: >-
-        Signed tombstone_sha256 has no normative domain, transcript, ordered
-        fields, bounds, or derivation from the durable cleanup row. It must not
-        be assumed equal to locator_sha256.
-    - id: H-A006-002
-      severity: High
-      finding: >-
-        Challenge account and binding selection is undefined. The contract must
-        choose historical-before versus current binding, define removed-account
-        behavior, and define whether blocked or recovery-required stores can
-        issue cleanup challenges.
-    - id: H-A006-003
-      severity: High
-      finding: >-
-        CredentialCleanupManifest permits transition_id=None for legacy cleanup,
-        but no confirmed owner/store/account/binding relationship or durable
-        tombstone origin defines that case.
-  later_a007_claim_contract:
-    - id: H-A007-001
-      severity: High
-      finding: >-
-        Cleanup claim identity, first-use transaction, exact/changed retry,
-        expiry precedence, response-loss recovery, and concurrent-winner
-        semantics are undefined.
-    - id: H-A007-002
-      severity: High
-      finding: >-
-        Opaque DeleteOnlyLocator ownership is undefined, including whether only
-        the first claim winner receives it, what exact recovery can receive, and
-        the required non-Clone/non-Debug/non-Serialize/no-byte-export boundary.
-    - id: H-A007-003
-      severity: High
-      finding: >-
-        cleanup_claimed event 16 lacks exact source, related entity, context
-        digest, receipt, ordering, timestamp, response-loss, and cardinality
-        rules.
-  later_a008_delete_contract:
-    - id: H-A008-001
-      severity: High
-      finding: >-
-        Delete completion lacks a crash protocol, caller capability, missing-key
-        outcome rule, exact terminal retry identity, changed retry result, and
-        recovery behavior.
-    - id: H-A008-002
-      severity: High
-      finding: >-
-        cleanup_deleted event 17 lacks exact source, related entity, context
-        digest, receipt, ordering after event 16, timestamp, response-loss, and
-        cardinality rules.
-
-required_governance_resolutions:
-  - Confirm H-A006-001 through H-A006-003 before replacing this blocker with an independently reviewed A006 execution packet.
-  - Resolve H-A007-001 through H-A007-003 in a separate A007 packet before any claim implementation.
-  - Resolve H-A008-001 and H-A008-002 in a separate A008 packet before any delete-completion implementation.
-  - Each resolution must amend the confirmed security contract; no value may be inferred from schema shape, existing code, or this packet.
+  conflicts_with:
+    - all concurrent authority registry, transition, cleanup, event, or restart validation work
 
 codebase_context:
   branch: codex/v1-roadmap-governance
-  baseline_head: a9f7978
-  relevant_existing_surfaces:
-    - sealed CredentialCleanupManifest fields in kirje-core
-    - transition-bound cleanup rows and Ready events from accepted A002/A003
-    - canonical credential_cleanup schema states and event codes 16/17
-  semantic_rule: existing code and schema are evidence of gaps, not authority to choose a missing contract value
+  baseline_head: 6337e74
+  existing_surfaces:
+    - sealed CredentialCleanupManifest and canonical authorization TLV helpers in kirje-core
+    - transition-bound private cleanup reservations and cleanup-ready event 15 from accepted A002/A003
+    - canonical credential_cleanup states and authority event codes 16/17 in unchanged Authority SQLite v1
+  implementation_rule: >-
+    Existing code supplies storage and parsing mechanics but cannot override the
+    canonical security semantics in contract_snapshot.
+
+contract_snapshot:
+  locator:
+    domain: KIRJE-DELETE-ONLY-LOCATOR-V1 followed by NUL
+    fields:
+      - 0x0001 locator_kind u8
+      - 0x0002 service UTF-8, 1..128 bytes and characters
+      - 0x0003 username UTF-8, 1..1024 bytes and characters
+    total_bound: 1..4096 bytes
+    active_v2: exact v2 service and lowercase digest username from realm/store/account/historical credential/historical binding
+    legacy_v1: exact legacy service plus origin-before historical display ID
+    digest: SHA-256 of the complete canonical transcript
+  tombstone:
+    domain: KIRJE-CREDENTIAL-CLEANUP-TOMBSTONE-V1 followed by NUL
+    ordered_fields:
+      - 0x0001 realm_id BLOB32
+      - 0x0002 cleanup_id UUID16
+      - 0x0003 transition_id UUID16
+      - 0x0004 transition_sha256 BLOB32
+      - 0x0005 origin_manifest_sha256 BLOB32
+      - 0x0006 store_id UUID16
+      - 0x0007 account_id UUID16
+      - 0x0008 historical_account_generation u64be
+      - 0x0009 historical_credential_id UUID16
+      - 0x000a historical_binding_sha256 BLOB32
+      - 0x000b locator_kind u8
+      - 0x000c locator_sha256 BLOB32
+      - 0x000d created_at i64be
+      - 0x000e origin_expected_state u8, exact 0x01 provisional
+    exclusions:
+      - raw locator material
+      - mutable cleanup state, claim grant, and deleted time
+    derivation: >-
+      Rederive from realm meta, cleanup row, finalized origin transition and
+      transition digest, origin grant/challenge manifest and its exactly-one
+      provisional descriptor, plus the immutable origin-before account/version.
+  eligibility:
+    - Cleanup manifest transition_id is present and equals the row/origin transition; None is rejected.
+    - Persisted NULL transition is owner_recovery_required corruption; schema and core transcript bytes do not change.
+    - Origin is finalized account_update or account_remove and created_at equals prepared_at.
+    - Store is active and historical account registry projection is active or removed.
+    - Blocked store/account returns account_update_conflict; recovery store returns owner_recovery_required.
+    - Manifest expected state is ready and common binding is origin-before historical binding.
+    - Later account update/remove/recreation does not rebind the origin.
+  challenge:
+    - Issuance and exact pending reuse create zero grant uses, cleanup mutations, effects, invocations, janitor calls, or external calls.
+    - Exact pending reuse consumes no entropy and returns the same bounded challenge after complete validation.
+    - Public projection, errors, logs, events, fixtures, and evidence omit locator material and private fields.
+
+later_attempt_outlines:
+  T202C3_A007:
+    status: non_executable
+    owns:
+      - atomic grant use plus ready-to-claimed transition and exact/changed retry, expiry, response loss, and concurrency
+      - opaque non-Clone, non-Debug, non-Serialize, no-export CleanupDeletePermit holding the apply lock
+      - event 16 source runtime, related grant, use_sha256 context, same receipt/time, adjacent after event 7
+  T202C3_A008:
+    status: non_executable
+    owns:
+      - combined consuming fake-janitor delete boundary with no caller mark_deleted
+      - deleted/no-entry indistinguishability, backend-failure claimed state, crash recovery, and terminal no-recall retry
+      - event 17 source runtime, same grant/use/receipt, exactly once after event 16
+  integration_owner: T204 owns real runtime/keyring wiring and end-to-end integration
 
 execution_constraints:
-  production_permission: none
-  test_permission: none
-  allowed_files: []
-  executor: none while blocked
+  production_permission: none_pending_independent_packet_review
+  test_permission: none_pending_independent_packet_review
+  future_allowed_files:
+    - crates/kirje-store/src/authority.rs
+    - crates/kirje-store/tests/authority_registry.rs
+    - crates/kirje-store/tests/fixtures/authority/registry/account_credential_cleanup/**
+    - .ai-platform/evidence/T202C3/**
+    - .ai-platform/specs/007-stable-v1-program/**
+    - .ai-platform/specs/008-security-baseline/tasks.md
+  forbidden_changes:
+    - authority schema, application ID, user version, Cargo graph, or core transcript bytes/types
+    - cleanup claim/delete, permit, janitor, runtime, config, keyring, protocol, CLI, MCP, network, or remote-effect behavior
+    - transition, account, credential, or cleanup semantics outside challenge issuance
   write_rules:
-    - Do not create a worker prompt or edit production/test code from this packet.
-    - Do not treat the autonomy cadence as approval of any unresolved semantic.
-    - Do not mark A006, A007, A008, T202C3, or T110 Ready, review_complete, or Accepted.
-    - Do not push, merge, tag, publish, access live providers, or request credentials.
-
-future_validation_contract:
-  status: non_executable_outline
-  required_after_each_contract_is_confirmed_and_packetized:
-    - discriminating RED before implementation
-    - focused lifecycle tests plus full kirje-store all-feature and no-default tests
-    - all-target all-feature Clippy with warnings denied and format check
-    - schema and Cargo.lock integrity hashes
-    - delivery artifact validation and three-pass review
-  prohibited_evidence:
-    - credentials, addresses, endpoints, private keys, seeds, proofs, nonces, locator material, mailbox content, or real provider data
+    - No production or test edit may begin until independent packet review changes both permissions.
+    - After review, write a discriminating focused RED before production changes.
+    - A worker edits only future_allowed_files and does not delegate.
+    - Synthetic public signatures may be committed; private keys, seeds, proofs, nonces, locator material, and real account data may not.
+    - Do not mark A007, A008, T202C3, or T110 Ready or Accepted from this packet.
 
 tdd_plan:
-  status: blocked
-  rule: no RED or GREEN may be written until the applicable contract subset is confirmed and independently packetized
+  red:
+    - Prove the first exact ready cleanup challenge reaches the unsupported action gate with zero rows/events/clock/entropy beyond the pre-existing origin graph.
+    - Add canonical locator and tombstone byte/digest goldens and every one-field mutation negative.
+    - Add active/removal history, later update/remove/recreation, blocked/recovery, NULL-transition, wrong-origin, duplicate-descriptor, state, restart, corruption, and privacy negatives.
+  green:
+    - Parse and rederive the private locator and tombstone from immutable origin history with bounded streaming validation.
+    - Admit only exact ready challenge issuance and pending reuse with zero authorization effect.
+    - Extend restart validation for the A006 challenge graph without admitting claim/delete rows or events 16/17.
+  refactor:
+    - Share canonical TLV helpers only when the private locator/tombstone bounds and action-specific validation stay explicit.
 
 validation_loop:
-  status: governance_only
-  commands:
-    - YAML parse for this packet
-    - delivery artifact validation for 007-stable-v1-program and 008-security-baseline
+  focused_red_green:
+    - cargo test -p kirje-store --test authority_registry credential_cleanup_challenge_is_exact --all-features --locked
+  complete:
+    - cargo test -p kirje-store --test authority_registry --all-features --locked
+    - cargo test -p kirje-store --all-features --locked
+    - cargo test -p kirje-store --no-default-features --locked
+    - cargo clippy -p kirje-store --all-targets --all-features --locked -- -D warnings
+    - cargo fmt --all --check
+  integrity:
     - git diff --check
+    - shasum -a 256 crates/kirje-store/src/authority/schema_v1.sql Cargo.lock
+    - python3 /Users/iiwish/.codex/skills/ai-delivery-governor/scripts/validate_delivery_artifacts.py --root /Users/iiwish/self/kirje --feature-id 007-stable-v1-program
+    - python3 /Users/iiwish/.codex/skills/ai-delivery-governor/scripts/validate_delivery_artifacts.py --root /Users/iiwish/self/kirje --feature-id 008-security-baseline
 
 evidence_contract:
-  status: blocker_only
+  attempt_path: .ai-platform/evidence/T202C3/attempts/T202C3-A006.md
+  summary_path: .ai-platform/evidence/T202C3/summary.md
+  test_results_path: .ai-platform/evidence/T202C3/test-results.md
   required:
-    - exact unresolved decisions and their A006/A007/A008 ownership
-    - explicit no-production, no-test, and no-delegation state
+    - exact RED/GREEN commands and results
+    - canonical locator/tombstone goldens and mutation matrix
+    - origin/eligibility/state/restart/corruption/privacy matrices
+    - zero grant-use/effect/claim/delete/external-call proof
+    - schema and Cargo.lock unchanged hashes
+    - spec, engineering, and QA reviews with residual risk
+  prohibited:
+    - credentials, addresses, endpoints, private keys, seeds, proofs, nonces, locator material, mailbox content, or real provider data
 
 review_contract:
-  status: blocked
-  pass_condition: all applicable decisions are confirmed in SSOT and a replacement attempt packet passes independent review
+  pass_1_spec_compliance:
+    - exact transcripts, historical-before origin, transition-bound legacy, ready eligibility, and no core/schema change
+  pass_2_engineering:
+    - strict bounds, streaming restart derivation, error precedence, pending reuse, zero-effect transaction, and privacy/capability closure
+  pass_3_qa:
+    - golden/mutation, active/removed/later-history, blocked/recovery, NULL transition, corruption, restart, response loss, and zero-external-call coverage
+  packet_pass_condition:
+    - no unresolved Critical, High, or Medium finding
+    - independent reviewer explicitly authorizes production and test execution in a governance follow-up
+  production_acceptance:
+    - TDD, every validation command, sanitized evidence, and all three reviews pass
+    - orchestrator may then record delegated acceptance without claiming user personal review
 
 handoff:
-  expected_state: T110 Blocked and T202C3 Blocked
-  evidence_state: T202C3-A005 accepted; A006/A007/A008 have no execution permission
-  next_gate: explicit user confirmation of all A006 minimum challenge-contract decisions followed by independent packet review
+  current_state: contract approved; packet ready_for_review; production and test permission none
+  after_packet_review: A006 Ready only if an independent review explicitly changes both permissions
+  after_execution: A006 review_complete or delegated Accepted from evidence; A007 may then be packetized just in time
+  commit_policy:
+    - local commits only
+    - no push, merge, tag, publish, GitHub Release, live provider, mailbox, credential, or external destructive operation
 
 stop_conditions:
-  - Any blocking finding remains unresolved.
-  - A proposed resolution chooses a security semantic without explicit user confirmation and a confirmed contract amendment.
-  - Any production/test implementation or worker delegation is proposed from this blocked packet.
-  - Private locator material would enter output, events, fixtures, evidence, logs, Debug, serialization, cloning, or byte export.
+  - Independent packet review finds any unresolved Critical, High, or Medium issue.
+  - Production or test work is requested while permission remains none.
+  - A required change touches schema, core transcripts/types, dependencies, runtime, keyring, protocol, CLI, MCP, network, or external calls.
+  - Locator material or private origin values would enter output, events, logs, fixtures, evidence, Debug, serialization, cloning, or byte export.
+  - A second same-cause contract or validation failure occurs.

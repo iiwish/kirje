@@ -384,8 +384,43 @@ trait CredentialJanitor {
 ```
 
 `DeleteOnlyLocator` exposes no public bytes and no conversion to
-`ActiveCredentialLocator`. `delete_only` treats a missing keyring entry as
-idempotent success and returns no presence distinction.
+`ActiveCredentialLocator`. The janitor port is crate-private and is reachable
+only from the combined cleanup apply boundary described below; a caller cannot
+invoke it and then independently mark authority state deleted. `delete_only`
+treats a deleted entry and an entry that was already absent as one
+indistinguishable success result. It exposes no presence distinction.
+
+## Credential Locator Transcripts
+
+Every `credential_cleanup.locator_material` value is exactly one canonical
+transcript using the authorization contract's TLV primitive:
+
+```text
+KIRJE-DELETE-ONLY-LOCATOR-V1\0
+0x0001 locator_kind:u8
+0x0002 service:UTF-8
+0x0003 username:UTF-8
+```
+
+The three tags occur once in ascending order. Service and username reject NUL,
+malformed or noncanonical UTF-8, unknown/duplicate/out-of-order tags, and
+trailing bytes. Service is 1..128 bytes and characters, username is 1..1024
+bytes and characters, and the complete transcript is 1..4096 bytes.
+`locator_sha256` is SHA-256 of the complete domain-prefixed transcript, never a
+hash of an implementation struct, concatenated strings, or only the username.
+
+The closed locator forms are:
+
+| Kind | Service | Username |
+| --- | --- | --- |
+| `active_v2` (`0x01`) | exact `dev.kirje.mail.credentials.v2` | exact `v2:` plus 64 lowercase hexadecimal characters for the V2 locator digest derived from realm, store, account, historical credential, and historical binding |
+| `legacy_v1` (`0x02`) | exact `dev.kirje.mail` | exact validated historical display-ID bytes from the origin transition's before snapshot |
+
+An `active_v2` cleanup rederives the documented V2 digest from the immutable
+historical-before tuple. A `legacy_v1` cleanup never substitutes a current or
+recreated account's display ID. Any other service, username shape, uppercase
+hexadecimal character, locator kind, or digest relationship is
+`credential_cleanup_invalid` before janitor access.
 
 ## Locator V2
 
@@ -407,7 +442,8 @@ binding digest
 
 The old `dev.kirje.mail/<display-id>` form is never used by active set/get/
 contains/delete, migration, status, or doctor. It can appear only as private
-delete-only tombstone material after owner authorization.
+delete-only tombstone material after owner authorization, encoded as the exact
+`legacy_v1` transcript above.
 
 ## Account Lifecycle
 
@@ -518,6 +554,28 @@ grant use + transition prepare with provisional old-locator tombstone
 ```
 
 Cleanup never reads or tests the old credential.
+
+### Retired Cleanup
+
+Cleanup challenge and claim bind the immutable origin transition's historical
+before account generation, credential identity, binding digest, and, for a
+legacy locator, display ID. A later account update, removal, recreation, or
+credential change does not rebind this origin. The authority store admits only
+a finalized, transition-bound cleanup created in provisional state and later
+made ready; canonical v1 treats a persisted cleanup without `transition_id` as
+corruption. The schema remains unchanged and the core optional transcript field
+remains parseable, but no supported v1 operation accepts the absent form.
+
+Claim yields an opaque `CleanupDeletePermit` that owns the fixed cleanup apply
+lock and the private `DeleteOnlyLocator`. The permit is non-`Clone`,
+non-`Debug`, non-serializable, and has no byte, service, username, or locator
+export. Only the combined consuming cleanup apply service may accept it. That
+service invokes the crate-private janitor and records terminal authority state
+after an indistinguishable delete/already-absent success; there is no public or
+caller-owned `mark_deleted` operation. A janitor failure leaves authority state
+claimed. An exact retry may obtain another permit only after reacquiring the
+same apply lock; a deleted retry returns only the terminal projection and never
+calls the janitor again.
 
 ## Readiness Snapshot
 

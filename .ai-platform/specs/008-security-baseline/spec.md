@@ -11,9 +11,11 @@
   credential, approval, input-boundary, and capability-claim audits performed
   before Mailbox Alpha planning.
 - Depends on: Confirmed `007-stable-v1-program` spec, plan, and work graph.
-- Review: Confirmed on 2026-08-27 under the user's delegated project-owner
-  authority after three scope-specific independent security reviews reported no
-  unresolved Critical or High requirement gap.
+- Review: The base contract was confirmed on 2026-08-27 after three independent
+  security reviews. The user approved the T202C3 cleanup contract revision on
+  2026-08-30 and delegated later evidence-based acceptance; this record does
+  not claim personal review of the resulting unseen artifact. The A006 packet
+  remains pending independent review before production permission.
 
 ## Goal
 
@@ -228,7 +230,15 @@ granting mailbox access.
   never get, contains, list, copy, export, rebind, or fall back. Normal runtime,
   status, doctor, and migration code never probes the legacy service namespace;
   v0.3 accounts report quarantine from migration metadata whether or not an old
-  entry exists.
+  entry exists. Every v1 tombstone is owned by one finalized account update or
+  removal and binds that transition's immutable historical-before account,
+  credential, binding, and locator transcript; later account state cannot
+  redirect it. Challenge is effect-free. Claim atomically consumes one grant
+  and yields only an opaque lock-owning delete permit. One combined consuming
+  boundary performs the idempotent janitor call and terminal authority update,
+  while delete and already-absent outcomes remain indistinguishable. Crashes or
+  backend failure leave a safely retryable claimed tombstone, and an exact
+  deleted retry performs no second janitor call.
 - FR-009: Account status and doctor output expose orthogonal bounded
   `store_state`, `owner_state`, `binding_state`, and `credential_state` fields
   with deterministic combinations, including unregistered, not configured,

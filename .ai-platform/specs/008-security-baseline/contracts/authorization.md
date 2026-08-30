@@ -334,7 +334,7 @@ nested-record encoding is permitted.
 | `store_enroll` | `0100 transition_id:UUID16`, `0101 config_cas:ConfigCas`, `0102 expected_store_state:u8` where `0` means unregistered |
 | account create/update/remove | `0100 transition_id:UUID16`, `0101 config_cas:ConfigCas`, `0102 before:optional AccountSnapshot`, `0103 after:optional AccountSnapshot`, `0104 next_config_generation:u64be`, `0105 after_config_sha256:BLOB32`, `0106 cleanup:list<CleanupDescriptor>` |
 | credential set/delete | account fields plus `0107 active_locator_sha256:BLOB32`; credential bytes never appear |
-| credential cleanup | `0100 cleanup_id:UUID16`, `0101 locator_kind:u8`, `0102 locator_sha256:BLOB32`, `0103 tombstone_sha256:BLOB32`, `0104 transition_id:zero-or-UUID16`, `0105 expected_state:u8` |
+| credential cleanup | `0100 cleanup_id:UUID16`, `0101 locator_kind:u8`, `0102 locator_sha256:BLOB32`, `0103 tombstone_sha256:BLOB32`, `0104 transition_id:UUID16`, `0105 expected_state:u8` (`0x02 ready`) |
 | owner/recovery rotate | `0100 transition_id:UUID16`, `0101 role:OwnerKeyRole:u8`, `0102 old_key_id:BLOB32`, `0103 old_public_key:BLOB32`, `0104 new_key_id:BLOB32`, `0105 new_public_key:BLOB32`, `0106 old_epoch:u64be`, `0107 new_epoch:u64be`, `0108 old_bundle:BLOB32`, `0109 new_bundle:BLOB32`, `010a permissions:u32be` |
 | owner recover | `0100 transition_id:UUID16`, `0101 journal_id:UUID16`, `0102 old_epoch:u64be`, `0103 new_epoch:u64be`, `0104 old_bundle:BLOB32`, `0105 new_owner_id:BLOB32`, `0106 new_owner_key:BLOB32`, `0107 new_recovery_id:BLOB32`, `0108 new_recovery_key:BLOB32`, `0109 new_bundle:BLOB32`, `010a invalidation_scope:u8` where `1` means all |
 | ambiguous close | `0100 operation_id:UUID16`, `0101 invocation_id:UUID16`, `0102 original_manifest_sha256:BLOB32`, `0103 claim_sha256:BLOB32`, `0104 observation_sha256:zero-or-BLOB32`, `0105 assertion:AmbiguousAssertion:u8`, `0106 assertion_text:UTF-8`, `0107 terminal:AmbiguousTerminal:u8` |
@@ -353,6 +353,17 @@ credential for delete; cleanup target equals `cleanup_id`; trust target is the
 old epoch and equals `old_epoch`; ambiguous target equals the original remote
 effect. Repeated IDs/digests in common context, nested records, and action
 fields must match byte-for-byte.
+
+Canonical v1 accepts `credential_cleanup` only when `transition_id` is present.
+The existing core optional field and zero-length parser form remain unchanged
+for transcript compatibility, but an absent value is never an authorized v1
+semantic: request construction rejects it as `authorization_malformed`, and a
+persisted cleanup with no transition is authority corruption. The common store,
+account, and binding fields bind the finalized origin transition's historical
+before account snapshot, not the current mutable account generation. The
+manifest locator kind and digest match the private canonical locator transcript,
+and `tombstone_sha256` is the digest of the exact tombstone transcript defined
+by the authority-store contract. No raw locator field enters this manifest.
 
 ### Send Manifest
 

@@ -17,12 +17,12 @@
   dependency, migration, CI, and checkpoint-specific gates run once per tag.
 - Future packets are generated just in time after their predecessor clears its
   execution gate. The user explicitly accepted `T202C3-A005` on 2026-08-30.
-- For the user-authorized unattended cadence beginning 2026-08-30, an internal
-  attempt may unlock its next internal attempt only after TDD, the packet's full
-  validation loop, and all three review passes complete. Such an attempt is
-  recorded as `review_complete`, never `Accepted`, unless the user explicitly
-  accepts it. T110, T112, T114, T116, T117, T119, T120, and T121 remain explicit
-  user acceptance gates.
+- For the user-authorized unattended delegation beginning 2026-08-30, the
+  orchestrator may accept an internal attempt or major milestone only after
+  TDD, the packet's full validation loop, required evidence, and all three
+  review passes complete with no unresolved blocking finding. The record names
+  delegated orchestrator acceptance and never states that the user personally
+  reviewed unseen work. Missing or failed evidence still blocks progression.
 - The unattended cadence permits bounded subagent management and local commits
   only. It forbids push, merge, tag, publish, GitHub Release, live mailbox or
   provider effects, and credential input. A Critical/High finding, material
@@ -130,21 +130,19 @@ Evidence required:
 
 ## T110: Complete Authority Lifecycles
 
-Status: Blocked
+Status: Running
 Execution state: T109 is Accepted. T110 runs as four strict serial security
 batches. T202C3-A001 challenge issuance is reviewed at commit `daf22a0`; the
 T202C3-A002 account-update transition is accepted at commit `2c00f32`.
 `T202C3-A003` account-remove transition is accepted at commit `703b5a1`.
 `T202C3-A004` credential-set transition is accepted at commit `1c6d7cb`.
 `T202C3-A005` credential-delete transition is accepted at commit `316dae0` by
-explicit user decision on 2026-08-30. `T202C3-A006` is reserved for exact,
-effect-free cleanup challenge-contract resolution, but its packet is Blocked.
-The minimal A006 contract lacks the tombstone digest derivation, account/binding
-selection across historical, removed, blocked, and recovery states, and
-`transition_id=None` legacy ownership. Separate unpacketized A007 claim and A008
-delete-completion work also lacks claim/retry/expiry/concurrency identity,
-opaque `DeleteOnlyLocator` ownership/recovery, crash and terminal retry rules,
-and exact event 16/17 semantics. No cleanup implementation is Ready.
+explicit user decision on 2026-08-30. The user approved the T202C3 cleanup
+security-contract amendment. It closes the locator/tombstone, historical
+origin, legacy ownership, challenge eligibility, claim/permit, crash/terminal,
+event, restart/privacy, and error-precedence decisions. `T202C3-A006` now awaits
+independent packet review with production permission `none`; A007 claim and
+A008 delete completion remain non-executable just-in-time outlines.
 Priority: P0
 Depends on: T109 Accepted
 Blocks: T111
@@ -216,11 +214,11 @@ Evidence required:
    prepare through terminal state, permanent credential-history retention,
    immutable account/store versioning, and the no-cleanup/no-keyring boundary
    at commit `316dae0`; the user explicitly accepted A005 on 2026-08-30.
-   `T202C3-A006` is the reserved cleanup-challenge contract attempt and remains
-   Blocked on its three minimum contract decisions. A007 claim and A008
-   delete-completion are only reserved labels for later contract decisions; they
-   are neither Ready nor packetized. The unattended cadence does not waive any
-   cleanup security-contract gate.
+   The approved cleanup security-contract amendment closes the nine recorded
+   challenge/claim/delete findings. `T202C3-A006` is ready for independent packet
+   review but retains production permission `none`. A007 claim and A008 delete
+   completion remain non-executable just-in-time outlines and become packetizable
+   only after their serial predecessor passes all gates.
 2. `T202C4`: remote challenge registry binding and planner-owned effect row.
 3. `T202D`: effect claim, invocation permit, observation, and ambiguity.
 4. `T202E`: owner rotation/recovery, audit, and aggregate authority acceptance.

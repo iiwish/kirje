@@ -302,6 +302,15 @@ the locator first and commits `missing` second; either crash point fails closed.
 A binding-changing update commits the new credential identity plus an immutable
 delete-only tombstone for the old locator. Cleanup can only call delete on the
 exact tombstoned locator and cannot read, test, list, export, copy, or rebind it.
+The locator is one bounded canonical kind/service/username transcript and the
+tombstone is one domain-separated 14-field transcript bound to the finalized
+origin transition's historical-before account, credential, and binding. All v1
+tombstones are transition-bound, including legacy locators. Claim consumes one
+grant and returns an opaque apply-lock-owning delete permit. A combined service
+consumes the permit, calls only the delete-only janitor, and commits deletion;
+it exposes neither a standalone terminal marker nor a deleted-versus-absent
+result. T202C3 proves the authority lifecycle with a store-private fake janitor,
+while T204 wires the real runtime/keyring adapter and end-to-end crash recovery.
 
 ### D-009 Unified Same-Handle Bounded Input
 

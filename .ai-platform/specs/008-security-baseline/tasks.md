@@ -25,12 +25,14 @@
   and does not mark the task Accepted.
 - The orchestrator performs scope, spec, engineering, and QA review and writes
   evidence after each attempt.
-- Under the user's explicit 2026-08-30 unattended cadence, an internal attempt
-  that completes TDD, its full validation loop, and all three review passes may
-  unlock the next internal attempt as `review_complete`; it is not `Accepted`
-  without a separate explicit user decision. The major v1 program gates remain
-  user acceptance gates, and all external publication, live-provider, mailbox,
-  and credential operations remain forbidden while unattended.
+- Under the user's explicit 2026-08-30 unattended delegation, the orchestrator
+  may accept a future internal attempt or major milestone only after its TDD,
+  full validation loop, required evidence, and all three review passes succeed
+  with no unresolved blocking finding. The acceptance record names delegated
+  orchestrator review; it never claims that the user personally reviewed an
+  unseen artifact. A failed or missing gate remains blocking. External
+  publication, live-provider, mailbox, and credential operations remain
+  forbidden while unattended.
 - No task may expose credentials, owner private keys, signatures, mailbox
   content, account addresses, endpoints, UIDs, or raw provider responses in
   committed fixtures/evidence.
@@ -707,7 +709,7 @@ Evidence required:
 
 ### T202C3: Account Credential And Cleanup Lifecycles
 
-Status: Blocked
+Status: Running
 Execution state: `T202C3-A001` completed review at production commit `daf22a0`.
 It owns effect-free challenge issuance for account update/remove and credential
 set/delete. `T202C3-A002` is accepted at production commit `2c00f32` and owns
@@ -720,14 +722,15 @@ credential identity, immutable after versions, and no-cleanup/no-keyring
 boundary. `T202C3-A005` is accepted at production commit `316dae0` and owns the
 exact credential-delete authority transition, retained credential history,
 immutable after versions, and the no-cleanup/no-keyring boundary. The user
-explicitly accepted A005 on 2026-08-30. `T202C3-A006` is reserved for effect-free
-cleanup challenge-contract resolution, but is Blocked on three minimum
-decisions: tombstone digest derivation, account/binding and store-state
-selection, and `transition_id=None` legacy ownership. Later A007 claim and A008
-delete-completion decisions remain unresolved for claim identity/retry/expiry/
-concurrency, opaque `DeleteOnlyLocator` ownership/recovery, crash/terminal
-retry, and exact event 16/17 semantics. Neither later attempt is Ready or
-packetized, and no cleanup implementation is permitted.
+explicitly accepted A005 on 2026-08-30 and approved the cleanup security-
+contract amendment. The confirmed contracts define the canonical locator and
+tombstone transcripts, historical origin, transition-bound legacy ownership,
+challenge eligibility, claim identity/retry/expiry/concurrency, opaque permit,
+combined deletion boundary, crash recovery, events 16/17, restart/cardinality/
+privacy invariants, and closed error precedence. `T202C3-A006` is an execution
+packet awaiting independent packet review with production permission still
+`none`. A007 claim and A008 delete-completion are non-executable just-in-time
+outlines; neither is Ready or packetized.
 Priority: P0
 Story / Requirement: US-001, US-003; FR-003-FR-009, FR-016; NFR-001-NFR-003,
 NFR-006, NFR-007
@@ -757,6 +760,14 @@ Test targets:
 - Provisional/ready/claimed/deleted cleanup; active-v2/legacy-v1 exact enum;
   delete-only projection/API compile review and capability-escalation negatives
 - Event/corruption/restart/boundedness/privacy and no-external-call-before-claim
+- Canonical delete-only locator and 14-field tombstone byte/digest goldens with
+  every one-field mutation, transition-less persisted-row corruption, and
+  historical-before binding across later update/remove/recreation
+- Claim response loss/concurrency/expiry/exact-versus-changed grant retry,
+  opaque permit compile negatives, and adjacent grant/event-16 cardinality
+- Fake-janitor pre-call/post-call/pre-terminal crash windows, backend failure,
+  deleted/no-entry indistinguishability, terminal no-recall, and exact event-17
+  order/cardinality
 
 Validation commands:
 ```bash
@@ -775,6 +786,13 @@ Packet path:
 
 The 007 v1 work graph owns executable just-in-time attempt packets for T110;
 there is no separate `008-security-baseline/packets/T202C3.yaml`.
+
+Attempt ownership is serial: A006 owns effect-free cleanup challenge issuance;
+A007 owns atomic grant use, ready-to-claimed transition, opaque permit and event
+16; A008 owns the combined fake-janitor delete/terminal boundary and event 17.
+Only a reviewed predecessor may unlock the next outline. T202C3 owns no real
+keyring adapter. T204 owns runtime/keyring wiring and end-to-end integration and
+must preserve every final 1.0 cleanup invariant.
 
 Evidence required:
 - `.ai-platform/evidence/T202C3/summary.md`
@@ -1156,6 +1174,8 @@ Test targets:
 - Binding change, new credential ID, re-entry, account generation
 - Active locator digest and zero active use of legacy locator
 - Set/delete/binding-change crash order and delete-only cleanup capability
+- Runtime/keyring wiring for the reviewed cleanup claim/permit/combined-apply
+  contract, including exact retry after every janitor/terminal crash window
 - Status orthogonal states/privacy
 - Message-index migration to stable account ID and same-display-ID recreation
   isolation
@@ -1166,6 +1186,8 @@ Deliverables:
 - Config v2 repository/migration, account service, bound secret ports, registry
   integration, and stable message-index migration
 - Config/account/status and fake-keyring contract fixtures
+- Real runtime/keyring adapter wiring for the T202C3 authority cleanup state
+  machine; no second claim, permit, janitor, or terminal-state API
 
 Acceptance criteria:
 - Every legacy account is quarantined with zero legacy read/presence calls.
@@ -1192,6 +1214,9 @@ Definition of Done:
 - Active credentials resolve only through matching realm/store/account/
   credential/binding context.
 - Removal/recreation cannot inherit indexed or credential state.
+- Cleanup end to end consumes the opaque apply-lock permit, invokes only
+  idempotent delete, collapses deleted/no-entry, and preserves claimed recovery
+  on backend failure or a pre-terminal crash without exposing locator material.
 - T204 can produce one bounded duplicate-free ledger migration context without
   letting the store reopen config.
 
@@ -1897,12 +1922,14 @@ Evidence required:
 
 ## User Review Gate
 
-Confirmed on 2026-08-28 under the user's explicit standing project-owner
-delegation and instruction to continue without per-step approval. T202A is
-Accepted, and T202B is Accepted at `43f0788` from four test-first attempts and
-independent final review. T202C-T202E and T203-T212 are Draft; no production
-task is Ready. The T202
-umbrella is Draft and cannot become Accepted before T202E evidence and recorded
-delegated acceptance. Individual task acceptance remains evidence-based rather
-than inferred from this graph confirmation; a failed or missing gate still stops
-execution.
+The user confirmed the graph under standing project-owner delegation and, on
+2026-08-30, explicitly authorized the orchestrator to make subsequent
+acceptance decisions without per-step user approval. That delegation is not an
+acceptance of unseen work. Each future acceptance record must cite the required
+TDD, full validation, sanitized evidence, and three review passes and must state
+that the orchestrator exercised delegated authority; it must not claim that the
+user personally reviewed the artifact. T202A is Accepted, and T202B is Accepted
+at `43f0788` from four test-first attempts and independent final review. The
+T202 umbrella remains Draft and cannot become Accepted before T202E evidence
+and a recorded evidence-based delegated decision. A failed or missing gate
+still stops execution.

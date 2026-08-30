@@ -1176,6 +1176,31 @@ pre-release v1 amendment: `created_event_sequence` plus
 against this canonical v1 schema and do not add migrations, columns, indexes,
 tables, triggers, or version changes.
 
+## Credential Cleanup V1
+
+The nullable SQL shape of `credential_cleanup.transition_id` is not a supported
+transition-less v1 mode. Every supported row is owned by one finalized account-
+update or account-remove transition, and a NULL value is corruption on open.
+This application invariant preserves the canonical schema bytes and the core
+manifest transcript while requiring `legacy_v1` locators to use the same
+transition-bound historical origin as `active_v2` locators.
+
+`locator_material` is exactly the bounded canonical
+`KIRJE-DELETE-ONLY-LOCATOR-V1\0` transcript. `locator_sha256` hashes that
+complete transcript. The immutable tombstone digest is rederived from the
+14-field `KIRJE-CREDENTIAL-CLEANUP-TOMBSTONE-V1\0` transcript defined in the
+authority-store contract; raw locator material and mutable cleanup state are
+not tombstone fields.
+
+Cleanup state is monotonic `provisional -> ready -> claimed -> deleted`.
+Provisional and ready rows have no claim grant. Claimed and deleted rows have
+exactly one grant use; claimed has no deletion time, and deleted has exactly one
+deletion time. Event 15 proves ready. Adjacent events 7 then 16 prove the claim
+with one effective time and `use_sha256`; one later event 17 proves deletion
+against the same grant, receipt, and context digest. Restart rejects any
+cardinality, ordering, timestamp, transcript, origin, or privacy mismatch as
+authority corruption.
+
 ## Credential Locator V2
 
 ```text
@@ -1191,8 +1216,9 @@ validated `ActiveCredentialLocator`; legacy and retired cleanup receives only a
 `DeleteOnlyLocator`.
 
 The legacy service/username pair remains identifiable for owner-authorized
-delete-only cleanup, but migration, status, doctor, active deletion, and normal
-authentication never probe it.
+delete-only cleanup as exact service `dev.kirje.mail` plus the transition
+origin's historical display ID, but migration, status, doctor, active deletion,
+and normal authentication never probe it.
 
 ## Operation Ledger V3
 
