@@ -96,8 +96,16 @@ there is no outcome enum or presence signal. Open/read/validation paths never
 call the keyring, and store never re-exports low-level APIs. A007 introduces the
 crate, opaque locator, root/store dependency entries, and store-private fake
 deletion hook. A008 adds the concrete low-level keyring delete and sole
-production store call site. T204 wires runtime/CLI only to the high-level store
-API and migrates/removes legacy runtime `SecretStore` paths.
+production store call site in private module
+`credential_cleanup_delete_adapter`, method
+`AuthorityStore::apply_credential_cleanup_delete`. Its dedicated AST test
+parses every production store Rust file and rejects imports, aliases, wildcards,
+re-exports, macro/function-pointer/indirect bindings, low-level type/API
+references, and calls outside that exact method. It composes with the Cargo
+direct-dependency allowlist and runtime no-dependency compile-fail fixture. A008
+may add a scoped store test-only parser dev dependency and owns its reviewed
+lockfile change. T204 wires runtime/CLI only to the high-level store API and
+migrates/removes legacy runtime `SecretStore` paths.
 
 ### Runtime
 
@@ -335,7 +343,8 @@ it exposes neither a standalone terminal marker nor a deleted-versus-absent
 result. A007 creates the unpublished lower-level credential crate, opaque
 locator, store-only direct dependency, store-private fake deletion hook,
 store-owned permit, and combined store contract. A008 adds the real low-level
-keyring delete and sole production store call site. T204 migrates/removes legacy
+keyring delete, exact private adapter method, and exhaustive production-source
+AST allowlist. T204 migrates/removes legacy
 runtime `SecretStore` paths, wires runtime/CLI only to the high-level store API,
 and proves end-to-end crash recovery. No schema or core transcript changes are
 part of this architecture decision.

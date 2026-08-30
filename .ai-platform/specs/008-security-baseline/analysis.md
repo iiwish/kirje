@@ -13,7 +13,7 @@
 ## Gate Result
 
 - Critical findings: 0 unresolved.
-- High findings: 1 open pending another repeat independent review. The first A006
+- High findings: 0 unresolved. The first A006
   review rejected the current-binding contradiction, incomplete clock-only
   recovery rule, and non-implementable cross-crate delete capability. The
   revised amendment makes cleanup the explicit historical-before exception,
@@ -23,8 +23,9 @@
   shared public constructor/deletion surface still allowed runtime to bypass
   authority. The focused revision makes the unpublished low-level crate a
   direct dependency of store only, removes the trait/plugin surface, and makes
-  the combined store apply method the sole production call site. This fix is
-  proposed, not independently closed. A006 remains `ready_for_review` with
+  the combined store apply method the sole production call site. Final QA
+  accepted that boundary but found one Medium in its literal call-site proof.
+  A006 remains `ready_for_review` with
   production permission `none`; A007/A008 remain non-executable JIT outlines.
   The 3 A001 T202C1 findings are closed by A002
   and `T202C1_A002_PACKET_REVIEW_PASS`. Historical challenge validation is now
@@ -39,7 +40,12 @@
   packet review found mutable remote-effect parents; accepted T202C1S replaces
   them with immutable version parents and closes that High finding. T202C2 A006
   independently passed with zero findings.
-- Medium findings: 0 unresolved in the confirmed requirement contract. The 1 A001 T202C1 finding is closed by A002
+- Medium findings: 1 open pending another independent review. The literal
+  sole-call scan can be bypassed by aliases, wildcards, re-exports, macros,
+  function pointers, or indirect bindings. A008 now owns a dedicated exhaustive
+  AST allowlist over every production store Rust file, composed with Cargo
+  direct-dependency, no-re-export, and runtime compile-fail proofs. The test is
+  specified but not implemented; A007/A008 remain non-executable. The 1 A001 T202C1 finding is closed by A002
   and `T202C1_A002_PACKET_REVIEW_PASS`. A 128-or-more complete legal-history RED
   plus indexed EXPLAIN plans and O(1) memory review is now mandatory. Canonical schema ownership
   is assigned to T202B and propagated through T202C-T202E, the unreleased T202A
@@ -154,6 +160,8 @@ The spec, plan, data model, and contracts all state the same guarantee:
   `kirje-credential` is a direct dependency of `kirje-store` only and owns the
   opaque locator plus concrete delete-only backend. Store owns the lock-holding
   permit, sole production low-level call site, and combined terminal method.
+  A008 proves exclusivity with an exhaustive production-source AST allowlist;
+  literal source matching is not acceptance evidence.
   Runtime calls only that high-level method and never imports, receives, or
   re-exports low-level APIs. A007 owns the crate/type/store-only dependency and
   store-private fake hook; A008 owns the real backend and sole call site; T204

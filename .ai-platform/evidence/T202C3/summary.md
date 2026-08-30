@@ -2,9 +2,10 @@
 
 ## Status
 
-Cleanup amendment revised after first and repeat A006 packet review; one
-capability-boundary High is proposed fixed and another independent review is
-pending with no production permission. `T202C3-A001` challenge issuance is reviewed at production commit
+Cleanup amendment revised after first, repeat, and final QA review. The
+capability-boundary High is closed; one literal-scan Medium is proposed fixed by
+an exhaustive AST allowlist and another independent review is pending with no
+production permission. `T202C3-A001` challenge issuance is reviewed at production commit
 `daf22a0`. `T202C3-A002` account-update transition execution is accepted at
 production commit `2c00f32` by explicit user decision on 2026-08-30.
 `T202C3-A003` account-remove transition execution is accepted at production
@@ -84,6 +85,7 @@ registry test, and synthetic public-signature fixture.
 - Contract amendment: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract.md`
 - Contract fix: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract-A002.md`
 - Contract fix: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract-A003.md`
+- Contract fix: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract-A004.md`
 - Test results: `.ai-platform/evidence/T202C3/test-results.md`
 - Production commits: `daf22a0`, `2c00f32`, `703b5a1`, `1c6d7cb`, `316dae0`
 
@@ -97,7 +99,9 @@ error precedence. It also defines clock-only exact recovery, reservation-time
 canonicality, expired replacement/concurrency rollback, synthetic-vector
 privacy, and an unpublished credential crate directly depended on only by
 store, with the combined store apply method as the sole low-level production
-call site. `T202C3-A006` is
+call site. A008 must prove this with an exhaustive AST allowlist across every
+production store Rust file, plus Cargo direct-dependency, no-re-export, and
+runtime compile-fail controls; no AST test exists yet. `T202C3-A006` is
 `ready_for_review`; production and test
 permission remain `none` until independent packet review passes. A007 claim and
 A008 delete completion remain non-executable just-in-time outlines. T202C3 and

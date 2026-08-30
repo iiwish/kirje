@@ -1357,7 +1357,15 @@ for that sole consumer; the enforceable workspace boundary is the dependency
 allowlist because Rust provides no friend-crate visibility. A007 creates the
 low-level crate, opaque locator, store dependency, and store-private fake
 deletion hook. A008 adds the real low-level keyring delete implementation and
-the sole production call in the combined store method. T204 calls only the
+the sole production call in
+`AuthorityStore::apply_credential_cleanup_delete` inside the exact private
+module `credential_cleanup_delete_adapter`. A dedicated A008 AST test parses
+every production Rust file in `kirje-store` and closes alias, wildcard,
+re-export, macro, function-pointer, indirect-binding, type/constructor/API, and
+call bypasses. Only that exact method may mention `DeleteOnlyLocator` or call
+`kirje_credential::delete_only`, and the call count is exactly one. The AST
+allowlist composes with the Cargo direct-dependency allowlist, store no-re-export
+rule, and runtime compile-fail no-dependency fixture. T204 calls only the
 high-level store API while migrating/removing legacy runtime `SecretStore`
 paths; runtime never imports, names, receives, or re-exports the low-level crate
 or locator.

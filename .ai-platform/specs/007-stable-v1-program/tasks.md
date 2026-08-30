@@ -145,7 +145,9 @@ mutation, hardens locator reservation/prepare before row insertion, and defines
 the lower `kirje-credential` crate. Repeat review found one remaining High in
 the shared public deletion surface; the focused repair makes the unpublished
 crate a direct dependency of store only and the combined store apply method its
-sole production call site. `T202C3-A006` remains
+sole production call site. Final QA found one Medium because a literal call-site
+scan could be bypassed; the A008 outline now owns an exhaustive store-production
+AST allowlist. `T202C3-A006` remains
 `ready_for_review` with production permission `none`; A007 claim and A008 delete
 completion remain non-executable just-in-time outlines.
 Priority: P0
@@ -229,8 +231,10 @@ Evidence required:
    for repeat independent packet review with production permission `none`.
    A007 owns the unpublished credential crate/opaque locator, store-only direct
    dependency, store-private fake deletion hook, permit, claim, and event 16.
-   A008 owns the real low-level keyring delete, sole combined-store call site,
-   dependency boundary checks, delete completion, and event 17. T204 owns only
+   A008 owns the real low-level keyring delete, exact private adapter method,
+   exhaustive production-source AST allowlist, any scoped test-only parser dev
+   dependency/lock change, dependency boundary checks, delete completion, and
+   event 17. T204 owns only
    high-level runtime/CLI integration and legacy `SecretStore` path removal.
    Both remain non-executable JIT outlines until their serial predecessor passes.
 2. `T202C4`: remote challenge registry binding and planner-owned effect row.

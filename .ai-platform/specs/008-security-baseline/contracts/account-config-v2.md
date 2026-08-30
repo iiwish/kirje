@@ -417,8 +417,13 @@ not re-export the locator, constructor, function, module, or crate.
 A007 creates the unpublished low-level crate and opaque locator, adds the root
 workspace and store-only dependency entries, and adds a store-private fake
 deletion hook for authority state-machine tests. A008 adds the real low-level
-keyring delete implementation and the sole production call site in the store's
-combined method. T204 wires runtime and CLI application services only to the
+keyring delete implementation and the sole production call site,
+`AuthorityStore::apply_credential_cleanup_delete`, inside the private store
+module `credential_cleanup_delete_adapter`. That method uses only fully
+qualified low-level paths; production store source contains no low-level import,
+alias, wildcard, re-export, macro indirection, function pointer, indirect
+binding, constructor/type/API reference, or call outside it. T204 wires runtime
+and CLI application services only to the
 high-level store cleanup API and migrates/removes legacy runtime `SecretStore`
 paths; runtime never sees the locator or low-level backend.
 
@@ -753,12 +758,22 @@ presence in another account/store.
   prepare rejection before row insertion
 - lower credential crate `publish = false` and direct-dependency allowlist:
   Cargo metadata/tree proves only `kirje-store` directly depends on it
-- exactly one production `kirje_credential::delete_only(` call site, located in
-  the store's combined apply method, and no store re-export of low-level APIs
+- a dedicated AST-based allowlist test recursively parses every production Rust
+  file under `crates/kirje-store/src`; an unparsed file or unvisited production
+  source fails the test
+- the AST test rejects every `kirje_credential` import/use alias, wildcard,
+  re-export, macro/function-pointer/indirect binding, constructor/type/API
+  reference, and call except fully qualified references inside the exact private
+  module `credential_cleanup_delete_adapter` and combined permit-consuming
+  method `AuthorityStore::apply_credential_cleanup_delete`; its visitor covers
+  every path/value/type position and recursively inspects macro token streams
+- only that method may mention `DeleteOnlyLocator`, and it contains exactly one
+  `kirje_credential::delete_only` call; store exposes no low-level re-export
 - compile-fail fixture proves runtime cannot import or name
   `kirje_credential` because it is not a dependency
-- opaque locator negative tests, store-private fake deletion-hook tests, and
-  runtime no-constructor/no-raw-locator source scan
+- if A008 needs a Rust parser, it is a store test-only dev dependency whose lock
+  change is reviewed and absent from the production dependency tree
+- opaque locator negative tests and store-private fake deletion-hook tests
 - delete-only combined permit method and idempotent absence behavior
 - remove/recreate same display ID with no old operation/index inheritance
 - account status golden output and secret/locator/digest scan

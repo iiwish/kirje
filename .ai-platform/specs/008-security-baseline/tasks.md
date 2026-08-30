@@ -792,8 +792,16 @@ Test targets:
   replacement and concurrent exact issuance entropy/event/restart matrices
 - Cargo metadata/tree direct-dependency allowlist proving only `kirje-store`
   directly depends on unpublished `kirje-credential`
-- Exactly one production `kirje_credential::delete_only(` call in the combined
-  store method; no store re-export; runtime compile-fail import/name fixture
+- Dedicated AST allowlist parses every production Rust file under store and
+  rejects low-level imports/aliases/wildcards/re-exports, macro/function-pointer/
+  indirect bindings, constructor/type/API references, and calls outside private
+  module `credential_cleanup_delete_adapter` and method
+  `AuthorityStore::apply_credential_cleanup_delete`
+- Only that exact method may mention `DeleteOnlyLocator` and call
+  `kirje_credential::delete_only` exactly once; runtime compile-fail no-dependency
+  fixture and store no-re-export check also pass
+- If needed, the A008 Rust parser is a store test-only dev dependency; its lock
+  change is reviewed and the production Cargo tree remains unchanged
 - Opaque-type compile negatives and deterministic store-private fake deletion
   call log
 
@@ -803,6 +811,8 @@ cargo test -p kirje-store --test authority_registry --all-features --locked
 cargo test -p kirje-credential -p kirje-store --all-features --locked
 cargo test -p kirje-store --all-features --locked
 cargo clippy -p kirje-credential -p kirje-store --all-targets --all-features --locked -- -D warnings
+cargo metadata --no-deps --format-version 1
+cargo tree -p kirje-store -e normal --locked
 ```
 
 Definition of Done:
@@ -822,9 +832,11 @@ changing transition state-machine behavior. A007 owns the new unpublished
 `kirje-credential` workspace crate, root/store-only dependency entries, opaque
 locator, store-private fake deletion hook, store-owned permit and combined
 method foundation, atomic grant use, ready-to-claimed transition, and event 16.
-A008 owns the real low-level keyring delete, the sole production store call
-site, combined delete/terminal behavior, dependency/no-re-export/compile-fail
-enforcement, and event 17. Only a reviewed predecessor may unlock the next
+A008 owns the real low-level keyring delete, the exact private adapter method,
+exhaustive production-source AST allowlist, any scoped store test-only parser
+dev dependency and reviewed lockfile change, combined delete/terminal behavior,
+dependency/no-re-export/compile-fail enforcement, and event 17. Only a reviewed
+predecessor may unlock the next
 outline. T204 migrates/removes legacy runtime `SecretStore` paths, wires runtime
 and CLI only to the high-level store cleanup API, and proves end-to-end
 integration without directly depending on or receiving/re-exporting
@@ -1208,6 +1220,9 @@ Forbidden changes:
   or re-export from `kirje-credential`
 - A second locator type, pluggable deletion implementation surface,
   caller-owned terminal marker, or runtime raw-locator constructor/export
+- Removal, weakening, or bypass of the T202C3 AST production-source allowlist,
+  Cargo direct-dependency allowlist, no-re-export rule, or runtime compile-fail
+  fixture
 
 Test targets:
 - Strict config v2 parsing/state/duplicates/unrecognized fields/size/newer version
@@ -1224,8 +1239,13 @@ Test targets:
 - Runtime/keyring wiring for the reviewed cleanup claim/permit/combined-apply
   contract, including legacy runtime-store migration and exact retry after
   every low-level-delete/terminal crash window through the high-level store API
-- Runtime dependency/source scan proving no locator constructor, canonical raw
-  transcript, direct low-level delete, or terminal marker access
+- Runtime integration uses only the high-level store API and has no locator
+  constructor, canonical raw transcript, direct low-level delete, or terminal
+  marker access
+- Rerun the T202C3 exhaustive store AST allowlist and prove the sole exact
+  adapter module/method remains the only low-level reference/call location
+- Cargo metadata/tree and compile-fail fixtures still prove store-only direct
+  dependency and runtime inability to import or name the low-level crate
 - Status orthogonal states/privacy
 - Message-index migration to stable account ID and same-display-ID recreation
   isolation

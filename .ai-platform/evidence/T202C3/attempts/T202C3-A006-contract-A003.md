@@ -60,6 +60,8 @@ implementation evidence.
 ## Result
 
 The A006 packet remains `ready_for_review`; production and test permissions
-remain closed pending another independent packet review. A007 and A008 remain
-non-executable. `H-A006-R2-001` is proposed fixed but remains open until that
-review passes.
+remain closed pending another independent packet review. Final QA accepted the
+store-only architecture repair for `H-A006-R2-001` but found one Medium: the
+literal sole-call scan was bypassable through Rust aliases and indirection. The
+focused A004 governance attempt supersedes that proof with an exhaustive AST
+allowlist. A007 and A008 remain non-executable.

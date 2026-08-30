@@ -23,10 +23,12 @@ accepted the historical-binding and clock-only repairs but found one remaining
 High in the shared public deletion surface. The focused amendment specifies an
 unpublished low-level credential crate directly depended on only by store, a
 single combined store adapter-call boundary, reservation/prepare canonicality,
-and complete issuance race/replacement matrices. The A006 challenge packet is
+and complete issuance race/replacement matrices. Final QA accepted the High
+repair and found one Medium in the literal sole-call proof; A008 now requires an
+exhaustive production-store AST allowlist. The A006 challenge packet is
 ready for another independent review with production permission `none`; A007
 claim and A008 delete completion remain non-executable just-in-time outlines,
-not Ready packets or implementation permission. One separate Medium
+not Ready packets or implementation permission. One separate dependency Medium
 implementation finding is assigned: the unchanged branch dependency graph contains yanked
 `chacha20 0.10.1`, which makes `cargo deny check advisories` fail. T111
 owns remediation and Security Alpha cannot be Accepted until the complete
@@ -297,14 +299,25 @@ High, H-A006-R2-001: the public constructor plus pluggable public deletion
 method still let runtime bypass authority. The proposed focused repair makes
 the low-level crate unpublished and directly depended on only by store, removes
 the trait/plugin surface, fixes `Result<(), MailError>` success semantics, and
-makes the combined store apply method the sole call site. It remains open until
-another independent review passes. A006 cannot execute before that pass.
+makes the combined store apply method the sole call site. Final QA accepted this
+High repair and returned the Medium below. A006 remains non-executable until the
+remaining review gate passes.
 
 ### Medium
 
 M-001: The dependency policy gate fails on yanked `chacha20 0.10.1` through
 `io-imap`. `Cargo.lock` is unchanged by T202C2, so this is not introduced by
 the preserved diff. T111 owns removal before Security Alpha acceptance.
+
+M-A006-R3-001: A literal sole-call scan can miss aliases, wildcards, re-exports,
+macro/function-pointer indirection, and indirect bindings. A008 now requires a
+dedicated parser-backed AST allowlist over every production store Rust file.
+Only private module `credential_cleanup_delete_adapter` and method
+`AuthorityStore::apply_credential_cleanup_delete` may contain fully qualified
+low-level references; only that method may mention `DeleteOnlyLocator` and call
+`kirje_credential::delete_only` exactly once. The proof composes with Cargo
+direct-dependency, no-re-export, and runtime compile-fail checks. This contract
+fix remains open until independent review; the AST test is not implemented.
 
 ### Low
 

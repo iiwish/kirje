@@ -39,8 +39,9 @@ governance_inputs:
     packet_review: >-
       First review failed with three High findings. Repeat review accepted the
       binding and clock repairs but found one High in the public low-level
-      deletion surface; this focused revision is pending another independent
-      review.
+      deletion surface. Final QA of the store-only repair found one Medium in
+      the literal call-site scan; this focused AST-allowlist revision is pending
+      another independent review.
 
 work_unit:
   title: Issue an exact effect-free credential-cleanup challenge
@@ -81,6 +82,7 @@ codebase_context:
     - cleanup common binding is historical origin-before, while account remove and credential delete retain current signed-before binding
     - exact pending reuse and claimed recovery may mutate only the paired authority clock high-water
     - the unpublished kirje-credential crate is a direct dependency of kirje-store only; no public trait/plugin surface lets runtime bypass authority
+    - A008 uses an exhaustive AST allowlist rather than a bypassable literal sole-call scan
 
 contract_snapshot:
   locator:
@@ -154,7 +156,10 @@ later_attempt_outlines:
       - concrete low-level keyring delete function returning `Result<(), MailError>` and the sole production call in the combined store method
       - combined consuming delete boundary with no caller mark_deleted; authority open/read/validation paths make zero keyring calls
       - deleted/no-entry Ok(()) indistinguishability, backend-failure claimed state, crash recovery, and terminal no-recall retry
-      - Cargo metadata/tree direct-dependency allowlist, exactly-one production call-site scan, runtime compile-fail import fixture, and store no-re-export check
+      - exact private module credential_cleanup_delete_adapter and combined method AuthorityStore::apply_credential_cleanup_delete; only this method may mention DeleteOnlyLocator or call kirje_credential::delete_only exactly once
+      - dedicated AST test parsing every kirje-store production Rust file and rejecting low-level imports, aliases, wildcards, re-exports, macro/function-pointer/indirect bindings, constructor/type/API references, and calls outside the exact adapter method
+      - Cargo metadata/tree direct-dependency allowlist, runtime compile-fail no-dependency fixture, and store no-re-export check
+      - if necessary, one scoped kirje-store test-only Rust parser dev dependency plus its reviewed Cargo.lock change and proof it is absent from the production dependency tree
       - event 17 source runtime, same grant/use/receipt, exactly once after event 16
   integration_owner: >-
     T204 owns migration/removal of legacy runtime SecretStore paths, runtime/CLI
