@@ -151,6 +151,16 @@ cleanup. Review reproduced and fixed an expired-update restart defect. No
 unresolved Critical, High, or Medium finding remains. The user explicitly
 accepted A002 on 2026-08-30. Account remove is the active bounded attempt.
 
+`T202C3-A003` is Ready with no blocking packet finding. The accepted authority
+contract requires removal to preserve the exact before account tuple, create no
+replacement credential and no after account version, and retain every identity.
+Prepare blocks the account/store and records private provisional cleanup;
+config commit adds only the after store version; finalize removes the current
+account projection and readies cleanup. Abort restores the predecessor receipt,
+while unsafe observation remains fail-closed recovery. Credential transitions,
+cleanup claim/delete, config, keyring, runtime, protocol, CLI, MCP, and network
+behavior remain excluded.
+
 ## Current Implementation Evidence Check
 
 T109 recovered and reviewed the interrupted T202C2 attempt:
