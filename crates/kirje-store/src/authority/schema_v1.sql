@@ -202,7 +202,8 @@ CREATE TABLE registered_stores (
           (typeof(removed_at) = 'integer' AND removed_at >= created_at)),
     CHECK((state = 'removed' AND removed_at IS NOT NULL)
        OR (state != 'removed' AND removed_at IS NULL)),
-    UNIQUE(store_id, location_sha256, config_generation, config_sha256),
+    UNIQUE(store_id, location_sha256),
+    UNIQUE(store_id, location_sha256, enrolled_receipt_id),
     FOREIGN KEY(enrolled_receipt_id) REFERENCES authorization_receipts(receipt_id) ON DELETE RESTRICT
 ) STRICT;
 
@@ -240,6 +241,9 @@ CREATE TABLE registered_accounts (
     UNIQUE(account_id, store_id, account_generation, credential_id, binding_sha256),
     FOREIGN KEY(store_id) REFERENCES registered_stores(store_id) ON DELETE RESTRICT,
     FOREIGN KEY(authorized_receipt_id) REFERENCES authorization_receipts(receipt_id) ON DELETE RESTRICT,
+    FOREIGN KEY(credential_id, account_id, store_id)
+        REFERENCES registered_credentials(credential_id, account_id, store_id)
+        ON DELETE RESTRICT,
     FOREIGN KEY(active_transition_id) REFERENCES account_transitions(transition_id) ON DELETE RESTRICT
 ) STRICT;
 
@@ -509,6 +513,8 @@ CREATE TABLE account_transitions (
            AND finalized_at IS NULL AND resolved_at IS NOT NULL)
        OR (state = 'recovery_required' AND finalized_at IS NULL
            AND resolved_at IS NOT NULL)),
+    UNIQUE(transition_id, store_id),
+    UNIQUE(transition_id, account_id, store_id),
     FOREIGN KEY(grant_id) REFERENCES grant_uses(grant_id) ON DELETE RESTRICT,
     FOREIGN KEY(store_id) REFERENCES registered_stores(store_id) ON DELETE RESTRICT,
     FOREIGN KEY(account_id, store_id)
@@ -519,6 +525,88 @@ CREATE INDEX account_transitions_store_state
 ON account_transitions(store_id, state);
 CREATE INDEX account_transitions_account_state
 ON account_transitions(account_id, state);
+
+CREATE TABLE registered_credentials (
+    credential_id BLOB PRIMARY KEY
+        CHECK(typeof(credential_id) = 'blob' AND length(credential_id) = 16),
+    account_id BLOB NOT NULL
+        CHECK(typeof(account_id) = 'blob' AND length(account_id) = 16),
+    store_id BLOB NOT NULL
+        CHECK(typeof(store_id) = 'blob' AND length(store_id) = 16),
+    created_transition_id BLOB NOT NULL UNIQUE
+        CHECK(typeof(created_transition_id) = 'blob'
+          AND length(created_transition_id) = 16),
+    created_at INTEGER NOT NULL
+        CHECK(typeof(created_at) = 'integer' AND created_at >= 0),
+    UNIQUE(credential_id, account_id, store_id),
+    FOREIGN KEY(account_id, store_id)
+        REFERENCES registered_accounts(account_id, store_id) ON DELETE RESTRICT,
+    FOREIGN KEY(created_transition_id, account_id, store_id)
+        REFERENCES account_transitions(transition_id, account_id, store_id)
+        ON DELETE RESTRICT
+) STRICT;
+
+CREATE TABLE registered_store_versions (
+    store_id BLOB NOT NULL
+        CHECK(typeof(store_id) = 'blob' AND length(store_id) = 16),
+    location_sha256 BLOB NOT NULL
+        CHECK(typeof(location_sha256) = 'blob' AND length(location_sha256) = 32),
+    config_generation INTEGER NOT NULL
+        CHECK(typeof(config_generation) = 'integer' AND config_generation > 0),
+    config_sha256 BLOB NOT NULL
+        CHECK(typeof(config_sha256) = 'blob' AND length(config_sha256) = 32),
+    enrolled_receipt_id BLOB UNIQUE
+        CHECK(enrolled_receipt_id IS NULL OR
+          (typeof(enrolled_receipt_id) = 'blob' AND length(enrolled_receipt_id) = 16)),
+    committed_transition_id BLOB UNIQUE
+        CHECK(committed_transition_id IS NULL OR
+          (typeof(committed_transition_id) = 'blob'
+           AND length(committed_transition_id) = 16)),
+    created_at INTEGER NOT NULL
+        CHECK(typeof(created_at) = 'integer' AND created_at >= 0),
+    PRIMARY KEY(store_id, config_generation),
+    CHECK((enrolled_receipt_id IS NOT NULL AND committed_transition_id IS NULL)
+       OR (enrolled_receipt_id IS NULL AND committed_transition_id IS NOT NULL)),
+    UNIQUE(store_id, config_generation, config_sha256),
+    UNIQUE(store_id, location_sha256, config_generation, config_sha256),
+    FOREIGN KEY(store_id, location_sha256)
+        REFERENCES registered_stores(store_id, location_sha256) ON DELETE RESTRICT,
+    FOREIGN KEY(store_id, location_sha256, enrolled_receipt_id)
+        REFERENCES registered_stores(store_id, location_sha256, enrolled_receipt_id)
+        ON DELETE RESTRICT,
+    FOREIGN KEY(enrolled_receipt_id)
+        REFERENCES authorization_receipts(receipt_id) ON DELETE RESTRICT,
+    FOREIGN KEY(committed_transition_id, store_id)
+        REFERENCES account_transitions(transition_id, store_id) ON DELETE RESTRICT
+) STRICT;
+
+CREATE TABLE registered_account_versions (
+    account_id BLOB NOT NULL
+        CHECK(typeof(account_id) = 'blob' AND length(account_id) = 16),
+    store_id BLOB NOT NULL
+        CHECK(typeof(store_id) = 'blob' AND length(store_id) = 16),
+    account_generation INTEGER NOT NULL
+        CHECK(typeof(account_generation) = 'integer' AND account_generation > 0),
+    credential_id BLOB NOT NULL
+        CHECK(typeof(credential_id) = 'blob' AND length(credential_id) = 16),
+    binding_sha256 BLOB NOT NULL
+        CHECK(typeof(binding_sha256) = 'blob' AND length(binding_sha256) = 32),
+    committed_transition_id BLOB NOT NULL UNIQUE
+        CHECK(typeof(committed_transition_id) = 'blob'
+          AND length(committed_transition_id) = 16),
+    created_at INTEGER NOT NULL
+        CHECK(typeof(created_at) = 'integer' AND created_at >= 0),
+    PRIMARY KEY(account_id, account_generation),
+    UNIQUE(account_id, store_id, account_generation, credential_id, binding_sha256),
+    FOREIGN KEY(account_id, store_id)
+        REFERENCES registered_accounts(account_id, store_id) ON DELETE RESTRICT,
+    FOREIGN KEY(credential_id, account_id, store_id)
+        REFERENCES registered_credentials(credential_id, account_id, store_id)
+        ON DELETE RESTRICT,
+    FOREIGN KEY(committed_transition_id, account_id, store_id)
+        REFERENCES account_transitions(transition_id, account_id, store_id)
+        ON DELETE RESTRICT
+) STRICT;
 
 CREATE TABLE credential_cleanup (
     cleanup_id BLOB PRIMARY KEY
@@ -610,11 +698,11 @@ CREATE TABLE remote_effects (
         ) ON DELETE RESTRICT,
     FOREIGN KEY(grant_id) REFERENCES grant_uses(grant_id) ON DELETE RESTRICT,
     FOREIGN KEY(store_id, store_location_sha256, config_generation, config_sha256)
-        REFERENCES registered_stores(
+        REFERENCES registered_store_versions(
             store_id, location_sha256, config_generation, config_sha256
         ) ON DELETE RESTRICT,
     FOREIGN KEY(account_id, store_id, account_generation, credential_id, binding_sha256)
-        REFERENCES registered_accounts(
+        REFERENCES registered_account_versions(
             account_id, store_id, account_generation, credential_id, binding_sha256
         ) ON DELETE RESTRICT,
     FOREIGN KEY(trust_epoch) REFERENCES trust_epochs(epoch) ON DELETE RESTRICT,

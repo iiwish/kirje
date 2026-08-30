@@ -298,10 +298,11 @@ fn clock_pair(connection: &Connection) -> (i64, i64) {
         .unwrap()
 }
 
-fn registry_fingerprint(connection: &Connection) -> (i64, i64, i64, (i64, i64)) {
+fn registry_fingerprint(connection: &Connection) -> (i64, i64, i64, i64, (i64, i64)) {
     (
         scalar(connection, "SELECT COUNT(*) FROM grant_uses"),
         scalar(connection, "SELECT COUNT(*) FROM registered_stores"),
+        scalar(connection, "SELECT COUNT(*) FROM registered_store_versions"),
         scalar(connection, "SELECT COUNT(*) FROM authority_events"),
         clock_pair(connection),
     )
@@ -767,6 +768,32 @@ fn first_use_exact_recovery_and_receipt_priority_use_effective_time() {
     assert_eq!(first.created_at, first.updated_at);
 
     let connection = Connection::open(fixture.home.database_path()).unwrap();
+    let version = connection
+        .query_row(
+            "SELECT store_id,location_sha256,config_generation,config_sha256,
+                        enrolled_receipt_id,committed_transition_id,created_at
+                 FROM registered_store_versions",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, Vec<u8>>(0)?,
+                    row.get::<_, Vec<u8>>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, Vec<u8>>(3)?,
+                    row.get::<_, Vec<u8>>(4)?,
+                    row.get::<_, Option<Vec<u8>>>(5)?,
+                    row.get::<_, i64>(6)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(version.0, store_id(1).as_bytes());
+    assert_eq!(version.1, location_sha256(1).as_bytes());
+    assert_eq!(version.2, 1);
+    assert_eq!(version.3, config_sha256(1).as_bytes());
+    assert_eq!(version.4, authorized.receipt.receipt_id.as_bytes());
+    assert!(version.5.is_none());
+    assert_eq!(version.6, issued_at(1) + 100);
     let before = registry_fingerprint(&connection);
     let recovered = store
         .enroll_store(enrollment_request(1, &authorized, issued_at(1) + 1_500))
@@ -777,7 +804,8 @@ fn first_use_exact_recovery_and_receipt_priority_use_effective_time() {
     assert_eq!(after.0, before.0);
     assert_eq!(after.1, before.1);
     assert_eq!(after.2, before.2);
-    assert_eq!(after.3, (issued_at(1) + 1_500, issued_at(1) + 1_500));
+    assert_eq!(after.3, before.3);
+    assert_eq!(after.4, (issued_at(1) + 1_500, issued_at(1) + 1_500));
 
     let replay = open_ready(&fixture, deterministic(Vec::new()))
         .verify_proof(VerifyProofRequest {
@@ -822,10 +850,10 @@ fn authorized_unclaimed_expiry_is_committed_exactly_once() {
     assert_eq!(retry.code, MailErrorCode::AuthorizationExpired);
     let later = registry_fingerprint(&connection);
     assert_eq!(
-        (later.0, later.1, later.2),
-        (fingerprint.0, fingerprint.1, fingerprint.2)
+        (later.0, later.1, later.2, later.3),
+        (fingerprint.0, fingerprint.1, fingerprint.2, fingerprint.3)
     );
-    assert_eq!(later.3, (issued_at(2) + 950, issued_at(2) + 950));
+    assert_eq!(later.4, (issued_at(2) + 950, issued_at(2) + 950));
     let rollback =
         exact_error(store.enroll_store(enrollment_request(2, &authorized, issued_at(2) + 925)));
     assert_eq!(rollback.code, MailErrorCode::AuthorizationExpired);
@@ -1100,6 +1128,7 @@ fn enrollment_and_expiry_fault_boundaries_are_atomic_and_zero_entropy() {
         AuthorityFaultPoint::GrantUseInserted,
         AuthorityFaultPoint::GrantUsedEvent,
         AuthorityFaultPoint::RegisteredStoreInserted,
+        AuthorityFaultPoint::RegisteredStoreVersionInserted,
         AuthorityFaultPoint::StoreEnrolledEvent,
         AuthorityFaultPoint::EnrollmentClockUpdated,
         AuthorityFaultPoint::EnrollmentBeforeCommit,
@@ -1204,6 +1233,13 @@ fn exact_and_distinct_receipt_concurrency_have_one_durable_winner() {
         scalar(&connection, "SELECT COUNT(*) FROM registered_stores"),
         1
     );
+    assert_eq!(
+        scalar(
+            &connection,
+            "SELECT COUNT(*) FROM registered_store_versions"
+        ),
+        1
+    );
 
     let fixture = ready_fixture();
     let first = Arc::new(authorize(&fixture, 130));
@@ -1240,6 +1276,13 @@ fn exact_and_distinct_receipt_concurrency_have_one_durable_winner() {
     assert_eq!(scalar(&connection, "SELECT COUNT(*) FROM grant_uses"), 1);
     assert_eq!(
         scalar(&connection, "SELECT COUNT(*) FROM registered_stores"),
+        1
+    );
+    assert_eq!(
+        scalar(
+            &connection,
+            "SELECT COUNT(*) FROM registered_store_versions"
+        ),
         1
     );
 }
@@ -1287,6 +1330,13 @@ fn store_and_location_only_contenders_have_stable_losers_without_grants() {
         assert_eq!(scalar(&connection, "SELECT COUNT(*) FROM grant_uses"), 1);
         assert_eq!(
             scalar(&connection, "SELECT COUNT(*) FROM registered_stores"),
+            1
+        );
+        assert_eq!(
+            scalar(
+                &connection,
+                "SELECT COUNT(*) FROM registered_store_versions"
+            ),
             1
         );
         assert_eq!(
@@ -1495,6 +1545,15 @@ fn insert_forbidden_row(connection: &Connection, table: &str) {
         "registered_accounts" => {
             "INSERT INTO registered_accounts VALUES(zeroblob(16),zeroblob(16),zeroblob(32),1,zeroblob(16),zeroblob(32),'active',zeroblob(16),NULL,1,1,NULL)"
         }
+        "registered_credentials" => {
+            "INSERT INTO registered_credentials VALUES(zeroblob(16),zeroblob(16),zeroblob(16),zeroblob(16),1)"
+        }
+        "registered_store_versions" => {
+            "INSERT INTO registered_store_versions VALUES(zeroblob(16),zeroblob(32),1,zeroblob(32),zeroblob(16),NULL,1)"
+        }
+        "registered_account_versions" => {
+            "INSERT INTO registered_account_versions VALUES(zeroblob(16),zeroblob(16),1,zeroblob(16),zeroblob(32),zeroblob(16),1)"
+        }
         "challenge_effects" => {
             "INSERT INTO challenge_effects VALUES(zeroblob(32),0,zeroblob(16),1)"
         }
@@ -1526,6 +1585,9 @@ fn insert_forbidden_row(connection: &Connection, table: &str) {
 fn restart_rejects_corruption_oversize_orphans_and_every_later_stage_table() {
     for table in [
         "registered_accounts",
+        "registered_credentials",
+        "registered_store_versions",
+        "registered_account_versions",
         "challenge_effects",
         "account_transitions",
         "credential_cleanup",
@@ -1554,6 +1616,11 @@ fn restart_rejects_corruption_oversize_orphans_and_every_later_stage_table() {
     for mutation in [
         "UPDATE grant_uses SET use_sha256=zeroblob(32)",
         "UPDATE registered_stores SET location_material=zeroblob(4097)",
+        "DELETE FROM registered_store_versions",
+        "UPDATE registered_store_versions SET config_sha256=zeroblob(32)",
+        "UPDATE registered_store_versions SET enrolled_receipt_id=zeroblob(16)",
+        "UPDATE registered_store_versions
+         SET enrolled_receipt_id=NULL,committed_transition_id=zeroblob(16)",
         "DELETE FROM authority_events WHERE event_code=8",
     ] {
         let fixture = ready_fixture();
@@ -1590,6 +1657,11 @@ fn restart_rejects_corruption_oversize_orphans_and_every_later_stage_table() {
             "UPDATE registered_stores SET config_generation='wrong-storage-class'",
             "SELECT typeof(config_generation) FROM registered_stores",
         ),
+        (
+            "registered_store_versions",
+            "UPDATE registered_store_versions SET config_generation='wrong-storage-class'",
+            "SELECT typeof(config_generation) FROM registered_store_versions",
+        ),
     ] {
         let fixture = ready_fixture();
         let authorized = authorize(&fixture, 10);
@@ -1606,6 +1678,9 @@ fn restart_rejects_corruption_oversize_orphans_and_every_later_stage_table() {
         "UPDATE registered_stores SET location_sha256=zeroblob(31)",
         "UPDATE registered_stores SET config_generation=0",
         "UPDATE registered_stores SET config_sha256=zeroblob(32)",
+        "UPDATE registered_store_versions SET location_sha256=zeroblob(31)",
+        "UPDATE registered_store_versions SET config_generation=0",
+        "UPDATE registered_store_versions SET created_at=-1",
     ] {
         let fixture = ready_fixture();
         let authorized = authorize(&fixture, 10);
@@ -1693,6 +1768,85 @@ fn restart_rejects_corruption_oversize_orphans_and_every_later_stage_table() {
         .unwrap();
     drop(connection);
     assert_recovery_required(&fixture);
+
+    let fixture = ready_fixture();
+    let first = authorize(&fixture, 10);
+    open_ready(&fixture, deterministic(Vec::new()))
+        .enroll_store(enrollment_request(10, &first, issued_at(10) + 200))
+        .unwrap();
+    let second = authorize(&fixture, 11);
+    open_ready(&fixture, deterministic(Vec::new()))
+        .enroll_store(enrollment_request(11, &second, issued_at(11) + 200))
+        .unwrap();
+    let connection = Connection::open(fixture.home.database_path()).unwrap();
+    connection
+        .execute_batch("PRAGMA foreign_keys=OFF; PRAGMA ignore_check_constraints=ON;")
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE registered_store_versions SET enrolled_receipt_id=?1 WHERE store_id=?2",
+            params![[0xfb_u8; 16], store_id(10).as_bytes()],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE registered_store_versions SET enrolled_receipt_id=?1 WHERE store_id=?2",
+            params![first.receipt.receipt_id.as_bytes(), store_id(11).as_bytes()],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE registered_store_versions SET enrolled_receipt_id=?1 WHERE store_id=?2",
+            params![
+                second.receipt.receipt_id.as_bytes(),
+                store_id(10).as_bytes()
+            ],
+        )
+        .unwrap();
+    drop(connection);
+    assert_recovery_required(&fixture);
+}
+
+#[test]
+fn old_seventeen_table_inventory_is_rejected_without_repair() {
+    let fixture = ready_fixture();
+    let connection = Connection::open(fixture.home.database_path()).unwrap();
+    connection
+        .execute_batch(
+            "PRAGMA foreign_keys=OFF;
+             DROP TABLE registered_account_versions;
+             DROP TABLE registered_store_versions;
+             DROP TABLE registered_credentials;",
+        )
+        .unwrap();
+    let before: (i64, i64, i64) = connection
+        .query_row(
+            "SELECT
+                (SELECT COUNT(*) FROM sqlite_schema
+                 WHERE type='table' AND name NOT LIKE 'sqlite_%'),
+                (SELECT application_id FROM pragma_application_id),
+                (SELECT user_version FROM pragma_user_version)",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(before, (17, 1_263_096_394, 1));
+    drop(connection);
+
+    assert_recovery_required(&fixture);
+    let connection = Connection::open(fixture.home.database_path()).unwrap();
+    let after: (i64, i64, i64) = connection
+        .query_row(
+            "SELECT
+                (SELECT COUNT(*) FROM sqlite_schema
+                 WHERE type='table' AND name NOT LIKE 'sqlite_%'),
+                (SELECT application_id FROM pragma_application_id),
+                (SELECT user_version FROM pragma_user_version)",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(after, before);
 }
 
 #[test]
@@ -1730,11 +1884,18 @@ fn complete_128_row_history_restarts_with_indexed_streams() {
     assert_eq!(store_preflight, 1);
     assert_eq!(event_preflight, 1);
     assert_eq!(registry_stream, 4);
-    assert_eq!(bounded_keyed, 20 * 128);
+    assert_eq!(bounded_keyed, 28 * 128);
     let connection = Connection::open(fixture.home.database_path()).unwrap();
     assert_eq!(scalar(&connection, "SELECT COUNT(*) FROM grant_uses"), 128);
     assert_eq!(
         scalar(&connection, "SELECT COUNT(*) FROM registered_stores"),
+        128
+    );
+    assert_eq!(
+        scalar(
+            &connection,
+            "SELECT COUNT(*) FROM registered_store_versions"
+        ),
         128
     );
     let plans = [
@@ -1745,6 +1906,11 @@ fn complete_128_row_history_restarts_with_indexed_streams() {
         query_plan(
             &connection,
             "SELECT store_id FROM registered_stores ORDER BY store_id",
+        ),
+        query_plan(
+            &connection,
+            "SELECT store_id,config_generation FROM registered_store_versions
+             WHERE store_id=zeroblob(16) ORDER BY store_id,config_generation",
         ),
         query_plan(
             &connection,
@@ -1763,6 +1929,11 @@ fn complete_128_row_history_restarts_with_indexed_streams() {
     );
     assert!(
         plans[2]
+            .iter()
+            .any(|line| line.contains("sqlite_autoindex_registered_store_versions_3"))
+    );
+    assert!(
+        plans[3]
             .iter()
             .any(|line| line.contains("authority_events_entity_sequence"))
     );

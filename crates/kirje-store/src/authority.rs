@@ -38,7 +38,7 @@ const GRANT_USE_DOMAIN: &[u8] = b"KIRJE-GRANT-USE-V1\0";
 const STORE_ENROLLMENT_INTENT_DOMAIN: &[u8] = b"KIRJE-STORE-ENROLLMENT-INTENT-V1\0";
 const AUTHORIZATION_LIFETIME_MS: i64 = 900_000;
 
-const TABLES: [&str; 17] = [
+const TABLES: [&str; 20] = [
     "account_transitions",
     "authority_events",
     "authority_keys",
@@ -52,7 +52,10 @@ const TABLES: [&str; 17] = [
     "effect_observations",
     "grant_uses",
     "nonce_uses",
+    "registered_account_versions",
     "registered_accounts",
+    "registered_credentials",
+    "registered_store_versions",
     "registered_stores",
     "remote_effects",
     "trust_epochs",
@@ -493,6 +496,7 @@ pub enum AuthorityFaultPoint {
     GrantUseInserted,
     GrantUsedEvent,
     RegisteredStoreInserted,
+    RegisteredStoreVersionInserted,
     StoreEnrolledEvent,
     EnrollmentClockUpdated,
     EnrollmentBeforeCommit,
@@ -655,6 +659,7 @@ enum TestFaultPoint {
     GrantUseInserted,
     GrantUsedEvent,
     RegisteredStoreInserted,
+    RegisteredStoreVersionInserted,
     StoreEnrolledEvent,
     EnrollmentClockUpdated,
     EnrollmentBeforeCommit,
@@ -693,6 +698,7 @@ impl From<TestFaultPoint> for AuthorityFaultPoint {
             TestFaultPoint::GrantUseInserted => Self::GrantUseInserted,
             TestFaultPoint::GrantUsedEvent => Self::GrantUsedEvent,
             TestFaultPoint::RegisteredStoreInserted => Self::RegisteredStoreInserted,
+            TestFaultPoint::RegisteredStoreVersionInserted => Self::RegisteredStoreVersionInserted,
             TestFaultPoint::StoreEnrolledEvent => Self::StoreEnrolledEvent,
             TestFaultPoint::EnrollmentClockUpdated => Self::EnrollmentClockUpdated,
             TestFaultPoint::EnrollmentBeforeCommit => Self::EnrollmentBeforeCommit,
@@ -1389,13 +1395,16 @@ impl AuthorityStore {
             if !store.matches_request(&request, &enrollment) {
                 return Err(authorization_context_stale_error());
             }
+            let version = load_store_version_by_receipt(&transaction, receipt.receipt_id)?
+                .ok_or_else(recovery_error)?;
+            validate_initial_store_version(&version, &store, &enrollment, &receipt)?;
             let effective_time =
                 checked_clock(loaded.last_observed_at, request.observed_at_unix_ms)?;
             utc_millis(effective_time)?;
             observe_clock_pair(&transaction, effective_time)?;
             transaction.commit().map_err(|_| store_write_error())?;
             secure_authority_files(&self.home.database)?;
-            return enrolled_store_projection(&store);
+            return enrolled_store_projection(&version);
         }
 
         let receipt = load_receipt_by_id(&transaction, request.grant_use.receipt_id)?
@@ -1511,6 +1520,28 @@ impl AuthorityStore {
         }
         self.test_hooks
             .fault(TestFaultPoint::RegisteredStoreInserted)?;
+        let inserted = transaction
+            .execute(
+                "INSERT INTO registered_store_versions
+                 (store_id,location_sha256,config_generation,config_sha256,
+                  enrolled_receipt_id,committed_transition_id,created_at)
+                 VALUES(?1,?2,?3,?4,?5,NULL,?6)",
+                params![
+                    request.store_id.as_bytes(),
+                    request.location_sha256.as_bytes(),
+                    i64::try_from(request.config_generation.get())
+                        .map_err(|_| authorization_context_stale_error())?,
+                    request.config_sha256.as_bytes(),
+                    receipt.receipt_id.as_bytes(),
+                    effective_time,
+                ],
+            )
+            .map_err(|_| store_write_error())?;
+        if inserted != 1 {
+            return Err(store_write_error());
+        }
+        self.test_hooks
+            .fault(TestFaultPoint::RegisteredStoreVersionInserted)?;
         insert_store_enrolled_event(
             &transaction,
             request.store_id,
@@ -1529,17 +1560,14 @@ impl AuthorityStore {
         secure_authority_files(&self.home.database)?;
         self.test_hooks
             .fault(TestFaultPoint::EnrollmentAfterCommit)?;
-        enrolled_store_projection(&StoredRegisteredStore {
+        enrolled_store_projection(&StoredRegisteredStoreVersion {
             store_id: request.store_id,
-            location_material: request.location_bytes,
             location_sha256: request.location_sha256,
             config_generation: request.config_generation,
             config_sha256: request.config_sha256,
-            state: "active".to_owned(),
-            enrolled_receipt_id: receipt.receipt_id,
+            enrolled_receipt_id: Some(receipt.receipt_id),
+            committed_transition_id: None,
             created_at: effective_time,
-            updated_at: effective_time,
-            removed_at: None,
         })
     }
 
@@ -1715,6 +1743,16 @@ struct StoredRegisteredStore {
     removed_at: Option<i64>,
 }
 
+struct StoredRegisteredStoreVersion {
+    store_id: StoreId,
+    location_sha256: Sha256Digest,
+    config_generation: NonZeroU64,
+    config_sha256: Sha256Digest,
+    enrolled_receipt_id: Option<AuthorizationReceiptId>,
+    committed_transition_id: Option<Vec<u8>>,
+    created_at: i64,
+}
+
 impl StoredRegisteredStore {
     fn matches_request(
         &self,
@@ -1732,6 +1770,28 @@ impl StoredRegisteredStore {
             && self.config_generation == enrollment.config_generation
             && self.config_sha256 == enrollment.config_sha256
     }
+}
+
+fn validate_initial_store_version(
+    version: &StoredRegisteredStoreVersion,
+    store: &StoredRegisteredStore,
+    enrollment: &StoreEnrollmentContext,
+    receipt: &StoredReceipt,
+) -> Result<(), MailError> {
+    utc_millis(version.created_at)?;
+    if version.store_id != store.store_id
+        || version.store_id != enrollment.store_id
+        || version.location_sha256 != store.location_sha256
+        || version.location_sha256 != enrollment.location_sha256
+        || version.config_generation != enrollment.config_generation
+        || version.config_sha256 != enrollment.config_sha256
+        || version.enrolled_receipt_id != Some(receipt.receipt_id)
+        || version.committed_transition_id.is_some()
+        || version.created_at != store.created_at
+    {
+        return Err(recovery_error());
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy)]
@@ -2226,6 +2286,46 @@ fn store_preflight(connection: &Connection) -> Result<(), MailError> {
     Ok(())
 }
 
+fn registry_parent_preflight(connection: &Connection) -> Result<(), MailError> {
+    let malformed: i64 = connection
+        .query_row(
+            "SELECT
+                (SELECT COUNT(*) FROM registered_credentials WHERE
+                    typeof(credential_id)<>'blob' OR length(credential_id)<>16 OR
+                    typeof(account_id)<>'blob' OR length(account_id)<>16 OR
+                    typeof(store_id)<>'blob' OR length(store_id)<>16 OR
+                    typeof(created_transition_id)<>'blob' OR length(created_transition_id)<>16 OR
+                    typeof(created_at)<>'integer' OR created_at<0) +
+                (SELECT COUNT(*) FROM registered_store_versions WHERE
+                    typeof(store_id)<>'blob' OR length(store_id)<>16 OR
+                    typeof(location_sha256)<>'blob' OR length(location_sha256)<>32 OR
+                    typeof(config_generation)<>'integer' OR config_generation<=0 OR
+                    typeof(config_sha256)<>'blob' OR length(config_sha256)<>32 OR
+                    (enrolled_receipt_id IS NOT NULL AND
+                     (typeof(enrolled_receipt_id)<>'blob' OR length(enrolled_receipt_id)<>16)) OR
+                    (committed_transition_id IS NOT NULL AND
+                     (typeof(committed_transition_id)<>'blob' OR length(committed_transition_id)<>16)) OR
+                    ((enrolled_receipt_id IS NULL)=(committed_transition_id IS NULL)) OR
+                    typeof(created_at)<>'integer' OR created_at<0) +
+                (SELECT COUNT(*) FROM registered_account_versions WHERE
+                    typeof(account_id)<>'blob' OR length(account_id)<>16 OR
+                    typeof(store_id)<>'blob' OR length(store_id)<>16 OR
+                    typeof(account_generation)<>'integer' OR account_generation<=0 OR
+                    typeof(credential_id)<>'blob' OR length(credential_id)<>16 OR
+                    typeof(binding_sha256)<>'blob' OR length(binding_sha256)<>32 OR
+                    typeof(committed_transition_id)<>'blob' OR
+                    length(committed_transition_id)<>16 OR
+                    typeof(created_at)<>'integer' OR created_at<0)",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| store_read_error())?;
+    if malformed != 0 {
+        return Err(recovery_error());
+    }
+    Ok(())
+}
+
 fn load_grant_use(
     connection: &Connection,
     grant_id: AuthorizationGrantId,
@@ -2325,6 +2425,23 @@ fn load_registered_store_by_id(
         .map_err(|_| store_read_error())
 }
 
+fn load_store_version_by_receipt(
+    connection: &Connection,
+    receipt_id: AuthorizationReceiptId,
+) -> Result<Option<StoredRegisteredStoreVersion>, MailError> {
+    record_validation_query(ValidationQueryKind::BoundedKeyed);
+    connection
+        .query_row(
+            "SELECT store_id,location_sha256,config_generation,config_sha256,
+                    enrolled_receipt_id,committed_transition_id,created_at
+             FROM registered_store_versions WHERE enrolled_receipt_id=?1",
+            [receipt_id.as_bytes()],
+            stored_store_version_from_row,
+        )
+        .optional()
+        .map_err(|_| store_read_error())
+}
+
 fn stored_registered_store_from_row(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<StoredRegisteredStore> {
@@ -2346,6 +2463,28 @@ fn stored_registered_store_from_row(
     })
 }
 
+fn stored_store_version_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<StoredRegisteredStoreVersion> {
+    let generation = u64::try_from(row.get::<_, i64>(2)?)
+        .ok()
+        .and_then(NonZeroU64::new)
+        .ok_or(rusqlite::Error::InvalidQuery)?;
+    let enrolled_receipt_id = row
+        .get::<_, Option<Vec<u8>>>(4)?
+        .map(uuid_from_blob_sql)
+        .transpose()?;
+    Ok(StoredRegisteredStoreVersion {
+        store_id: uuid_from_blob_sql(row.get(0)?)?,
+        location_sha256: digest_from_blob_sql(row.get(1)?)?,
+        config_generation: generation,
+        config_sha256: digest_from_blob_sql(row.get(3)?)?,
+        enrolled_receipt_id,
+        committed_transition_id: row.get(5)?,
+        created_at: row.get(6)?,
+    })
+}
+
 fn store_identity_count(
     connection: &Connection,
     store_id: StoreId,
@@ -2362,18 +2501,17 @@ fn store_identity_count(
 }
 
 fn enrolled_store_projection(
-    store: &StoredRegisteredStore,
+    version: &StoredRegisteredStoreVersion,
 ) -> Result<EnrolledStoreProjection, MailError> {
-    if store.state != "active" || store.removed_at.is_some() || store.created_at != store.updated_at
-    {
+    if version.enrolled_receipt_id.is_none() || version.committed_transition_id.is_some() {
         return Err(recovery_error());
     }
     Ok(EnrolledStoreProjection {
-        store_id: store.store_id,
+        store_id: version.store_id,
         state: EnrolledStoreState::Active,
-        config_generation: store.config_generation,
-        created_at: utc_millis(store.created_at)?,
-        updated_at: utc_millis(store.updated_at)?,
+        config_generation: version.config_generation,
+        created_at: utc_millis(version.created_at)?,
+        updated_at: utc_millis(version.created_at)?,
     })
 }
 
@@ -2964,6 +3102,7 @@ fn preflight_authorization_storage(connection: &Connection) -> Result<(), MailEr
     nonce_preflight(connection)?;
     grant_preflight(connection)?;
     store_preflight(connection)?;
+    registry_parent_preflight(connection)?;
     event_preflight(connection)
 }
 
@@ -3220,6 +3359,8 @@ fn validate_t202a_initial_row_counts(connection: &Connection) -> Result<(), Mail
         .query_row(
             "SELECT
                 (SELECT COUNT(*) FROM registered_accounts) +
+                (SELECT COUNT(*) FROM registered_credentials) +
+                (SELECT COUNT(*) FROM registered_account_versions) +
                 (SELECT COUNT(*) FROM challenge_effects) +
                 (SELECT COUNT(*) FROM account_transitions) +
                 (SELECT COUNT(*) FROM credential_cleanup) +
@@ -3260,7 +3401,10 @@ fn validate_authorization_history(
         let registry_count: i64 = connection
             .query_row(
                 "SELECT (SELECT COUNT(*) FROM grant_uses)
-                      + (SELECT COUNT(*) FROM registered_stores)",
+                      + (SELECT COUNT(*) FROM registered_stores)
+                      + (SELECT COUNT(*) FROM registered_store_versions)
+                      + (SELECT COUNT(*) FROM registered_credentials)
+                      + (SELECT COUNT(*) FROM registered_account_versions)",
                 [],
                 |row| row.get(0),
             )
@@ -3449,16 +3593,32 @@ fn validate_stored_receipt(
 
 fn validate_registry_history(connection: &Connection) -> Result<(), MailError> {
     record_validation_query(ValidationQueryKind::RegistryStream);
-    let grant_count: i64 = connection
-        .query_row("SELECT COUNT(*) FROM grant_uses", [], |row| row.get(0))
-        .map_err(|_| store_read_error())?;
-    record_validation_query(ValidationQueryKind::RegistryStream);
-    let store_count: i64 = connection
-        .query_row("SELECT COUNT(*) FROM registered_stores", [], |row| {
-            row.get(0)
-        })
-        .map_err(|_| store_read_error())?;
-    if grant_count != store_count {
+    let (grant_count, store_count, version_count, credential_count, account_version_count) =
+        connection
+            .query_row(
+                "SELECT
+                (SELECT COUNT(*) FROM grant_uses),
+                (SELECT COUNT(*) FROM registered_stores),
+                (SELECT COUNT(*) FROM registered_store_versions),
+                (SELECT COUNT(*) FROM registered_credentials),
+                (SELECT COUNT(*) FROM registered_account_versions)",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(4)?,
+                    ))
+                },
+            )
+            .map_err(|_| store_read_error())?;
+    if grant_count != store_count
+        || store_count != version_count
+        || credential_count != 0
+        || account_version_count != 0
+    {
         return Err(recovery_error());
     }
 
@@ -3499,6 +3659,25 @@ fn validate_registry_history(connection: &Connection) -> Result<(), MailError> {
     if seen != store_count {
         return Err(recovery_error());
     }
+
+    record_validation_query(ValidationQueryKind::RegistryStream);
+    let mut statement = connection
+        .prepare(
+            "SELECT store_id,location_sha256,config_generation,config_sha256,
+                    enrolled_receipt_id,committed_transition_id,created_at
+             FROM registered_store_versions ORDER BY store_id,config_generation",
+        )
+        .map_err(|_| store_read_error())?;
+    let mut rows = statement.query([]).map_err(|_| store_read_error())?;
+    let mut seen = 0_i64;
+    while let Some(row) = rows.next().map_err(|_| store_read_error())? {
+        let version = stored_store_version_from_row(row).map_err(|_| recovery_error())?;
+        validate_stored_store_version(connection, &version)?;
+        seen = seen.checked_add(1).ok_or_else(recovery_error)?;
+    }
+    if seen != version_count {
+        return Err(recovery_error());
+    }
     Ok(())
 }
 
@@ -3517,6 +3696,8 @@ fn validate_stored_grant(connection: &Connection, grant: &StoredGrantUse) -> Res
     let manifest = ActionManifest::parse(&challenge.manifest).map_err(|_| recovery_error())?;
     let enrollment = store_enrollment_context(&manifest).map_err(|_| recovery_error())?;
     let store = load_registered_store_by_receipt(connection, receipt.receipt_id)?
+        .ok_or_else(recovery_error)?;
+    let version = load_store_version_by_receipt(connection, receipt.receipt_id)?
         .ok_or_else(recovery_error)?;
     if challenge.state != "authorized"
         || grant.grant_id != challenge.grant_id
@@ -3537,6 +3718,7 @@ fn validate_stored_grant(connection: &Connection, grant: &StoredGrantUse) -> Res
     {
         return Err(recovery_error());
     }
+    validate_initial_store_version(&version, &store, &enrollment, &receipt)?;
     validate_registry_events(connection, grant, &store)
 }
 
@@ -3570,7 +3752,43 @@ fn validate_stored_store(
     if grant.used_at != store.created_at {
         return Err(recovery_error());
     }
+    let version = load_store_version_by_receipt(connection, receipt.receipt_id)?
+        .ok_or_else(recovery_error)?;
+    let challenge = load_challenge(connection, receipt.challenge_id)?;
+    let manifest = ActionManifest::parse(&challenge.manifest).map_err(|_| recovery_error())?;
+    let enrollment = store_enrollment_context(&manifest).map_err(|_| recovery_error())?;
+    validate_initial_store_version(&version, store, &enrollment, &receipt)?;
     Ok(())
+}
+
+fn validate_stored_store_version(
+    connection: &Connection,
+    version: &StoredRegisteredStoreVersion,
+) -> Result<(), MailError> {
+    let receipt_id = version.enrolled_receipt_id.ok_or_else(recovery_error)?;
+    if version.committed_transition_id.is_some() {
+        return Err(recovery_error());
+    }
+    let receipt = load_receipt_by_id(connection, receipt_id)?.ok_or_else(recovery_error)?;
+    let challenge = load_challenge(connection, receipt.challenge_id)?;
+    let manifest = ActionManifest::parse(&challenge.manifest).map_err(|_| recovery_error())?;
+    let enrollment = store_enrollment_context(&manifest).map_err(|_| recovery_error())?;
+    let store =
+        load_registered_store_by_id(connection, version.store_id)?.ok_or_else(recovery_error)?;
+    record_validation_query(ValidationQueryKind::BoundedKeyed);
+    let grant_id: Vec<u8> = connection
+        .query_row(
+            "SELECT grant_id FROM grant_uses WHERE receipt_id=?1",
+            [receipt_id.as_bytes()],
+            |row| row.get(0),
+        )
+        .map_err(|_| store_read_error())?;
+    let grant_id = uuid_from_blob_sql(grant_id).map_err(|_| recovery_error())?;
+    let grant = load_grant_use(connection, grant_id)?.ok_or_else(recovery_error)?;
+    if grant.receipt_id != receipt_id || grant.used_at != version.created_at {
+        return Err(recovery_error());
+    }
+    validate_initial_store_version(version, &store, &enrollment, &receipt)
 }
 
 fn grant_use_transcript_from_row(grant: &StoredGrantUse) -> Vec<u8> {

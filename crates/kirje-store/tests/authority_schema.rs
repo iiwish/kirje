@@ -26,7 +26,7 @@ const BOOTSTRAP_EVENT_DETAIL_SHA256_HEX: &str =
     "5c37cb3d04458bcfb7a89eb3038e31d2e0f074a81ed07e045794a0aa9519672c";
 const CONFIRM_EVENT_DETAIL_SHA256_HEX: &str =
     "6ac5a60f3517c4d914870ae0db4c8aa0160e2b19a9e407a1f6a6d3ef45af8af1";
-const TABLES: [&str; 17] = [
+const TABLES: [&str; 20] = [
     "account_transitions",
     "authority_events",
     "authority_keys",
@@ -40,7 +40,10 @@ const TABLES: [&str; 17] = [
     "effect_observations",
     "grant_uses",
     "nonce_uses",
+    "registered_account_versions",
     "registered_accounts",
+    "registered_credentials",
+    "registered_store_versions",
     "registered_stores",
     "remote_effects",
     "trust_epochs",
@@ -67,7 +70,7 @@ const TRIGGERS: [&str; 3] = [
     "trust_epochs_key_roles_insert",
     "trust_epochs_key_roles_update",
 ];
-const COLUMN_INVARIANT_CASES: [(&str, &str, &str, &str); 17] = [
+const COLUMN_INVARIANT_CASES: [(&str, &str, &str, &str); 20] = [
     (
         "account_transitions",
         "kind",
@@ -147,10 +150,28 @@ const COLUMN_INVARIANT_CASES: [(&str, &str, &str, &str); 17] = [
         "nonce=zeroblob(1)",
     ),
     (
+        "registered_account_versions",
+        "binding_sha256",
+        "created_at",
+        "credential_id=zeroblob(1)",
+    ),
+    (
         "registered_accounts",
         "state",
         "updated_at",
         "account_id=zeroblob(1)",
+    ),
+    (
+        "registered_credentials",
+        "created_transition_id",
+        "created_at",
+        "credential_id=zeroblob(1)",
+    ),
+    (
+        "registered_store_versions",
+        "config_sha256",
+        "created_at",
+        "location_sha256=zeroblob(1)",
     ),
     (
         "registered_stores",
@@ -546,7 +567,7 @@ fn production_and_isolated_constructors_have_closed_inputs() {
 fn canonical_schema_body_has_exact_digest_and_inventory() {
     assert_eq!(
         hex(&Sha256::digest(SCHEMA)),
-        "572a73ba5fa83c763188d804ce9767a3c21373410d8b170f6d97b49be0a86454"
+        "5d01739b89246a5f495a965e57e416eee9fd0b5016995add41c6edee7f3e970d"
     );
     for forbidden in ["PRAGMA", "BEGIN TRANSACTION", "BEGIN IMMEDIATE", "COMMIT"] {
         assert!(!SCHEMA.contains(forbidden));
@@ -610,7 +631,7 @@ fn outer_transaction_rollback_leaves_no_schema_identity_or_rows() {
                 params![[21_u8; 16], detail, detail_sha256],
             )
             .unwrap();
-        assert_eq!(user_object_count(&transaction), 35);
+        assert_eq!(user_object_count(&transaction), 38);
         assert_eq!(
             scalar_i64(
                 &transaction,
@@ -797,8 +818,13 @@ fn assert_numeric_and_relationship_invariants(connection: &Connection) {
         "UPDATE authority_meta SET last_observed_at=-1",
         "UPDATE registered_stores SET config_generation=0",
         "UPDATE registered_stores SET updated_at=created_at-1",
+        "UPDATE registered_store_versions SET config_generation=0",
+        "UPDATE registered_store_versions SET created_at=-1",
         "UPDATE registered_accounts SET account_generation=0",
         "UPDATE registered_accounts SET updated_at=created_at-1",
+        "UPDATE registered_credentials SET created_at=-1",
+        "UPDATE registered_account_versions SET account_generation=0",
+        "UPDATE registered_account_versions SET created_at=-1",
         "UPDATE authorization_challenges SET action=2",
         "UPDATE authorization_challenges SET action=256",
         "UPDATE authorization_challenges SET expires_at=issued_at",
@@ -947,6 +973,7 @@ fn every_declared_partial_unique_boundary_rejects_a_competing_row() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn valid_relationship_chains_pass_and_every_composite_cross_link_fails() {
     let connection = schema_connection();
     let root = insert_raw_authority_root(&connection);
@@ -956,13 +983,18 @@ fn valid_relationship_chains_pass_and_every_composite_cross_link_fails() {
     insert_raw_challenge(&connection, &store_authorization);
     insert_raw_receipt(&connection, &store_authorization);
     insert_registered_store(&connection, &context, store_authorization.receipt_id);
+    insert_receipt_store_version(&connection, &context, store_authorization.receipt_id);
 
     let account_authorization = RawAuthorization::account_create(40, &context, &root);
     insert_raw_challenge(&connection, &account_authorization);
     insert_raw_receipt(&connection, &account_authorization);
-    insert_registered_account(&connection, &context, account_authorization.receipt_id);
     insert_grant_use(&connection, &account_authorization);
-    insert_account_transition_and_cleanup(&connection, &context, &account_authorization);
+    insert_registered_account_graph(
+        &connection,
+        &context,
+        account_authorization.receipt_id,
+        &account_authorization,
+    );
 
     let first = RawAuthorization::remote(60, &context, &root);
     let second = RawAuthorization::remote(90, &context, &root);
@@ -1059,6 +1091,161 @@ fn valid_relationship_chains_pass_and_every_composite_cross_link_fails() {
 }
 
 #[test]
+fn immutable_version_parents_survive_current_projection_updates() {
+    let connection = complete_schema_connection();
+    connection
+        .execute(
+            "UPDATE registered_stores
+             SET config_generation=2,config_sha256=?1,updated_at=21",
+            [[0xa1_u8; 32]],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE registered_accounts
+             SET account_generation=2,binding_sha256=?1,updated_at=21",
+            [[0xa2_u8; 32]],
+        )
+        .unwrap();
+
+    assert_eq!(
+        scalar_i64(&connection, "SELECT COUNT(*) FROM remote_effects"),
+        1
+    );
+    assert_eq!(
+        scalar_i64(&connection, "SELECT COUNT(*) FROM pragma_foreign_key_check"),
+        0
+    );
+    assert_eq!(scalar_text(&connection, "PRAGMA integrity_check"), "ok");
+}
+
+#[test]
+fn immutable_parent_origins_and_remote_effect_links_are_exact() {
+    let connection = complete_schema_connection();
+
+    for sql in [
+        "UPDATE registered_store_versions
+         SET enrolled_receipt_id=NULL,committed_transition_id=NULL",
+        "UPDATE registered_store_versions
+         SET committed_transition_id=zeroblob(16)",
+        "UPDATE registered_credentials SET account_id=zeroblob(16)",
+        "UPDATE registered_account_versions SET store_id=zeroblob(16)",
+        "UPDATE remote_effects SET config_sha256=zeroblob(32)",
+        "UPDATE remote_effects SET binding_sha256=zeroblob(32)",
+    ] {
+        assert_sql_mutation_rejected(&connection, sql);
+    }
+
+    assert!(
+        connection
+            .execute(
+                "INSERT INTO registered_store_versions
+                 (store_id,location_sha256,config_generation,config_sha256,
+                  enrolled_receipt_id,committed_transition_id,created_at)
+                 SELECT store_id,location_sha256,2,zeroblob(32),
+                        enrolled_receipt_id,zeroblob(16),created_at
+                 FROM registered_stores LIMIT 1",
+                [],
+            )
+            .is_err()
+    );
+}
+
+#[test]
+fn cross_account_and_cross_store_transition_origins_are_rejected() {
+    let connection = complete_schema_connection();
+    let root = RawAuthorityRoot {
+        owner_key_id: [11; 32],
+        recovery_key_id: [12; 32],
+        bundle_sha256: [13; 32],
+    };
+    let second = RawRemoteContext::synthetic(80);
+    let store = RawAuthorization::store_enroll(100, &second, &root);
+    insert_raw_challenge(&connection, &store);
+    insert_raw_receipt(&connection, &store);
+    insert_registered_store(&connection, &second, store.receipt_id);
+    insert_receipt_store_version(&connection, &second, store.receipt_id);
+    let account = RawAuthorization::account_create(110, &second, &root);
+    insert_raw_challenge(&connection, &account);
+    insert_raw_receipt(&connection, &account);
+    insert_grant_use(&connection, &account);
+    insert_registered_account_graph(&connection, &second, account.receipt_id, &account);
+
+    assert!(
+        connection
+            .execute(
+                "INSERT INTO registered_store_versions VALUES
+                 (?1,?2,2,?3,NULL,?4,21)",
+                params![
+                    second.store_id,
+                    second.store_location_sha256,
+                    [0xb1_u8; 32],
+                    [151_u8; 16]
+                ],
+            )
+            .is_err()
+    );
+    assert!(
+        connection
+            .execute(
+                "INSERT INTO registered_credentials VALUES (?1,?2,?3,?4,21)",
+                params![
+                    [0xb2_u8; 16],
+                    second.account_id,
+                    second.store_id,
+                    [151_u8; 16]
+                ],
+            )
+            .is_err()
+    );
+    assert!(
+        connection
+            .execute(
+                "INSERT INTO registered_account_versions VALUES
+                 (?1,?2,2,?3,?4,?5,21)",
+                params![
+                    second.account_id,
+                    second.store_id,
+                    second.credential_id,
+                    second.binding_sha256,
+                    [151_u8; 16]
+                ],
+            )
+            .is_err()
+    );
+    assert_eq!(
+        scalar_i64(&connection, "SELECT COUNT(*) FROM pragma_foreign_key_check"),
+        0
+    );
+}
+
+#[test]
+fn immutable_parent_query_plans_use_declared_keys_without_temp_sort() {
+    let connection = complete_schema_connection();
+    for sql in [
+        "SELECT store_id,config_generation FROM registered_store_versions
+         WHERE store_id=zeroblob(16) ORDER BY store_id,config_generation",
+        "SELECT store_id FROM registered_store_versions
+         WHERE store_id=zeroblob(16) AND location_sha256=zeroblob(32)
+           AND config_generation=1 AND config_sha256=zeroblob(32)",
+        "SELECT credential_id FROM registered_credentials
+         WHERE credential_id=zeroblob(16) AND account_id=zeroblob(16)
+           AND store_id=zeroblob(16)",
+        "SELECT account_id FROM registered_account_versions
+         WHERE account_id=zeroblob(16) AND store_id=zeroblob(16)
+           AND account_generation=1 AND credential_id=zeroblob(16)
+           AND binding_sha256=zeroblob(32)",
+    ] {
+        let plan = query_plan(&connection, sql);
+        assert!(plan.iter().any(|line| line.contains("INDEX")), "{plan:?}");
+        assert!(
+            plan.iter().all(|line| !line.contains("TEMP B-TREE")),
+            "{plan:?}"
+        );
+    }
+}
+
+#[test]
 fn invalid_bootstrap_keys_fail_before_entropy_or_filesystem_effects() {
     let temp = TempDir::new().unwrap();
     let home = isolated(&temp);
@@ -1084,6 +1271,7 @@ fn invalid_bootstrap_keys_fail_before_entropy_or_filesystem_effects() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn bootstrap_is_database_first_stable_and_exactly_retryable() {
     let temp = TempDir::new().unwrap();
     let home = isolated(&temp);
@@ -1140,6 +1328,17 @@ fn bootstrap_is_database_first_stable_and_exactly_retryable() {
         snapshot.journal_location_sha256
     );
     let event_connection = Connection::open(home.database_path()).unwrap();
+    assert_eq!(
+        pragma_i64(&event_connection, "application_id"),
+        APPLICATION_ID
+    );
+    assert_eq!(
+        pragma_i64(&event_connection, "user_version"),
+        SCHEMA_VERSION
+    );
+    assert_eq!(objects(&event_connection, "table"), strings(TABLES));
+    assert_eq!(objects(&event_connection, "index"), strings(INDEXES));
+    assert_eq!(objects(&event_connection, "trigger"), strings(TRIGGERS));
     let bootstrap_detail = scalar_blob(
         &event_connection,
         "SELECT detail FROM authority_events WHERE event_code=1",
@@ -2088,6 +2287,18 @@ impl RawRemoteContext {
             policy_sha256: [7; 32],
         }
     }
+
+    fn synthetic(seed: u8) -> Self {
+        Self {
+            store_id: [seed; 16],
+            store_location_sha256: [seed.wrapping_add(1); 32],
+            config_sha256: [seed.wrapping_add(2); 32],
+            account_id: [seed.wrapping_add(3); 16],
+            credential_id: [seed.wrapping_add(4); 16],
+            binding_sha256: [seed.wrapping_add(5); 32],
+            policy_sha256: [seed.wrapping_add(6); 32],
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -2361,14 +2572,42 @@ fn insert_registered_store(
         .unwrap();
 }
 
-fn insert_registered_account(
+fn insert_receipt_store_version(
     connection: &Connection,
     context: &RawRemoteContext,
     receipt_id: [u8; 16],
 ) {
     connection
         .execute(
-            "INSERT INTO registered_accounts VALUES (?1,?2,?3,1,?4,?5,'active',?6,NULL,20,20,NULL)",
+            "INSERT INTO registered_store_versions
+             (store_id,location_sha256,config_generation,config_sha256,
+              enrolled_receipt_id,committed_transition_id,created_at)
+             VALUES (?1,?2,1,?3,?4,NULL,20)",
+            params![
+                context.store_id,
+                context.store_location_sha256,
+                context.config_sha256,
+                receipt_id,
+            ],
+        )
+        .unwrap();
+}
+
+fn insert_registered_account_graph(
+    connection: &Connection,
+    context: &RawRemoteContext,
+    receipt_id: [u8; 16],
+    authorization: &RawAuthorization,
+) {
+    let transition_seed = context.account_id[0].wrapping_add(147);
+    let transition_id = [transition_seed; 16];
+    connection
+        .execute_batch("BEGIN; PRAGMA defer_foreign_keys=ON;")
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO registered_accounts VALUES
+             (?1,?2,?3,1,?4,?5,'active',?6,NULL,20,20,NULL)",
             params![
                 context.account_id,
                 context.store_id,
@@ -2379,54 +2618,58 @@ fn insert_registered_account(
             ],
         )
         .unwrap();
-}
-
-fn insert_account_transition_and_cleanup(
-    connection: &Connection,
-    context: &RawRemoteContext,
-    authorization: &RawAuthorization,
-) {
-    let transition_id = [151_u8; 16];
-    assert!(
-        connection
-            .execute(
-                "INSERT INTO account_transitions VALUES (
-                 ?1,?2,?3,?4,'account_update',?5,?6,1,3,?7,'prepared',20,NULL,NULL,NULL)",
-                params![
-                    transition_id,
-                    authorization.grant_id,
-                    context.store_id,
-                    context.account_id,
-                    [152_u8; 32],
-                    [153_u8; 32],
-                    [154_u8; 32],
-                ],
-            )
-            .is_err()
-    );
     connection
         .execute(
             "INSERT INTO account_transitions VALUES (
-         ?1,?2,?3,?4,'account_update',?5,?6,1,2,?7,'prepared',20,NULL,NULL,NULL)",
+             ?1,?2,?3,?4,'account_create',?5,?6,1,2,?7,'prepared',20,NULL,NULL,NULL)",
             params![
                 transition_id,
                 authorization.grant_id,
                 context.store_id,
                 context.account_id,
-                [152_u8; 32],
-                [153_u8; 32],
-                [154_u8; 32],
+                [transition_seed.wrapping_add(1); 32],
+                [transition_seed.wrapping_add(2); 32],
+                [transition_seed.wrapping_add(3); 32],
             ],
         )
         .unwrap();
-    assert!(connection.execute(
-        "INSERT INTO credential_cleanup VALUES (?1,?2,'active_v2',?3,?4,'claimed',NULL,20,NULL)",
-        params![[155_u8; 16], transition_id, [156_u8], [157_u8; 32]],
-    ).is_err());
-    connection.execute(
-        "INSERT INTO credential_cleanup VALUES (?1,?2,'active_v2',?3,?4,'provisional',NULL,20,NULL)",
-        params![[155_u8; 16], transition_id, [156_u8], [157_u8; 32]],
-    ).unwrap();
+    connection
+        .execute(
+            "INSERT INTO registered_credentials VALUES (?1,?2,?3,?4,20)",
+            params![
+                context.credential_id,
+                context.account_id,
+                context.store_id,
+                transition_id,
+            ],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO registered_account_versions VALUES
+             (?1,?2,1,?3,?4,?5,20)",
+            params![
+                context.account_id,
+                context.store_id,
+                context.credential_id,
+                context.binding_sha256,
+                transition_id,
+            ],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO credential_cleanup VALUES
+             (?1,?2,'active_v2',?3,?4,'provisional',NULL,20,NULL)",
+            params![
+                [transition_seed.wrapping_add(4); 16],
+                transition_id,
+                [transition_seed.wrapping_add(5)],
+                [transition_seed.wrapping_add(6); 32]
+            ],
+        )
+        .unwrap();
+    connection.execute_batch("COMMIT").unwrap();
 }
 
 fn insert_challenge_effect(connection: &Connection, value: &RawAuthorization) {
@@ -2658,13 +2901,13 @@ fn complete_schema_connection() -> Connection {
     insert_raw_challenge(&connection, &store);
     insert_raw_receipt(&connection, &store);
     insert_registered_store(&connection, &context, store.receipt_id);
+    insert_receipt_store_version(&connection, &context, store.receipt_id);
 
     let account = RawAuthorization::account_create(40, &context, &root);
     insert_raw_challenge(&connection, &account);
     insert_raw_receipt(&connection, &account);
-    insert_registered_account(&connection, &context, account.receipt_id);
     insert_grant_use(&connection, &account);
-    insert_account_transition_and_cleanup(&connection, &context, &account);
+    insert_registered_account_graph(&connection, &context, account.receipt_id, &account);
 
     let remote = RawAuthorization::remote(60, &context, &root);
     insert_raw_challenge(&connection, &remote);
@@ -2762,6 +3005,16 @@ fn scalar_text(connection: &Connection, sql: &str) -> String {
 
 fn scalar_blob(connection: &Connection, sql: &str) -> Vec<u8> {
     connection.query_row(sql, [], |row| row.get(0)).unwrap()
+}
+
+fn query_plan(connection: &Connection, sql: &str) -> Vec<String> {
+    connection
+        .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+        .unwrap()
+        .query_map([], |row| row.get(3))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
 }
 
 fn create_database_parent(home: &IsolatedAuthorityHome) {
