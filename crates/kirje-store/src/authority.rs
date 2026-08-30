@@ -13,12 +13,12 @@ use std::sync::{Arc, Barrier, Mutex};
 use chrono::{DateTime, SecondsFormat, TimeZone as _, Utc};
 use directories::ProjectDirs;
 use kirje_core::{
-    AccountId, ActionManifest, AuthorizationGrantId, AuthorizationPayload, AuthorizationProof,
-    AuthorizationReceiptId, AuthorizationReceiptProjection, AuthorizationReceiptState,
-    CredentialId, JournalId, MailError, MailErrorCode, ManifestPayload, OwnerKeyRole,
-    OwnerPublicKey, OwnerRealmId, PlatformLocationMaterial, SensitiveAction, Sha256Digest,
-    StoreEnrollmentState, StoreId, TargetKind, TransitionId, TrustPermissionMask, owner_key_id,
-    verify_authorization_signature,
+    AccountId, AccountMutationManifest, ActionManifest, AuthorizationGrantId, AuthorizationPayload,
+    AuthorizationProof, AuthorizationReceiptId, AuthorizationReceiptProjection,
+    AuthorizationReceiptState, CleanupId, CleanupState, CredentialId, JournalId, LocatorKind,
+    MailError, MailErrorCode, ManifestPayload, OwnerKeyRole, OwnerPublicKey, OwnerRealmId,
+    PlatformLocationMaterial, SensitiveAction, Sha256Digest, StoreEnrollmentState, StoreId,
+    TargetKind, TransitionId, TrustPermissionMask, owner_key_id, verify_authorization_signature,
 };
 use rusqlite::{
     Connection, OpenFlags, OptionalExtension as _, Transaction, TransactionBehavior, params,
@@ -367,6 +367,43 @@ pub enum RegisteredStoreTransitionState {
 }
 
 #[derive(Clone, Eq, PartialEq)]
+pub struct CredentialCleanupReservation {
+    cleanup_id: CleanupId,
+    locator_kind: LocatorKind,
+    locator_material: Vec<u8>,
+    locator_sha256: Sha256Digest,
+}
+
+impl CredentialCleanupReservation {
+    /// Seal bounded delete-only locator material for an account transition.
+    ///
+    /// The material is intentionally not printable, serializable, or exposed by
+    /// any accessor. Authority compares its digest with the signed manifest.
+    ///
+    /// # Errors
+    ///
+    /// Returns invalid-input when material is empty or exceeds the schema bound.
+    pub fn new(
+        cleanup_id: CleanupId,
+        locator_kind: LocatorKind,
+        locator_material: Vec<u8>,
+    ) -> Result<Self, MailError> {
+        if locator_material.is_empty() || locator_material.len() > 4096 {
+            return Err(MailError::invalid_input(
+                "cleanup locator material is outside the contract",
+            ));
+        }
+        let locator_sha256 = Sha256Digest::digest(&locator_material);
+        Ok(Self {
+            cleanup_id,
+            locator_kind,
+            locator_material,
+            locator_sha256,
+        })
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
 pub struct PrepareAccountTransitionRequest {
     grant_use: GrantUseRequest,
     transition_id: TransitionId,
@@ -381,6 +418,7 @@ pub struct PrepareAccountTransitionRequest {
     account_generation: NonZeroU64,
     credential_id: CredentialId,
     binding_sha256: Sha256Digest,
+    cleanup_reservations: Vec<CredentialCleanupReservation>,
     observed_at_unix_ms: i64,
 }
 
@@ -433,8 +471,40 @@ impl PrepareAccountTransitionRequest {
             account_generation,
             credential_id,
             binding_sha256,
+            cleanup_reservations: Vec::new(),
             observed_at_unix_ms,
         })
+    }
+
+    /// Attach the private cleanup reservations sealed by an update manifest.
+    ///
+    /// # Errors
+    ///
+    /// Returns invalid-input for an unsupported transition kind, an empty or
+    /// oversized list, or duplicate cleanup identities or locator digests.
+    pub fn with_cleanup_reservations(
+        mut self,
+        cleanup_reservations: Vec<CredentialCleanupReservation>,
+    ) -> Result<Self, MailError> {
+        if self.kind != AccountTransitionKind::AccountUpdate
+            || cleanup_reservations.is_empty()
+            || cleanup_reservations.len() > 100
+            || cleanup_reservations
+                .iter()
+                .enumerate()
+                .any(|(index, item)| {
+                    cleanup_reservations[..index].iter().any(|prior| {
+                        prior.cleanup_id == item.cleanup_id
+                            || prior.locator_sha256 == item.locator_sha256
+                    })
+                })
+        {
+            return Err(MailError::invalid_input(
+                "cleanup reservations are outside the transition contract",
+            ));
+        }
+        self.cleanup_reservations = cleanup_reservations;
+        Ok(self)
     }
 }
 
@@ -706,6 +776,7 @@ pub enum AuthorityFaultPoint {
     RegisteredAccountInserted,
     AccountTransitionInserted,
     RegisteredCredentialInserted,
+    AccountCleanupInserted,
     AccountForeignKeyChecked,
     AccountStoreBlockedEvent,
     AccountTransitionPreparedEvent,
@@ -723,6 +794,7 @@ pub enum AuthorityFaultPoint {
     AccountFinalizeAccountUpdated,
     AccountFinalizeTransitionUpdated,
     AccountFinalizeStoreUpdated,
+    AccountFinalizeCleanupUpdated,
     AccountFinalizeTransitionEvent,
     AccountFinalizeStoreEvent,
     AccountFinalizeClockUpdated,
@@ -918,6 +990,7 @@ enum TestFaultPoint {
     RegisteredAccountInserted,
     AccountTransitionInserted,
     RegisteredCredentialInserted,
+    AccountCleanupInserted,
     AccountForeignKeyChecked,
     AccountStoreBlockedEvent,
     AccountTransitionPreparedEvent,
@@ -935,6 +1008,7 @@ enum TestFaultPoint {
     AccountFinalizeAccountUpdated,
     AccountFinalizeTransitionUpdated,
     AccountFinalizeStoreUpdated,
+    AccountFinalizeCleanupUpdated,
     AccountFinalizeTransitionEvent,
     AccountFinalizeStoreEvent,
     AccountFinalizeClockUpdated,
@@ -1000,6 +1074,7 @@ impl From<TestFaultPoint> for AuthorityFaultPoint {
             TestFaultPoint::RegisteredAccountInserted => Self::RegisteredAccountInserted,
             TestFaultPoint::AccountTransitionInserted => Self::AccountTransitionInserted,
             TestFaultPoint::RegisteredCredentialInserted => Self::RegisteredCredentialInserted,
+            TestFaultPoint::AccountCleanupInserted => Self::AccountCleanupInserted,
             TestFaultPoint::AccountForeignKeyChecked => Self::AccountForeignKeyChecked,
             TestFaultPoint::AccountStoreBlockedEvent => Self::AccountStoreBlockedEvent,
             TestFaultPoint::AccountTransitionPreparedEvent => Self::AccountTransitionPreparedEvent,
@@ -1019,6 +1094,7 @@ impl From<TestFaultPoint> for AuthorityFaultPoint {
                 Self::AccountFinalizeTransitionUpdated
             }
             TestFaultPoint::AccountFinalizeStoreUpdated => Self::AccountFinalizeStoreUpdated,
+            TestFaultPoint::AccountFinalizeCleanupUpdated => Self::AccountFinalizeCleanupUpdated,
             TestFaultPoint::AccountFinalizeTransitionEvent => Self::AccountFinalizeTransitionEvent,
             TestFaultPoint::AccountFinalizeStoreEvent => Self::AccountFinalizeStoreEvent,
             TestFaultPoint::AccountFinalizeClockUpdated => Self::AccountFinalizeClockUpdated,
@@ -1905,7 +1981,7 @@ impl AuthorityStore {
         })
     }
 
-    /// Reserve one authorized account-create transition.
+    /// Reserve one authorized account-create or account-update transition.
     ///
     /// # Errors
     ///
@@ -1915,7 +1991,10 @@ impl AuthorityStore {
         &self,
         request: PrepareAccountTransitionRequest,
     ) -> Result<AccountTransitionProjection, MailError> {
-        if request.kind != AccountTransitionKind::AccountCreate {
+        if !matches!(
+            request.kind,
+            AccountTransitionKind::AccountCreate | AccountTransitionKind::AccountUpdate
+        ) {
             return Err(authorization_context_stale_error());
         }
         if !matches!(self.state, AuthorityOpenState::Ready(_)) {
@@ -2003,7 +2082,7 @@ impl AuthorityStore {
             return Err(authorization_expired_error());
         }
 
-        validate_prepare_occupancy(&transaction, &request)?;
+        validate_prepare_occupancy(&transaction, &request, &challenge)?;
         let transition_sha256 = account_transition_digest(&request, effective_time);
         let collision: i64 = transaction
             .query_row(
@@ -2061,8 +2140,8 @@ impl AuthorityStore {
         }
         self.test_hooks
             .fault(TestFaultPoint::AccountForeignKeysDeferred)?;
-        let inserted = transaction
-            .execute(
+        let account_changed = match request.kind {
+            AccountTransitionKind::AccountCreate => transaction.execute(
                 "INSERT INTO registered_accounts
                  (account_id,store_id,display_id_sha256,account_generation,credential_id,
                   binding_sha256,state,authorized_receipt_id,active_transition_id,
@@ -2080,9 +2159,42 @@ impl AuthorityStore {
                     request.transition_id.as_bytes(),
                     effective_time,
                 ],
-            )
-            .map_err(|_| store_write_error())?;
-        if inserted != 1 {
+            ),
+            AccountTransitionKind::AccountUpdate => {
+                let mutation = account_mutation_manifest(&challenge, request.kind)?;
+                let before = mutation
+                    .before
+                    .as_ref()
+                    .ok_or_else(authorization_context_stale_error)?;
+                transaction.execute(
+                    "UPDATE registered_accounts SET account_generation=?1,credential_id=?2,
+                     binding_sha256=?3,state='blocked',authorized_receipt_id=?4,
+                     active_transition_id=?5,updated_at=?6
+                     WHERE account_id=?7 AND store_id=?8 AND display_id_sha256=?9
+                       AND account_generation=?10 AND credential_id=?11 AND binding_sha256=?12
+                       AND state='active' AND active_transition_id IS NULL AND removed_at IS NULL",
+                    params![
+                        i64::try_from(request.account_generation.get())
+                            .map_err(|_| authorization_context_stale_error())?,
+                        request.credential_id.as_bytes(),
+                        request.binding_sha256.as_bytes(),
+                        receipt.receipt_id.as_bytes(),
+                        request.transition_id.as_bytes(),
+                        effective_time,
+                        request.account_id.as_bytes(),
+                        request.store_id.as_bytes(),
+                        request.display_id_sha256.as_bytes(),
+                        i64::try_from(before.generation.get())
+                            .map_err(|_| authorization_context_stale_error())?,
+                        before.credential_id.as_bytes(),
+                        before.binding_sha256.as_bytes(),
+                    ],
+                )
+            }
+            _ => unreachable!(),
+        }
+        .map_err(|_| store_write_error())?;
+        if account_changed != 1 {
             return Err(store_write_error());
         }
         self.test_hooks
@@ -2135,6 +2247,29 @@ impl AuthorityStore {
         }
         self.test_hooks
             .fault(TestFaultPoint::RegisteredCredentialInserted)?;
+        for cleanup in &request.cleanup_reservations {
+            let inserted = transaction
+                .execute(
+                    "INSERT INTO credential_cleanup
+                     (cleanup_id,transition_id,locator_kind,locator_material,locator_sha256,
+                      state,claim_grant_id,created_at,deleted_at)
+                     VALUES(?1,?2,?3,?4,?5,'provisional',NULL,?6,NULL)",
+                    params![
+                        cleanup.cleanup_id.as_bytes(),
+                        request.transition_id.as_bytes(),
+                        locator_kind_name(cleanup.locator_kind),
+                        &cleanup.locator_material,
+                        cleanup.locator_sha256.as_bytes(),
+                        effective_time,
+                    ],
+                )
+                .map_err(|_| store_write_error())?;
+            if inserted != 1 {
+                return Err(store_write_error());
+            }
+        }
+        self.test_hooks
+            .fault(TestFaultPoint::AccountCleanupInserted)?;
         if foreign_key_violation_count(&transaction)? != 0 {
             return Err(recovery_error());
         }
@@ -2185,7 +2320,11 @@ impl AuthorityStore {
             transition_id: request.transition_id,
             account_id: request.account_id,
             transition_state: AccountTransitionState::Prepared,
-            account_state: RegisteredAccountState::Proposed,
+            account_state: if request.kind == AccountTransitionKind::AccountCreate {
+                RegisteredAccountState::Proposed
+            } else {
+                RegisteredAccountState::Blocked
+            },
             store_state: RegisteredStoreTransitionState::Blocked,
             config_generation: request.expected_generation,
             account_generation: request.account_generation,
@@ -2271,7 +2410,10 @@ impl AuthorityStore {
         utc_millis(effective_time)?;
         let transition = load_account_transition(&transaction, request.transition_id)?
             .ok_or_else(account_update_conflict_error)?;
-        if transition.kind != AccountTransitionKind::AccountCreate {
+        if !matches!(
+            transition.kind,
+            AccountTransitionKind::AccountCreate | AccountTransitionKind::AccountUpdate
+        ) {
             return Err(account_update_conflict_error());
         }
         let pair = classify_observed_pair(&transition, request);
@@ -2449,17 +2591,23 @@ impl AuthorityStore {
                     .fault(TestFaultPoint::AccountConfigClockUpdated)?;
                 self.test_hooks
                     .fault(TestFaultPoint::AccountConfigBeforeCommit)?;
+                let projection = projection_for_transition_state(
+                    &transaction,
+                    &transition,
+                    AccountTransitionState::ConfigCommitted,
+                    if transition.kind == AccountTransitionKind::AccountCreate {
+                        RegisteredAccountState::Proposed
+                    } else {
+                        RegisteredAccountState::Blocked
+                    },
+                    RegisteredStoreTransitionState::Blocked,
+                    transition.next_generation,
+                )?;
                 transaction.commit().map_err(|_| store_write_error())?;
                 secure_authority_files(&self.home.database)?;
                 self.test_hooks
                     .fault(TestFaultPoint::AccountConfigAfterCommit)?;
-                Ok(projection_for_state(
-                    &transition,
-                    AccountTransitionState::ConfigCommitted,
-                    RegisteredAccountState::Proposed,
-                    RegisteredStoreTransitionState::Blocked,
-                    transition.next_generation,
-                )?)
+                Ok(projection)
             }
             AccountObservationOperation::Finalize
                 if request.source_state == AccountTransitionState::ConfigCommitted
@@ -2496,22 +2644,25 @@ impl AuthorityStore {
                 )?;
                 self.test_hooks
                     .fault(TestFaultPoint::AccountFinalizeStoreEvent)?;
+                insert_cleanup_ready_events(&transaction, &transition, receipt_id, effective_time)?;
                 observe_clock_pair(&transaction, effective_time)?;
                 self.test_hooks
                     .fault(TestFaultPoint::AccountFinalizeClockUpdated)?;
                 self.test_hooks
                     .fault(TestFaultPoint::AccountFinalizeBeforeCommit)?;
-                transaction.commit().map_err(|_| store_write_error())?;
-                secure_authority_files(&self.home.database)?;
-                self.test_hooks
-                    .fault(TestFaultPoint::AccountFinalizeAfterCommit)?;
-                Ok(projection_for_state(
+                let projection = projection_for_transition_state(
+                    &transaction,
                     &transition,
                     AccountTransitionState::Finalized,
                     RegisteredAccountState::Active,
                     RegisteredStoreTransitionState::Active,
                     transition.next_generation,
-                )?)
+                )?;
+                transaction.commit().map_err(|_| store_write_error())?;
+                secure_authority_files(&self.home.database)?;
+                self.test_hooks
+                    .fault(TestFaultPoint::AccountFinalizeAfterCommit)?;
+                Ok(projection)
             }
             AccountObservationOperation::Abort
                 if request.source_state == AccountTransitionState::Prepared
@@ -2553,17 +2704,23 @@ impl AuthorityStore {
                     .fault(TestFaultPoint::AccountAbortClockUpdated)?;
                 self.test_hooks
                     .fault(TestFaultPoint::AccountAbortBeforeCommit)?;
+                let projection = projection_for_transition_state(
+                    &transaction,
+                    &transition,
+                    AccountTransitionState::Aborted,
+                    if transition.kind == AccountTransitionKind::AccountCreate {
+                        RegisteredAccountState::Removed
+                    } else {
+                        RegisteredAccountState::Active
+                    },
+                    RegisteredStoreTransitionState::Active,
+                    transition.expected_generation,
+                )?;
                 transaction.commit().map_err(|_| store_write_error())?;
                 secure_authority_files(&self.home.database)?;
                 self.test_hooks
                     .fault(TestFaultPoint::AccountAbortAfterCommit)?;
-                Ok(projection_for_state(
-                    &transition,
-                    AccountTransitionState::Aborted,
-                    RegisteredAccountState::Removed,
-                    RegisteredStoreTransitionState::Active,
-                    transition.expected_generation,
-                )?)
+                Ok(projection)
             }
             AccountObservationOperation::Recovery
                 if matches!(
@@ -2873,8 +3030,14 @@ fn validate_account_prepare_identity(
 ) -> Result<(), MailError> {
     let manifest = ActionManifest::parse(&challenge.manifest)
         .map_err(|_| authorization_context_stale_error())?;
-    let ManifestPayload::AccountCreate(value) = manifest.payload() else {
-        return Err(authorization_context_stale_error());
+    let (value, action) = match (request.kind, manifest.payload()) {
+        (AccountTransitionKind::AccountCreate, ManifestPayload::AccountCreate(value)) => {
+            (value, SensitiveAction::AccountCreate)
+        }
+        (AccountTransitionKind::AccountUpdate, ManifestPayload::AccountUpdate(value)) => {
+            (value, SensitiveAction::AccountUpdate)
+        }
+        _ => return Err(authorization_context_stale_error()),
     };
     let after = value
         .after
@@ -2884,7 +3047,7 @@ fn validate_account_prepare_identity(
         || request.grant_use.receipt_id != receipt.receipt_id
         || receipt.challenge_id != challenge.challenge_id
         || receipt.grant_id != challenge.grant_id
-        || request.grant_use.action != SensitiveAction::AccountCreate
+        || request.grant_use.action != action
         || request.grant_use.action != challenge.action
         || request.grant_use.target_kind != TargetKind::Account
         || request.grant_use.target_kind.code() != challenge.target_kind_code
@@ -2894,7 +3057,6 @@ fn validate_account_prepare_identity(
         || request.store_id != value.config_cas.store_id
         || request.account_id != after.account_id
         || request.account_id.as_bytes().as_slice() != challenge.target_id
-        || request.kind != AccountTransitionKind::AccountCreate
         || request.before_config_sha256 != value.config_cas.exact_content_sha256
         || request.after_config_sha256 != value.after_config_sha256
         || request.expected_generation != value.config_cas.generation
@@ -2903,6 +3065,7 @@ fn validate_account_prepare_identity(
         || request.account_generation != after.generation
         || request.credential_id != after.credential_id
         || request.binding_sha256 != after.binding_sha256
+        || !cleanup_reservations_match(&request.cleanup_reservations, &value.cleanup)
     {
         return Err(authorization_context_stale_error());
     }
@@ -2914,15 +3077,57 @@ fn account_manifest_location_sha256(
 ) -> Result<Sha256Digest, MailError> {
     let manifest = ActionManifest::parse(&challenge.manifest)
         .map_err(|_| authorization_context_stale_error())?;
-    let ManifestPayload::AccountCreate(value) = manifest.payload() else {
+    let (ManifestPayload::AccountCreate(value) | ManifestPayload::AccountUpdate(value)) =
+        manifest.payload()
+    else {
         return Err(authorization_context_stale_error());
     };
     Ok(value.config_cas.location_sha256)
 }
 
+fn cleanup_reservations_match(
+    reservations: &[CredentialCleanupReservation],
+    descriptors: &[kirje_core::CleanupDescriptor],
+) -> bool {
+    reservations.len() == descriptors.len()
+        && reservations
+            .iter()
+            .zip(descriptors)
+            .all(|(reservation, descriptor)| {
+                descriptor.expected_state == CleanupState::Provisional
+                    && reservation.cleanup_id == descriptor.cleanup_id
+                    && reservation.locator_kind == descriptor.locator_kind
+                    && reservation.locator_sha256 == descriptor.locator_sha256
+            })
+}
+
+const fn locator_kind_name(kind: LocatorKind) -> &'static str {
+    match kind {
+        LocatorKind::ActiveV2 => "active_v2",
+        LocatorKind::LegacyV1 => "legacy_v1",
+    }
+}
+
+fn account_mutation_manifest(
+    challenge: &StoredChallenge,
+    kind: AccountTransitionKind,
+) -> Result<AccountMutationManifest, MailError> {
+    let manifest = ActionManifest::parse(&challenge.manifest)
+        .map_err(|_| authorization_context_stale_error())?;
+    match (kind, manifest.payload()) {
+        (AccountTransitionKind::AccountCreate, ManifestPayload::AccountCreate(value))
+        | (AccountTransitionKind::AccountUpdate, ManifestPayload::AccountUpdate(value)) => {
+            Ok(value.clone())
+        }
+        _ => Err(authorization_context_stale_error()),
+    }
+}
+
+#[allow(clippy::too_many_lines)]
 fn validate_prepare_occupancy(
     connection: &Connection,
     request: &PrepareAccountTransitionRequest,
+    challenge: &StoredChallenge,
 ) -> Result<(), MailError> {
     let store = load_registered_store_by_id(connection, request.store_id)?
         .ok_or_else(authorization_context_stale_error)?;
@@ -2947,37 +3152,93 @@ fn validate_prepare_occupancy(
     if active_transition != 0 {
         return Err(account_update_conflict_error());
     }
-    let identities: i64 = connection
-        .query_row(
-            "SELECT
-                (SELECT COUNT(*) FROM registered_accounts WHERE account_id=?1) +
-                (SELECT COUNT(*) FROM registered_credentials WHERE credential_id=?2) +
-                (SELECT COUNT(*) FROM account_transitions WHERE transition_id=?3)",
-            params![
-                request.account_id.as_bytes(),
-                request.credential_id.as_bytes(),
-                request.transition_id.as_bytes(),
-            ],
-            |row| row.get(0),
-        )
-        .map_err(|_| store_read_error())?;
-    if identities != 0 {
-        return Err(account_identity_conflict_error());
-    }
-    let display: i64 = connection
-        .query_row(
-            "SELECT COUNT(*) FROM registered_accounts
-             WHERE store_id=?1 AND display_id_sha256=?2
-               AND state IN ('proposed','active','blocked')",
-            params![
-                request.store_id.as_bytes(),
-                request.display_id_sha256.as_bytes()
-            ],
-            |row| row.get(0),
-        )
-        .map_err(|_| store_read_error())?;
-    if display != 0 {
-        return Err(account_already_exists_error());
+    match request.kind {
+        AccountTransitionKind::AccountCreate => {
+            let identities: i64 = connection
+                .query_row(
+                    "SELECT
+                        (SELECT COUNT(*) FROM registered_accounts WHERE account_id=?1) +
+                        (SELECT COUNT(*) FROM registered_credentials WHERE credential_id=?2) +
+                        (SELECT COUNT(*) FROM account_transitions WHERE transition_id=?3)",
+                    params![
+                        request.account_id.as_bytes(),
+                        request.credential_id.as_bytes(),
+                        request.transition_id.as_bytes(),
+                    ],
+                    |row| row.get(0),
+                )
+                .map_err(|_| store_read_error())?;
+            if identities != 0 {
+                return Err(account_identity_conflict_error());
+            }
+            let display: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM registered_accounts
+                     WHERE store_id=?1 AND display_id_sha256=?2
+                       AND state IN ('proposed','active','blocked')",
+                    params![
+                        request.store_id.as_bytes(),
+                        request.display_id_sha256.as_bytes()
+                    ],
+                    |row| row.get(0),
+                )
+                .map_err(|_| store_read_error())?;
+            if display != 0 {
+                return Err(account_already_exists_error());
+            }
+        }
+        AccountTransitionKind::AccountUpdate => {
+            let mutation = account_mutation_manifest(challenge, request.kind)?;
+            let before = mutation
+                .before
+                .as_ref()
+                .ok_or_else(authorization_context_stale_error)?;
+            let account = load_registered_account(connection, request.account_id)?
+                .ok_or_else(authorization_context_stale_error)?;
+            if account.state != RegisteredAccountState::Active
+                || account.store_id != request.store_id
+                || account.display_id_sha256 != display_id_digest(&before.display_id)
+                || account.account_generation != before.generation
+                || account.credential_id != before.credential_id
+                || account.binding_sha256 != before.binding_sha256
+                || account.active_transition_id.is_some()
+                || account.removed_at.is_some()
+            {
+                return Err(authorization_context_stale_error());
+            }
+            let identities: i64 = connection
+                .query_row(
+                    "SELECT
+                        (SELECT COUNT(*) FROM registered_credentials WHERE credential_id=?1) +
+                        (SELECT COUNT(*) FROM account_transitions WHERE transition_id=?2)",
+                    params![
+                        request.credential_id.as_bytes(),
+                        request.transition_id.as_bytes(),
+                    ],
+                    |row| row.get(0),
+                )
+                .map_err(|_| store_read_error())?;
+            if identities != 0 {
+                return Err(account_identity_conflict_error());
+            }
+            for cleanup in &request.cleanup_reservations {
+                let occupied: i64 = connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM credential_cleanup
+                         WHERE cleanup_id=?1 OR locator_sha256=?2",
+                        params![
+                            cleanup.cleanup_id.as_bytes(),
+                            cleanup.locator_sha256.as_bytes(),
+                        ],
+                        |row| row.get(0),
+                    )
+                    .map_err(|_| store_read_error())?;
+                if occupied != 0 {
+                    return Err(account_identity_conflict_error());
+                }
+            }
+        }
+        _ => return Err(authorization_context_stale_error()),
     }
     Ok(())
 }
@@ -2987,8 +3248,11 @@ fn validate_prepare_retry_identity(
     request: &PrepareAccountTransitionRequest,
     transition: &StoredAccountTransition,
 ) -> Result<(), MailError> {
-    let account =
-        load_registered_account(connection, transition.account_id)?.ok_or_else(recovery_error)?;
+    let grant = load_grant_use(connection, transition.grant_id)?.ok_or_else(recovery_error)?;
+    let receipt = load_receipt_by_id(connection, grant.receipt_id)?.ok_or_else(recovery_error)?;
+    let challenge = load_challenge(connection, receipt.challenge_id)?;
+    validate_account_prepare_identity(request, &challenge, &receipt)
+        .map_err(|_| grant_already_used_error())?;
     if transition.transition_id != request.transition_id
         || transition.grant_id != request.grant_use.grant_id
         || transition.store_id != request.store_id
@@ -2998,15 +3262,43 @@ fn validate_prepare_retry_identity(
         || transition.after_config_sha256 != request.after_config_sha256
         || transition.expected_generation != request.expected_generation
         || transition.next_generation != request.next_generation
-        || account.display_id_sha256 != request.display_id_sha256
-        || account.account_generation != request.account_generation
-        || account.credential_id != request.credential_id
-        || account.binding_sha256 != request.binding_sha256
-        || account.authorized_receipt_id != request.grant_use.receipt_id
         || transition.transition_sha256
             != account_transition_digest(request, transition.prepared_at)
     {
         return Err(grant_already_used_error());
+    }
+    let cleanup_count: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM credential_cleanup WHERE transition_id=?1",
+            [transition.transition_id.as_bytes()],
+            |row| row.get(0),
+        )
+        .map_err(|_| store_read_error())?;
+    if usize::try_from(cleanup_count).ok() != Some(request.cleanup_reservations.len()) {
+        return Err(grant_already_used_error());
+    }
+    for cleanup in &request.cleanup_reservations {
+        let stored: Option<(String, Vec<u8>, Vec<u8>)> = connection
+            .query_row(
+                "SELECT locator_kind,locator_material,locator_sha256
+                 FROM credential_cleanup WHERE cleanup_id=?1 AND transition_id=?2",
+                params![
+                    cleanup.cleanup_id.as_bytes(),
+                    transition.transition_id.as_bytes(),
+                ],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()
+            .map_err(|_| store_read_error())?;
+        let Some((kind, material, digest)) = stored else {
+            return Err(grant_already_used_error());
+        };
+        if kind != locator_kind_name(cleanup.locator_kind)
+            || material != cleanup.locator_material
+            || digest.as_slice() != cleanup.locator_sha256.as_bytes()
+        {
+            return Err(grant_already_used_error());
+        }
     }
     Ok(())
 }
@@ -3122,12 +3414,48 @@ fn insert_transition_phase_event(
     )
 }
 
+fn insert_cleanup_ready_events(
+    transaction: &Transaction<'_>,
+    transition: &StoredAccountTransition,
+    receipt_id: AuthorizationReceiptId,
+    occurred_at: i64,
+) -> Result<(), MailError> {
+    let mut statement = transaction
+        .prepare(
+            "SELECT cleanup_id FROM credential_cleanup
+             WHERE transition_id=?1 AND state='ready' ORDER BY cleanup_id",
+        )
+        .map_err(|_| store_read_error())?;
+    let mut rows = statement
+        .query([transition.transition_id.as_bytes()])
+        .map_err(|_| store_read_error())?;
+    while let Some(row) = rows.next().map_err(|_| store_read_error())? {
+        let cleanup_id: Vec<u8> = row.get(0).map_err(|_| store_read_error())?;
+        insert_account_transition_event(
+            transaction,
+            &cleanup_id,
+            7,
+            15,
+            6,
+            6,
+            transition.transition_id.as_bytes(),
+            0x0701,
+            0x0702,
+            transition.transition_sha256,
+            receipt_id,
+            occurred_at,
+        )?;
+    }
+    Ok(())
+}
+
 fn projection_for_state(
     transition: &StoredAccountTransition,
     transition_state: AccountTransitionState,
     account_state: RegisteredAccountState,
     store_state: RegisteredStoreTransitionState,
     config_generation: NonZeroU64,
+    account_generation: NonZeroU64,
 ) -> Result<AccountTransitionProjection, MailError> {
     Ok(AccountTransitionProjection {
         transition_id: transition.transition_id,
@@ -3136,29 +3464,101 @@ fn projection_for_state(
         account_state,
         store_state,
         config_generation,
-        account_generation: NonZeroU64::new(1).expect("one is nonzero"),
+        account_generation,
         prepared_at: utc_millis(transition.prepared_at)?,
     })
 }
 
+fn projection_for_transition_state(
+    connection: &Connection,
+    transition: &StoredAccountTransition,
+    transition_state: AccountTransitionState,
+    account_state: RegisteredAccountState,
+    store_state: RegisteredStoreTransitionState,
+    config_generation: NonZeroU64,
+) -> Result<AccountTransitionProjection, MailError> {
+    projection_for_state(
+        transition,
+        transition_state,
+        account_state,
+        store_state,
+        config_generation,
+        transition_projection_account_generation(connection, transition, transition_state)?,
+    )
+}
+
+fn transition_projection_account_generation(
+    connection: &Connection,
+    transition: &StoredAccountTransition,
+    transition_state: AccountTransitionState,
+) -> Result<NonZeroU64, MailError> {
+    if transition.kind == AccountTransitionKind::AccountUpdate
+        && transition_state == AccountTransitionState::Aborted
+    {
+        let grant = load_grant_use(connection, transition.grant_id)?.ok_or_else(recovery_error)?;
+        let receipt =
+            load_receipt_by_id(connection, grant.receipt_id)?.ok_or_else(recovery_error)?;
+        let challenge = load_challenge(connection, receipt.challenge_id)?;
+        let manifest = ActionManifest::parse(&challenge.manifest).map_err(|_| recovery_error())?;
+        let ManifestPayload::AccountUpdate(mutation) = manifest.payload() else {
+            return Err(recovery_error());
+        };
+        return Ok(mutation
+            .before
+            .as_ref()
+            .ok_or_else(recovery_error)?
+            .generation);
+    }
+    transition_account_generation(connection, transition)
+}
+
+fn transition_account_generation(
+    connection: &Connection,
+    transition: &StoredAccountTransition,
+) -> Result<NonZeroU64, MailError> {
+    let grant = load_grant_use(connection, transition.grant_id)?.ok_or_else(recovery_error)?;
+    let receipt = load_receipt_by_id(connection, grant.receipt_id)?.ok_or_else(recovery_error)?;
+    let challenge = load_challenge(connection, receipt.challenge_id)?;
+    let manifest = ActionManifest::parse(&challenge.manifest).map_err(|_| recovery_error())?;
+    let (
+        (AccountTransitionKind::AccountCreate, ManifestPayload::AccountCreate(mutation))
+        | (AccountTransitionKind::AccountUpdate, ManifestPayload::AccountUpdate(mutation)),
+    ) = ((transition.kind, manifest.payload()),)
+    else {
+        return Err(recovery_error());
+    };
+    Ok(mutation
+        .after
+        .as_ref()
+        .ok_or_else(recovery_error)?
+        .generation)
+}
+
+#[allow(clippy::too_many_lines)]
 fn transition_projection(
     connection: &Connection,
     transition: &StoredAccountTransition,
 ) -> Result<AccountTransitionProjection, MailError> {
     let account =
         load_registered_account(connection, transition.account_id)?.ok_or_else(recovery_error)?;
-    if account.account_id != transition.account_id
-        || account.store_id != transition.store_id
-        || account.account_generation.get() != 1
-    {
+    let account_generation =
+        transition_projection_account_generation(connection, transition, transition.state)?;
+    if account.account_id != transition.account_id || account.store_id != transition.store_id {
         return Err(recovery_error());
     }
     match transition.state {
         AccountTransitionState::Prepared => {
             let store = load_registered_store_by_id(connection, transition.store_id)?
                 .ok_or_else(recovery_error)?;
-            if account.state != RegisteredAccountState::Proposed
+            let expected_account_state = if transition.kind == AccountTransitionKind::AccountCreate
+            {
+                RegisteredAccountState::Proposed
+            } else {
+                RegisteredAccountState::Blocked
+            };
+            if account.state != expected_account_state
                 || account.active_transition_id != Some(transition.transition_id)
+                || account.account_generation != account_generation
                 || store.state != "blocked"
                 || store.config_generation != transition.expected_generation
                 || store.config_sha256 != transition.before_config_sha256
@@ -3168,16 +3568,24 @@ fn transition_projection(
             projection_for_state(
                 transition,
                 transition.state,
-                RegisteredAccountState::Proposed,
+                expected_account_state,
                 RegisteredStoreTransitionState::Blocked,
                 transition.expected_generation,
+                account_generation,
             )
         }
         AccountTransitionState::ConfigCommitted => {
             let store = load_registered_store_by_id(connection, transition.store_id)?
                 .ok_or_else(recovery_error)?;
-            if account.state != RegisteredAccountState::Proposed
+            let expected_account_state = if transition.kind == AccountTransitionKind::AccountCreate
+            {
+                RegisteredAccountState::Proposed
+            } else {
+                RegisteredAccountState::Blocked
+            };
+            if account.state != expected_account_state
                 || account.active_transition_id != Some(transition.transition_id)
+                || account.account_generation != account_generation
                 || store.state != "blocked"
                 || store.config_generation != transition.next_generation
                 || store.config_sha256 != transition.after_config_sha256
@@ -3187,9 +3595,10 @@ fn transition_projection(
             projection_for_state(
                 transition,
                 transition.state,
-                RegisteredAccountState::Proposed,
+                expected_account_state,
                 RegisteredStoreTransitionState::Blocked,
                 transition.next_generation,
+                account_generation,
             )
         }
         AccountTransitionState::Finalized => projection_for_state(
@@ -3198,13 +3607,19 @@ fn transition_projection(
             RegisteredAccountState::Active,
             RegisteredStoreTransitionState::Active,
             transition.next_generation,
+            account_generation,
         ),
         AccountTransitionState::Aborted => projection_for_state(
             transition,
             transition.state,
-            RegisteredAccountState::Removed,
+            if transition.kind == AccountTransitionKind::AccountCreate {
+                RegisteredAccountState::Removed
+            } else {
+                RegisteredAccountState::Active
+            },
             RegisteredStoreTransitionState::Active,
             transition.expected_generation,
+            account_generation,
         ),
         AccountTransitionState::RecoveryRequired => {
             let store = load_registered_store_by_id(connection, transition.store_id)?
@@ -3221,6 +3636,7 @@ fn transition_projection(
                 RegisteredAccountState::Blocked,
                 RegisteredStoreTransitionState::RecoveryRequired,
                 store.config_generation,
+                account_generation,
             )
         }
     }
@@ -3285,14 +3701,20 @@ fn update_finalize_rows(
     at: i64,
     test_hooks: &AuthorityTestHooks,
 ) -> Result<(), MailError> {
+    let account_prior = if transition.kind == AccountTransitionKind::AccountCreate {
+        "proposed"
+    } else {
+        "blocked"
+    };
     let account = transaction
         .execute(
             "UPDATE registered_accounts SET state='active',active_transition_id=NULL,
-             updated_at=?1 WHERE account_id=?2 AND state='proposed'
-             AND active_transition_id=?3",
+             updated_at=?1 WHERE account_id=?2 AND state=?3
+             AND active_transition_id=?4",
             params![
                 at,
                 transition.account_id.as_bytes(),
+                account_prior,
                 transition.transition_id.as_bytes()
             ],
         )
@@ -3329,6 +3751,14 @@ fn update_finalize_rows(
         return Err(recovery_error());
     }
     test_hooks.fault(TestFaultPoint::AccountFinalizeStoreUpdated)?;
+    transaction
+        .execute(
+            "UPDATE credential_cleanup SET state='ready'
+             WHERE transition_id=?1 AND state='provisional'",
+            [transition.transition_id.as_bytes()],
+        )
+        .map_err(|_| store_write_error())?;
+    test_hooks.fault(TestFaultPoint::AccountFinalizeCleanupUpdated)?;
     Ok(())
 }
 
@@ -3338,8 +3768,8 @@ fn update_abort_rows(
     at: i64,
     test_hooks: &AuthorityTestHooks,
 ) -> Result<(), MailError> {
-    let account = transaction
-        .execute(
+    let account = if transition.kind == AccountTransitionKind::AccountCreate {
+        transaction.execute(
             "UPDATE registered_accounts SET state='removed',active_transition_id=NULL,
              updated_at=?1,removed_at=?1 WHERE account_id=?2 AND state='proposed'
              AND active_transition_id=?3",
@@ -3349,7 +3779,46 @@ fn update_abort_rows(
                 transition.transition_id.as_bytes()
             ],
         )
-        .map_err(|_| store_write_error())?;
+    } else {
+        let generation = transition_account_generation(transaction, transition)?
+            .get()
+            .checked_sub(1)
+            .and_then(NonZeroU64::new)
+            .ok_or_else(recovery_error)?;
+        let previous: (Vec<u8>, Vec<u8>, Vec<u8>) = transaction
+            .query_row(
+                "SELECT credential_id,binding_sha256,committed_transition_id
+                 FROM registered_account_versions
+                 WHERE account_id=?1 AND account_generation=?2",
+                params![
+                    transition.account_id.as_bytes(),
+                    i64::try_from(generation.get()).map_err(|_| recovery_error())?,
+                ],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(|_| recovery_error())?;
+        let previous_transition_id: TransitionId =
+            uuid_from_blob_sql(previous.2).map_err(|_| recovery_error())?;
+        let previous_transition = load_account_transition(transaction, previous_transition_id)?
+            .ok_or_else(recovery_error)?;
+        let previous_receipt = transition_receipt_id(transaction, &previous_transition)?;
+        transaction.execute(
+            "UPDATE registered_accounts SET account_generation=?1,credential_id=?2,
+             binding_sha256=?3,state='active',authorized_receipt_id=?4,
+             active_transition_id=NULL,updated_at=?5,removed_at=NULL
+             WHERE account_id=?6 AND state='blocked' AND active_transition_id=?7",
+            params![
+                i64::try_from(generation.get()).map_err(|_| recovery_error())?,
+                previous.0,
+                previous.1,
+                previous_receipt.as_bytes(),
+                at,
+                transition.account_id.as_bytes(),
+                transition.transition_id.as_bytes(),
+            ],
+        )
+    }
+    .map_err(|_| store_write_error())?;
     if account != 1 {
         return Err(recovery_error());
     }
@@ -3385,6 +3854,7 @@ fn update_abort_rows(
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 fn commit_account_recovery(
     transaction: &Transaction<'_>,
     transition: &StoredAccountTransition,
@@ -3404,14 +3874,20 @@ fn commit_account_recovery(
         request.actual_config_generation,
         request.actual_config_sha256,
     );
+    let account_prior = if transition.kind == AccountTransitionKind::AccountCreate {
+        "proposed"
+    } else {
+        "blocked"
+    };
     let account = transaction
         .execute(
             "UPDATE registered_accounts SET state='blocked',updated_at=?1
-             WHERE account_id=?2 AND active_transition_id=?3 AND state='proposed'",
+             WHERE account_id=?2 AND active_transition_id=?3 AND state=?4",
             params![
                 at,
                 transition.account_id.as_bytes(),
-                transition.transition_id.as_bytes()
+                transition.transition_id.as_bytes(),
+                account_prior,
             ],
         )
         .map_err(|_| store_write_error())?;
@@ -3480,7 +3956,8 @@ fn commit_account_recovery(
     test_hooks.fault(TestFaultPoint::AccountRecoveryTransitionEvent)?;
     observe_clock_pair(transaction, at)?;
     test_hooks.fault(TestFaultPoint::AccountRecoveryClockUpdated)?;
-    projection_for_state(
+    projection_for_transition_state(
+        transaction,
         transition,
         AccountTransitionState::RecoveryRequired,
         RegisteredAccountState::Blocked,
@@ -4251,7 +4728,11 @@ fn account_prepare_intent_from_rows(
     let after = value.after.as_ref().ok_or_else(recovery_error)?;
     let action = challenge.action.code().to_be_bytes();
     let target_kind = challenge.target_kind_code.to_be_bytes();
-    let kind = [AccountTransitionKind::AccountCreate.code()];
+    let kind = [match challenge.action {
+        SensitiveAction::AccountCreate => AccountTransitionKind::AccountCreate.code(),
+        SensitiveAction::AccountUpdate => AccountTransitionKind::AccountUpdate.code(),
+        _ => return Err(recovery_error()),
+    }];
     let expected = value.config_cas.generation.get().to_be_bytes();
     let next = value.next_config_generation.get().to_be_bytes();
     let account_generation = after.generation.get().to_be_bytes();
@@ -4468,7 +4949,23 @@ fn registry_parent_preflight(connection: &Connection) -> Result<(), MailError> {
                     typeof(binding_sha256)<>'blob' OR length(binding_sha256)<>32 OR
                     typeof(committed_transition_id)<>'blob' OR
                     length(committed_transition_id)<>16 OR
-                    typeof(created_at)<>'integer' OR created_at<0)",
+                    typeof(created_at)<>'integer' OR created_at<0) +
+                (SELECT COUNT(*) FROM credential_cleanup WHERE
+                    typeof(cleanup_id)<>'blob' OR length(cleanup_id)<>16 OR
+                    (transition_id IS NOT NULL AND
+                     (typeof(transition_id)<>'blob' OR length(transition_id)<>16)) OR
+                    typeof(locator_kind)<>'text' OR
+                    locator_kind NOT IN ('active_v2','legacy_v1') OR
+                    typeof(locator_material)<>'blob' OR
+                    length(locator_material) NOT BETWEEN 1 AND 4096 OR
+                    typeof(locator_sha256)<>'blob' OR length(locator_sha256)<>32 OR
+                    typeof(state)<>'text' OR
+                    state NOT IN ('provisional','ready','claimed','deleted') OR
+                    (claim_grant_id IS NOT NULL AND
+                     (typeof(claim_grant_id)<>'blob' OR length(claim_grant_id)<>16)) OR
+                    typeof(created_at)<>'integer' OR created_at<0 OR
+                    (deleted_at IS NOT NULL AND
+                     (typeof(deleted_at)<>'integer' OR deleted_at<created_at)))",
             [],
             |row| row.get(0),
         )
@@ -5622,7 +6119,6 @@ fn validate_t202a_initial_row_counts(connection: &Connection) -> Result<(), Mail
         .query_row(
             "SELECT
                 (SELECT COUNT(*) FROM challenge_effects) +
-                (SELECT COUNT(*) FROM credential_cleanup) +
                 (SELECT COUNT(*) FROM remote_effects) +
                 (SELECT COUNT(*) FROM effect_claims) +
                 (SELECT COUNT(*) FROM effect_invocations) +
@@ -5862,6 +6358,8 @@ fn validate_registry_history(connection: &Connection) -> Result<(), MailError> {
         account_count,
         transition_count,
         committed_count,
+        create_count,
+        unattached_cleanup_count,
     ) = connection
         .query_row(
             "SELECT
@@ -5874,7 +6372,9 @@ fn validate_registry_history(connection: &Connection) -> Result<(), MailError> {
                 (SELECT COUNT(*) FROM account_transitions),
                 (SELECT COUNT(*) FROM account_transitions
                  WHERE state IN ('config_committed','finalized')
-                    OR (state='recovery_required' AND config_committed_at IS NOT NULL))",
+                    OR (state='recovery_required' AND config_committed_at IS NOT NULL)),
+                (SELECT COUNT(*) FROM account_transitions WHERE kind='account_create'),
+                (SELECT COUNT(*) FROM credential_cleanup WHERE transition_id IS NULL)",
             [],
             |row| {
                 Ok((
@@ -5886,15 +6386,18 @@ fn validate_registry_history(connection: &Connection) -> Result<(), MailError> {
                     row.get::<_, i64>(5)?,
                     row.get::<_, i64>(6)?,
                     row.get::<_, i64>(7)?,
+                    row.get::<_, i64>(8)?,
+                    row.get::<_, i64>(9)?,
                 ))
             },
         )
         .map_err(|_| store_read_error())?;
     if grant_count != store_count + transition_count
         || credential_count != transition_count
-        || account_count != transition_count
+        || account_count != create_count
         || version_count != store_count + committed_count
         || account_version_count != committed_count
+        || unattached_cleanup_count != 0
     {
         return Err(recovery_error());
     }
@@ -5984,7 +6487,10 @@ fn validate_stored_grant(connection: &Connection, grant: &StoredGrantUse) -> Res
     if !matches!(
         (grant.action, grant.target_kind),
         (SensitiveAction::StoreEnroll, TargetKind::Store)
-            | (SensitiveAction::AccountCreate, TargetKind::Account)
+            | (
+                SensitiveAction::AccountCreate | SensitiveAction::AccountUpdate,
+                TargetKind::Account
+            )
     ) || !valid_target_shape(grant.target_kind, &grant.target_id)
         || grant.use_receipt != grant_use_transcript_from_row(grant)
         || grant.use_sha256 != Sha256Digest::digest(&grant.use_receipt)
@@ -6005,7 +6511,10 @@ fn validate_stored_grant(connection: &Connection, grant: &StoredGrantUse) -> Res
     {
         return Err(recovery_error());
     }
-    if grant.action == SensitiveAction::AccountCreate {
+    if matches!(
+        grant.action,
+        SensitiveAction::AccountCreate | SensitiveAction::AccountUpdate
+    ) {
         let transition = load_account_transition_by_grant(connection, grant.grant_id)?
             .ok_or_else(recovery_error)?;
         return validate_stored_account_transition(connection, &transition);
@@ -6174,9 +6683,11 @@ fn validate_stored_account_transition(
     transition: &StoredAccountTransition,
 ) -> Result<(), MailError> {
     utc_millis(transition.prepared_at)?;
-    if transition.kind != AccountTransitionKind::AccountCreate
-        || transition.expected_generation.get().checked_add(1)
-            != Some(transition.next_generation.get())
+    if !matches!(
+        transition.kind,
+        AccountTransitionKind::AccountCreate | AccountTransitionKind::AccountUpdate
+    ) || transition.expected_generation.get().checked_add(1)
+        != Some(transition.next_generation.get())
         || transition.before_config_sha256 == transition.after_config_sha256
         || transition.transition_sha256 != transition_digest_from_row(transition)
     {
@@ -6214,23 +6725,25 @@ fn validate_stored_account_transition(
     let receipt = load_receipt_by_id(connection, grant.receipt_id)?.ok_or_else(recovery_error)?;
     let challenge = load_challenge(connection, receipt.challenge_id)?;
     let manifest = ActionManifest::parse(&challenge.manifest).map_err(|_| recovery_error())?;
-    let ManifestPayload::AccountCreate(value) = manifest.payload() else {
-        return Err(recovery_error());
+    let (value, expected_action) = match (transition.kind, manifest.payload()) {
+        (AccountTransitionKind::AccountCreate, ManifestPayload::AccountCreate(value)) => {
+            (value, SensitiveAction::AccountCreate)
+        }
+        (AccountTransitionKind::AccountUpdate, ManifestPayload::AccountUpdate(value)) => {
+            (value, SensitiveAction::AccountUpdate)
+        }
+        _ => return Err(recovery_error()),
     };
     let after = value.after.as_ref().ok_or_else(recovery_error)?;
     let account =
         load_registered_account(connection, transition.account_id)?.ok_or_else(recovery_error)?;
-    if grant.action != SensitiveAction::AccountCreate
+    if grant.action != expected_action
         || grant.target_kind != TargetKind::Account
         || grant.target_id.as_slice() != transition.account_id.as_bytes()
         || value.transition_id != transition.transition_id
         || value.config_cas.store_id != transition.store_id
         || after.account_id != transition.account_id
-        || after.credential_id != account.credential_id
         || display_id_digest(&after.display_id) != account.display_id_sha256
-        || after.binding_sha256 != account.binding_sha256
-        || account.authorized_receipt_id != receipt.receipt_id
-        || account.created_at != transition.prepared_at
         || value.config_cas.generation != transition.expected_generation
         || value.config_cas.exact_content_sha256 != transition.before_config_sha256
         || value.next_config_generation != transition.next_generation
@@ -6238,42 +6751,46 @@ fn validate_stored_account_transition(
     {
         return Err(recovery_error());
     }
-    let account_timestamps = match transition.state {
-        AccountTransitionState::Prepared | AccountTransitionState::ConfigCommitted => {
-            account.state == RegisteredAccountState::Proposed
-                && account.active_transition_id == Some(transition.transition_id)
-                && account.updated_at == account.created_at
-                && account.removed_at.is_none()
-        }
-        AccountTransitionState::Finalized => {
-            account.state == RegisteredAccountState::Active
-                && account.active_transition_id.is_none()
-                && account.updated_at == transition.finalized_at.ok_or_else(recovery_error)?
-                && account.removed_at.is_none()
-        }
-        AccountTransitionState::Aborted => {
-            let resolved = transition.resolved_at.ok_or_else(recovery_error)?;
-            account.state == RegisteredAccountState::Removed
-                && account.active_transition_id.is_none()
-                && account.updated_at == resolved
-                && account.removed_at == Some(resolved)
-        }
-        AccountTransitionState::RecoveryRequired => {
-            account.state == RegisteredAccountState::Blocked
-                && account.active_transition_id == Some(transition.transition_id)
-                && account.updated_at == transition.resolved_at.ok_or_else(recovery_error)?
-                && account.removed_at.is_none()
-        }
-    };
-    if !account_timestamps {
+    let successors: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM account_transitions
+             WHERE account_id=?1 AND transition_id<>?2 AND expected_generation>=?3",
+            params![
+                transition.account_id.as_bytes(),
+                transition.transition_id.as_bytes(),
+                i64::try_from(transition.next_generation.get()).map_err(|_| recovery_error())?,
+            ],
+            |row| row.get(0),
+        )
+        .map_err(|_| store_read_error())?;
+    if successors != 0
+        && !matches!(
+            transition.state,
+            AccountTransitionState::Finalized | AccountTransitionState::Aborted
+        )
+    {
         return Err(recovery_error());
+    }
+    if transition.kind == AccountTransitionKind::AccountCreate
+        && account.created_at != transition.prepared_at
+    {
+        return Err(recovery_error());
+    }
+    if successors == 0 {
+        validate_current_account_for_transition(
+            connection,
+            &account,
+            transition,
+            value,
+            receipt.receipt_id,
+        )?;
     }
     record_validation_query(ValidationQueryKind::BoundedKeyed);
     let credential: Option<(Vec<u8>, Vec<u8>, Vec<u8>, i64)> = connection
         .query_row(
             "SELECT account_id,store_id,created_transition_id,created_at
              FROM registered_credentials WHERE credential_id=?1",
-            [account.credential_id.as_bytes()],
+            [after.credential_id.as_bytes()],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .optional()
@@ -6332,19 +6849,256 @@ fn validate_stored_account_transition(
             .map_err(|_| store_read_error())?;
         let (version_account, version_store, generation, version_credential, binding, created_at) =
             version.ok_or_else(recovery_error)?;
-        if version_account.as_slice() != account.account_id.as_bytes()
-            || version_store.as_slice() != account.store_id.as_bytes()
-            || generation
-                != i64::try_from(account.account_generation.get()).map_err(|_| recovery_error())?
-            || version_credential.as_slice() != account.credential_id.as_bytes()
-            || binding.as_slice() != account.binding_sha256.as_bytes()
+        if version_account.as_slice() != transition.account_id.as_bytes()
+            || version_store.as_slice() != transition.store_id.as_bytes()
+            || generation != i64::try_from(after.generation.get()).map_err(|_| recovery_error())?
+            || version_credential.as_slice() != after.credential_id.as_bytes()
+            || binding.as_slice() != after.binding_sha256.as_bytes()
             || created_at != committed_at
         {
             return Err(recovery_error());
         }
     }
+    if transition.kind == AccountTransitionKind::AccountUpdate {
+        validate_account_update_parent(connection, transition, value)?;
+    }
+    validate_transition_cleanup(connection, transition, value)?;
     transition_projection(connection, transition)?;
     validate_transition_events(connection, transition, receipt.receipt_id)
+}
+
+fn validate_current_account_for_transition(
+    connection: &Connection,
+    account: &StoredRegisteredAccount,
+    transition: &StoredAccountTransition,
+    mutation: &AccountMutationManifest,
+    receipt_id: AuthorizationReceiptId,
+) -> Result<(), MailError> {
+    let after = mutation.after.as_ref().ok_or_else(recovery_error)?;
+    let current = if transition.kind == AccountTransitionKind::AccountUpdate
+        && transition.state == AccountTransitionState::Aborted
+    {
+        mutation.before.as_ref().ok_or_else(recovery_error)?
+    } else {
+        after
+    };
+    let expected_receipt = if transition.kind == AccountTransitionKind::AccountUpdate
+        && transition.state == AccountTransitionState::Aborted
+    {
+        let parent: Vec<u8> = connection
+            .query_row(
+                "SELECT committed_transition_id FROM registered_account_versions
+                 WHERE account_id=?1 AND account_generation=?2",
+                params![
+                    transition.account_id.as_bytes(),
+                    i64::try_from(current.generation.get()).map_err(|_| recovery_error())?,
+                ],
+                |row| row.get(0),
+            )
+            .map_err(|_| store_read_error())?;
+        let parent_id: TransitionId = uuid_from_blob_sql(parent).map_err(|_| recovery_error())?;
+        let parent = load_account_transition(connection, parent_id)?.ok_or_else(recovery_error)?;
+        transition_receipt_id(connection, &parent)?
+    } else {
+        receipt_id
+    };
+    if account.account_generation != current.generation
+        || account.credential_id != current.credential_id
+        || account.binding_sha256 != current.binding_sha256
+        || account.authorized_receipt_id != expected_receipt
+    {
+        return Err(recovery_error());
+    }
+    let valid_state = match (transition.kind, transition.state) {
+        (
+            AccountTransitionKind::AccountCreate,
+            AccountTransitionState::Prepared | AccountTransitionState::ConfigCommitted,
+        ) => {
+            account.state == RegisteredAccountState::Proposed
+                && account.active_transition_id == Some(transition.transition_id)
+                && account.updated_at == transition.prepared_at
+                && account.removed_at.is_none()
+        }
+        (
+            AccountTransitionKind::AccountUpdate,
+            AccountTransitionState::Prepared | AccountTransitionState::ConfigCommitted,
+        ) => {
+            account.state == RegisteredAccountState::Blocked
+                && account.active_transition_id == Some(transition.transition_id)
+                && account.updated_at == transition.prepared_at
+                && account.removed_at.is_none()
+        }
+        (_, AccountTransitionState::Finalized) => {
+            account.state == RegisteredAccountState::Active
+                && account.active_transition_id.is_none()
+                && account.updated_at == transition.finalized_at.ok_or_else(recovery_error)?
+                && account.removed_at.is_none()
+        }
+        (AccountTransitionKind::AccountCreate, AccountTransitionState::Aborted) => {
+            let resolved = transition.resolved_at.ok_or_else(recovery_error)?;
+            account.state == RegisteredAccountState::Removed
+                && account.active_transition_id.is_none()
+                && account.updated_at == resolved
+                && account.removed_at == Some(resolved)
+        }
+        (AccountTransitionKind::AccountUpdate, AccountTransitionState::Aborted) => {
+            account.state == RegisteredAccountState::Active
+                && account.active_transition_id.is_none()
+                && account.updated_at == transition.resolved_at.ok_or_else(recovery_error)?
+                && account.removed_at.is_none()
+        }
+        (_, AccountTransitionState::RecoveryRequired) => {
+            account.state == RegisteredAccountState::Blocked
+                && account.active_transition_id == Some(transition.transition_id)
+                && account.updated_at == transition.resolved_at.ok_or_else(recovery_error)?
+                && account.removed_at.is_none()
+        }
+        _ => false,
+    };
+    if !valid_state {
+        return Err(recovery_error());
+    }
+    Ok(())
+}
+
+fn validate_account_update_parent(
+    connection: &Connection,
+    transition: &StoredAccountTransition,
+    mutation: &AccountMutationManifest,
+) -> Result<(), MailError> {
+    let before = mutation.before.as_ref().ok_or_else(recovery_error)?;
+    record_validation_query(ValidationQueryKind::BoundedKeyed);
+    let parent: Option<(Vec<u8>, Vec<u8>, Vec<u8>)> = connection
+        .query_row(
+            "SELECT credential_id,binding_sha256,committed_transition_id
+             FROM registered_account_versions
+             WHERE account_id=?1 AND store_id=?2 AND account_generation=?3",
+            params![
+                transition.account_id.as_bytes(),
+                transition.store_id.as_bytes(),
+                i64::try_from(before.generation.get()).map_err(|_| recovery_error())?,
+            ],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()
+        .map_err(|_| store_read_error())?;
+    let (credential, binding, parent_transition) = parent.ok_or_else(recovery_error)?;
+    if credential.as_slice() != before.credential_id.as_bytes()
+        || binding.as_slice() != before.binding_sha256.as_bytes()
+    {
+        return Err(recovery_error());
+    }
+    let parent_transition_id: TransitionId =
+        uuid_from_blob_sql(parent_transition).map_err(|_| recovery_error())?;
+    let parent_transition =
+        load_account_transition(connection, parent_transition_id)?.ok_or_else(recovery_error)?;
+    if parent_transition.state != AccountTransitionState::Finalized
+        || parent_transition.account_id != transition.account_id
+    {
+        return Err(recovery_error());
+    }
+    record_validation_query(ValidationQueryKind::BoundedKeyed);
+    let store_version: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM registered_store_versions
+             WHERE store_id=?1 AND config_generation=?2 AND config_sha256=?3",
+            params![
+                transition.store_id.as_bytes(),
+                i64::try_from(transition.expected_generation.get()).map_err(|_| recovery_error())?,
+                transition.before_config_sha256.as_bytes(),
+            ],
+            |row| row.get(0),
+        )
+        .map_err(|_| store_read_error())?;
+    if store_version != 1 {
+        return Err(recovery_error());
+    }
+    Ok(())
+}
+
+#[allow(clippy::type_complexity)]
+fn validate_transition_cleanup(
+    connection: &Connection,
+    transition: &StoredAccountTransition,
+    mutation: &AccountMutationManifest,
+) -> Result<(), MailError> {
+    record_validation_query(ValidationQueryKind::BoundedKeyed);
+    let count: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM credential_cleanup WHERE transition_id=?1",
+            [transition.transition_id.as_bytes()],
+            |row| row.get(0),
+        )
+        .map_err(|_| store_read_error())?;
+    if usize::try_from(count).ok() != Some(mutation.cleanup.len()) {
+        return Err(recovery_error());
+    }
+    let expected_state = if transition.state == AccountTransitionState::Finalized {
+        "ready"
+    } else {
+        "provisional"
+    };
+    for descriptor in &mutation.cleanup {
+        record_validation_query(ValidationQueryKind::BoundedKeyed);
+        let row: Option<(
+            String,
+            Vec<u8>,
+            Vec<u8>,
+            String,
+            Option<Vec<u8>>,
+            Option<i64>,
+            i64,
+        )> = connection
+            .query_row(
+                "SELECT locator_kind,locator_material,locator_sha256,state,
+                            claim_grant_id,deleted_at,created_at
+                     FROM credential_cleanup WHERE cleanup_id=?1 AND transition_id=?2",
+                params![
+                    descriptor.cleanup_id.as_bytes(),
+                    transition.transition_id.as_bytes(),
+                ],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|_| store_read_error())?;
+        let (kind, material, digest, state, claim, deleted, created_at) =
+            row.ok_or_else(recovery_error)?;
+        if descriptor.expected_state != CleanupState::Provisional
+            || kind != locator_kind_name(descriptor.locator_kind)
+            || digest.as_slice() != descriptor.locator_sha256.as_bytes()
+            || Sha256Digest::digest(&material) != descriptor.locator_sha256
+            || state != expected_state
+            || claim.is_some()
+            || deleted.is_some()
+            || created_at != transition.prepared_at
+        {
+            return Err(recovery_error());
+        }
+        record_validation_query(ValidationQueryKind::BoundedKeyed);
+        let ready_events: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM authority_events
+                 WHERE entity_kind=7 AND entity_id=?1 AND event_code=15",
+                [descriptor.cleanup_id.as_bytes()],
+                |row| row.get(0),
+            )
+            .map_err(|_| store_read_error())?;
+        let expected_events = i64::from(transition.state == AccountTransitionState::Finalized);
+        if ready_events != expected_events {
+            return Err(recovery_error());
+        }
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_lines)]
@@ -6811,7 +7565,7 @@ fn validate_events(
             )?,
             sequence if sequence > expected_prefix => match row.entity_kind {
                 8 => validate_challenge_event(connection, &row, last_observed_at)?,
-                4 | 6 | 10 => validate_registry_event_row(connection, &row)?,
+                4 | 6 | 7 | 10 => validate_registry_event_row(connection, &row)?,
                 _ => return Err(recovery_error()),
             },
             _ => return Err(recovery_error()),
@@ -6936,7 +7690,8 @@ fn validate_challenge_event(
                             store_enrollment_context(&manifest).map_err(|_| recovery_error())?;
                         enrollment_intent_from_rows(&challenge, receipt, enrollment)
                     }
-                    ManifestPayload::AccountCreate(value) => {
+                    ManifestPayload::AccountCreate(value)
+                    | ManifestPayload::AccountUpdate(value) => {
                         account_prepare_intent_from_rows(&challenge, receipt, value)?
                     }
                     _ => return Err(recovery_error()),
@@ -6992,6 +7747,47 @@ fn validate_registry_event_row(
     row: &StoredAuthorityEvent,
 ) -> Result<(), MailError> {
     match (row.entity_kind, row.event_code, row.entity_id.len()) {
+        (7, 15, 16) => {
+            let cleanup_id: CleanupId =
+                uuid_from_blob_sql(row.entity_id.clone()).map_err(|_| recovery_error())?;
+            let cleanup: Option<(Vec<u8>, String)> = connection
+                .query_row(
+                    "SELECT transition_id,state FROM credential_cleanup WHERE cleanup_id=?1",
+                    [cleanup_id.as_bytes()],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()
+                .map_err(|_| store_read_error())?;
+            let (transition_id, state) = cleanup.ok_or_else(recovery_error)?;
+            let transition_id: TransitionId =
+                uuid_from_blob_sql(transition_id).map_err(|_| recovery_error())?;
+            let transition =
+                load_account_transition(connection, transition_id)?.ok_or_else(recovery_error)?;
+            let receipt_id = transition_receipt_id(connection, &transition)?;
+            let occurred_at = transition.finalized_at.ok_or_else(recovery_error)?;
+            let expected = authority_event_detail(
+                15,
+                7,
+                cleanup_id.as_bytes(),
+                6,
+                6,
+                transition.transition_id.as_bytes(),
+                0x0701,
+                0x0702,
+                transition.transition_sha256,
+                Some(receipt_id),
+                occurred_at,
+            );
+            if state != "ready"
+                || transition.state != AccountTransitionState::Finalized
+                || row.source != 6
+                || row.occurred_at != occurred_at
+                || row.detail != expected
+                || row.detail_sha256.as_slice() != Sha256::digest(&expected).as_slice()
+            {
+                return Err(recovery_error());
+            }
+        }
         (6, 10..=14, 16) => {
             let transition_id: TransitionId =
                 uuid_from_blob_sql(row.entity_id.clone()).map_err(|_| recovery_error())?;
