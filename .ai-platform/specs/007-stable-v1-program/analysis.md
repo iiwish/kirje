@@ -143,13 +143,13 @@ manifest. GREEN covers all four actions, pending reuse, intrinsic-shape
 negatives, stale account state, busy store state, zero effects, restart, and
 unchanged schema/dependency bytes. No Critical or High finding remains.
 
-`T202C3-A002` is the active bounded attempt. Packet review found one intentional
-create-only API gap: the authority schema stores private cleanup locator
-material, while the T202C2 prepare request has no field for it. The attempt may
-add a non-printable, bounded store-layer cleanup reservation whose digest must
-match the signed descriptor. This is required for the canonical account-update
-tombstone and does not expose cleanup claim/delete, keyring, runtime, config,
-protocol, CLI, MCP, or network capability. No blocking planning finding remains.
+`T202C3-A002` completed test-first implementation and three-pass review at
+production commit `2c00f32`. Account update supports exact prepare, config
+commit, finalize, abort, unsafe recovery, retry, expiry, restart, immutable
+versions, replacement credential reservation, and private provisional-to-ready
+cleanup. Review reproduced and fixed an expired-update restart defect. No
+unresolved Critical, High, or Medium finding remains. Account remove is the
+next bounded attempt after explicit A002 acceptance.
 
 ## Current Implementation Evidence Check
 
