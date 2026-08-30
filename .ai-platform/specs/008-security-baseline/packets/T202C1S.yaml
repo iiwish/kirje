@@ -4,7 +4,7 @@ task_id: T202C1S
 feature_id: 008-security-baseline
 mode: execute_one_task
 adapter: codex_worker
-status: ready_for_delegated_execution
+status: accepted
 
 governance_inputs:
   constitution: .ai-platform/memory/constitution.md
@@ -115,6 +115,12 @@ governance_amendment:
       - deferred account/transition/credential cycle commits and current tuples no longer parent historical effects
       - store-version and keyed parent plans use PK/UNIQUE autoindexes without USE TEMP B-TREE
       - target digest, trailing bytes, YAML, artifact validator, diff check, and implementation baselines match
+  implementation_result:
+    production_commit: 8eceaff
+    review_token: T202C1S_A001_CODE_REVIEW_PASS
+    findings: 0 Critical, 0 High, 0 Medium, 1 accepted Low
+    evidence: .ai-platform/evidence/T202C1S/summary.md
+    residual_watch: registry_parent_preflight is called once but has no dedicated test-support query counter
 
 stage_boundary:
   supported_behavior_delta:

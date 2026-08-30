@@ -549,11 +549,12 @@ Evidence required:
 
 ### T202C1S: Immutable Registry Version Schema Correction
 
-Status: Ready
+Status: Accepted
 Priority: P0
 Story / Requirement: US-001, US-003; FR-003-FR-006, FR-016, FR-018;
 NFR-001-NFR-003, NFR-006, NFR-007
 Depends on: T202C1 Accepted at production commit `aa53efb`
+Accepted at: production commit `8eceaff`; evidence in `.ai-platform/evidence/T202C1S/`
 Blocks: T202C2; T202C umbrella acceptance; T202D
 Parallel: No
 Conflicts with: T202C2-T202E and every authority schema, store enrollment,

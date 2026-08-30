@@ -3,7 +3,7 @@
 ## Metadata
 
 - Feature ID: `008-security-baseline`
-- Status: T202C1S_Ready_For_Delegated_Execution
+- Status: T202C1S_Accepted_T202C2_Packet_Amendment_Required
 - Updated: 2026-08-30
 - Inputs: `spec.md`, `checklists/requirements.md`, `plan.md`, `research.md`,
   `data-model.md`, `contracts/**`, `tasks.md`, project constitution and AGENTS
@@ -36,21 +36,24 @@
   schema target/hash gates are present at task and packet level. T202C2 retry,
   synthetic-signature-fixture wording, and restart-order findings remain packet
   amendment items after T202C1S acceptance and cannot be waived by this task.
-- Low findings: 3 accepted watch items: future policy/assurance snapshot schemas
+- Low findings: 4 accepted watch items: future policy/assurance snapshot schemas
   remain executable fail-closed unsupported; the generic artifact validator
   cannot select letter-suffixed child IDs independently. The generated unified-diff
 evidence is excluded from whitespace lint because its context lines use the
 standard single-space patch marker. The T202C1 test-only token scanner may
 false-positive on a future raw string containing code-like text; current
 production source has no raw string and independent source review confirms no
-prohibited trait implementation.
+prohibited trait implementation. The T202C1S registry-parent preflight is
+currently called once but has no dedicated test-support query counter; T202C2
+must preserve that placement or add an explicit counter before loop expansion.
 - Execution decision: T201 and T202A are Accepted. T202 remains a Draft
   acceptance umbrella split into strict serial T202A-T202E. T202B is Accepted
   at production commit `43f0788`; T202C is a Draft acceptance umbrella split
   into strict serial T202C1, T202C1S, and T202C2-T202C4. T202C1 is Accepted at
-  production commit `aa53efb`; T202C1S is Ready after
-  `T202C1S_A002_PACKET_REVIEW_PASS`. T202C2-T202C4, T202D-T202E, and T203-T212
-  remain Draft, so T202C1S is the sole production task that may execute. T204 and every
+  production commit `aa53efb`; T202C1S is Accepted at production commit
+  `8eceaff` after `T202C1S_A001_CODE_REVIEW_PASS`. T202C2-T202C4, T202D-T202E,
+  and T203-T212 remain Draft; T202C2 may execute only after its blocked packet
+  is amended and independently passes review. T204 and every
   later task directly require the T202 umbrella to be Accepted.
 
 The product requirements remain confirmed and do not add a remote mailbox
@@ -478,8 +481,8 @@ T202C2 owns account-create issuance and transitions; T202C3 owns remaining accou
 credential, and delete-only cleanup lifecycles; T202C4 owns six remote challenge
 effects and aggregate T202C validation. These tasks are strict serial because
 they share the authority transaction, validator, event stream, and fixture
-surface. T202C1S and T202C2-T202C4 plus T202D-T202E remain dependency-gated
-Draft tasks, and T202 remains a Draft acceptance umbrella.
+surface. T202C1S is Accepted. T202C2-T202C4 plus T202D-T202E remain
+dependency-gated Draft tasks, and T202 remains a Draft acceptance umbrella.
 
 The first T202C2 packet review issued no pass. Its blocking High finding is the
 mutable-parent remote-effect relationship assigned to T202C1S. The T202C2
@@ -518,7 +521,7 @@ permission to merge child evidence or relax the strict serial gates.
 
 ## Execution Gate
 
-`APPROVED_FOR_T202C1S_DELEGATED_EXECUTION`
+`T202C1S_ACCEPTED_T202C2_PACKET_AMENDMENT_REQUIRED`
 
 T202A is accepted from four test-first attempts, independent security and QA
 review, its bootstrap-schema digest, and fresh packet/workspace gates. A003
@@ -544,6 +547,9 @@ generation rules, T202C2 ownership of successor retry, and target digest
 Independent A002 re-review verified every prior finding fixed, reproduced the
 exact FK/cycle/current-evolution/query-plan properties, reported zero Critical,
 High, Medium, or Low, and issued `T202C1S_A002_PACKET_REVIEW_PASS`. T202C1S is
-Ready for one delegated test-first attempt. T202C2 remains blocked
-until T202C1S acceptance and a fresh amended packet review. The T202C and T202
-umbrellas remain non-Accepted.
+Accepted at production commit `8eceaff` after one delegated test-first attempt,
+fresh package/workspace gates, and independent
+`T202C1S_A001_CODE_REVIEW_PASS` with zero Critical, High, or Medium finding.
+The accepted Low watch item records that the one-time registry-parent preflight
+lacks a dedicated test counter. T202C2 remains blocked until a fresh amended
+packet review passes. The T202C and T202 umbrellas remain non-Accepted.

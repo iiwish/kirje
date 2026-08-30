@@ -592,9 +592,9 @@ Confirmed on 2026-08-28 under the user's delegated project-owner authority.
 T202 is a serial umbrella. T202A and T202B are Accepted. T202C is a Draft
 acceptance umbrella split into strict serial T202C1, T202C1S, and T202C2-T202C4. T202C1 is Accepted
 at production commit `aa53efb` after `T202C1_A003_CODE_REVIEW_PASS` and fresh
-packet/workspace gates. T202C1S is Ready after
-`T202C1S_A002_PACKET_REVIEW_PASS`; it is the required pre-release schema
-correction. T202C2 is blocked until it is Accepted. T202C3-T202C4 and
+packet/workspace gates. T202C1S is Accepted at production commit `8eceaff`
+after `T202C1S_A001_CODE_REVIEW_PASS` and fresh packet/workspace gates. T202C2
+requires an amended independent packet review before execution. T202C3-T202C4 and
 T202D-E remain Draft until their predecessor is Accepted. T204 and every
 later production task additionally require the T202 umbrella to be Accepted.
 Execution still requires one self-contained packet per ready task, verified RED
