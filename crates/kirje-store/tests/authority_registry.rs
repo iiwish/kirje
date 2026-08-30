@@ -11,11 +11,11 @@ use kirje_core::{
     AccountBinding, AccountId, AccountSnapshot, AccountStateReason, ActionManifest,
     AuthorizationGrantId, AuthorizationProof, AuthorizationReceiptProjection,
     AuthorizationReceiptState, BindingState, CleanupDescriptor, CleanupId, CleanupState, ConfigCas,
-    CredentialId, CredentialKind, CredentialMutationManifest, Endpoint, EndpointSnapshot, HostKind,
-    LocatorKind, MailAccountConfig, MailError, MailErrorCode, ManifestContext, ManifestPayload,
-    ManifestTarget, OwnerPublicKey, PlatformLocationMaterial, Protocol, SensitiveAction,
-    Sha256Digest, StoreEnrollManifest, StoreEnrollmentState, StoreId, StoredCredentialState,
-    TargetKind, TransitionId, TransportSecurity,
+    CredentialCleanupManifest, CredentialId, CredentialKind, CredentialMutationManifest, Endpoint,
+    EndpointSnapshot, HostKind, LocatorKind, MailAccountConfig, MailError, MailErrorCode,
+    ManifestContext, ManifestPayload, ManifestTarget, OwnerPublicKey, PlatformLocationMaterial,
+    Protocol, SensitiveAction, Sha256Digest, StoreEnrollManifest, StoreEnrollmentState, StoreId,
+    StoredCredentialState, TargetKind, TransitionId, TransportSecurity,
 };
 use kirje_store::{
     AccountTransitionKind, AccountTransitionObservationRequest, AccountTransitionProjection,
@@ -464,6 +464,152 @@ where
     T::from_str(&synthetic_uuid(index, namespace)).unwrap()
 }
 
+fn test_realm_bytes() -> [u8; 32] {
+    core::array::from_fn(|index| u8::try_from(index).unwrap())
+}
+
+fn active_v2_locator_material(
+    store_id: StoreId,
+    account_id: AccountId,
+    credential_id: CredentialId,
+    binding_sha256: Sha256Digest,
+) -> Vec<u8> {
+    let mut digest_input = b"KIRJE-CREDENTIAL-LOCATOR-V2\0".to_vec();
+    digest_input.extend_from_slice(&test_realm_bytes());
+    digest_input.extend_from_slice(store_id.as_bytes());
+    digest_input.extend_from_slice(account_id.as_bytes());
+    digest_input.extend_from_slice(credential_id.as_bytes());
+    digest_input.extend_from_slice(binding_sha256.as_bytes());
+    let username = format!("v2:{:x}", Sha256::digest(&digest_input));
+    encode(
+        b"KIRJE-DELETE-ONLY-LOCATOR-V1\0",
+        &[&[1], b"dev.kirje.mail.credentials.v2", username.as_bytes()],
+    )
+}
+
+fn cleanup_tombstone_bytes(
+    fixture: &ReadyFixture,
+    origin: &ActionManifest,
+    created_at: i64,
+) -> Vec<u8> {
+    let (ManifestPayload::AccountUpdate(mutation) | ManifestPayload::AccountRemove(mutation)) =
+        origin.payload()
+    else {
+        unreachable!();
+    };
+    let before = mutation.before.as_ref().unwrap();
+    let cleanup = &mutation.cleanup[0];
+    let transition_sha256: Vec<u8> = Connection::open(fixture.home.database_path())
+        .unwrap()
+        .query_row(
+            "SELECT transition_sha256 FROM account_transitions WHERE transition_id=?1",
+            [mutation.transition_id.as_bytes()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let generation = before.generation.get().to_be_bytes();
+    let created_at = created_at.to_be_bytes();
+    encode(
+        b"KIRJE-CREDENTIAL-CLEANUP-TOMBSTONE-V1\0",
+        &[
+            &test_realm_bytes(),
+            cleanup.cleanup_id.as_bytes(),
+            mutation.transition_id.as_bytes(),
+            &transition_sha256,
+            origin.sha256().as_bytes(),
+            mutation.config_cas.store_id.as_bytes(),
+            before.account_id.as_bytes(),
+            &generation,
+            before.credential_id.as_bytes(),
+            before.binding_sha256.as_bytes(),
+            &[1],
+            cleanup.locator_sha256.as_bytes(),
+            &created_at,
+            &[1],
+        ],
+    )
+}
+
+fn credential_cleanup_manifest(fixture: &ReadyFixture) -> ActionManifest {
+    let origin = account_control_manifest(SensitiveAction::AccountUpdate, 60);
+    credential_cleanup_manifest_for_origin(fixture, &origin, 503_200, None)
+}
+
+fn credential_cleanup_manifest_for_origin(
+    fixture: &ReadyFixture,
+    origin: &ActionManifest,
+    created_at: i64,
+    tombstone_override: Option<Sha256Digest>,
+) -> ActionManifest {
+    let ManifestPayload::AccountUpdate(mutation) = origin.payload() else {
+        let ManifestPayload::AccountRemove(mutation) = origin.payload() else {
+            unreachable!();
+        };
+        return credential_cleanup_manifest_for_mutation(
+            fixture,
+            origin,
+            mutation,
+            created_at,
+            tombstone_override,
+        );
+    };
+    credential_cleanup_manifest_for_mutation(
+        fixture,
+        origin,
+        mutation,
+        created_at,
+        tombstone_override,
+    )
+}
+
+fn credential_cleanup_manifest_for_mutation(
+    fixture: &ReadyFixture,
+    origin: &ActionManifest,
+    mutation: &kirje_core::AccountMutationManifest,
+    created_at: i64,
+    tombstone_override: Option<Sha256Digest>,
+) -> ActionManifest {
+    let before = mutation.before.as_ref().unwrap();
+    let cleanup = &mutation.cleanup[0];
+    ActionManifest::new(
+        ManifestContext {
+            target: ManifestTarget::Cleanup(cleanup.cleanup_id),
+            store_id: Some(mutation.config_cas.store_id),
+            account_id: Some(before.account_id),
+            account_binding_sha256: Some(before.binding_sha256),
+            policy_sha256: None,
+            effect_id: None,
+        },
+        ManifestPayload::CredentialCleanup(CredentialCleanupManifest {
+            cleanup_id: cleanup.cleanup_id,
+            locator_kind: cleanup.locator_kind,
+            locator_sha256: cleanup.locator_sha256,
+            tombstone_sha256: tombstone_override.unwrap_or_else(|| {
+                Sha256Digest::digest(&cleanup_tombstone_bytes(fixture, origin, created_at))
+            }),
+            transition_id: Some(mutation.transition_id),
+            expected_state: CleanupState::Ready,
+        }),
+    )
+    .unwrap()
+}
+
+fn mutate_transcript_field(mut transcript: Vec<u8>, field_index: usize) -> Vec<u8> {
+    let domain_len = transcript.iter().position(|byte| *byte == 0).unwrap() + 1;
+    let mut cursor = domain_len + 2;
+    for index in 0..14 {
+        cursor += 2;
+        let length = u32::from_be_bytes(transcript[cursor..cursor + 4].try_into().unwrap());
+        cursor += 4;
+        if index == field_index {
+            transcript[cursor] ^= 0x80;
+            return transcript;
+        }
+        cursor += usize::try_from(length).unwrap();
+    }
+    unreachable!()
+}
+
 fn account_control_manifest(action: SensitiveAction, index: usize) -> ActionManifest {
     account_control_manifest_with_generation(action, index, 1)
 }
@@ -512,7 +658,12 @@ fn prepare_account_update_request(
 ) -> PrepareAccountTransitionRequest {
     prepare_account_update_request_with_material(
         authorized,
-        b"synthetic-old-active-locator".to_vec(),
+        active_v2_locator_material(
+            store_id(0),
+            account_id(),
+            credential_id(),
+            account_binding().sha256(),
+        ),
         observed_at_unix_ms,
     )
 }
@@ -654,7 +805,18 @@ fn prepare_account_remove_request(
 ) -> PrepareAccountTransitionRequest {
     prepare_account_remove_request_with_material(
         authorized,
-        b"synthetic-current-active-locator".to_vec(),
+        {
+            let ManifestPayload::AccountRemove(mutation) = authorized.manifest.payload() else {
+                unreachable!();
+            };
+            let before = mutation.before.as_ref().unwrap();
+            active_v2_locator_material(
+                mutation.config_cas.store_id,
+                before.account_id,
+                before.credential_id,
+                before.binding_sha256,
+            )
+        },
         observed_at_unix_ms,
     )
 }
@@ -748,6 +910,12 @@ fn account_remove_after_update_manifest() -> ActionManifest {
     };
     let before = update.after.as_ref().unwrap().clone();
     let cleanup_id = t202c3_uuid::<CleanupId>(0x5400_0000, 71);
+    let locator_sha256 = Sha256Digest::digest(&active_v2_locator_material(
+        store_id(0),
+        account_id(),
+        before.credential_id,
+        before.binding_sha256,
+    ));
     ActionManifest::new(
         ManifestContext {
             target: ManifestTarget::Account(account_id()),
@@ -772,9 +940,7 @@ fn account_remove_after_update_manifest() -> ActionManifest {
             cleanup: vec![CleanupDescriptor {
                 cleanup_id,
                 locator_kind: LocatorKind::ActiveV2,
-                locator_sha256: Sha256Digest::digest(
-                    b"synthetic-current-active-locator-after-update",
-                ),
+                locator_sha256,
                 expected_state: CleanupState::Provisional,
             }],
         }),
@@ -1207,7 +1373,12 @@ fn account_control_manifest_with_shape(
                 vec![CleanupDescriptor {
                     cleanup_id,
                     locator_kind: LocatorKind::ActiveV2,
-                    locator_sha256: Sha256Digest::digest(b"synthetic-old-active-locator"),
+                    locator_sha256: Sha256Digest::digest(&active_v2_locator_material(
+                        store_id(0),
+                        account_id(),
+                        before.credential_id,
+                        before.binding_sha256,
+                    )),
                     expected_state: CleanupState::Provisional,
                 }]
             } else {
@@ -1233,7 +1404,12 @@ fn account_control_manifest_with_shape(
                 .then_some(CleanupDescriptor {
                     cleanup_id,
                     locator_kind: LocatorKind::ActiveV2,
-                    locator_sha256: Sha256Digest::digest(b"synthetic-current-active-locator"),
+                    locator_sha256: Sha256Digest::digest(&active_v2_locator_material(
+                        store_id(0),
+                        account_id(),
+                        before.credential_id,
+                        before.binding_sha256,
+                    )),
                     expected_state: CleanupState::Provisional,
                 })
                 .into_iter()
@@ -3873,6 +4049,492 @@ fn remaining_account_and_credential_challenges_are_exact() {
 }
 
 #[test]
+fn credential_cleanup_locator_constructor_is_canonical() {
+    let cleanup_id = t202c3_uuid::<CleanupId>(0x5400_0000, 600);
+    let active = active_v2_locator_material(
+        store_id(0),
+        account_id(),
+        credential_id(),
+        account_binding().sha256(),
+    );
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&active)),
+        "b6080c4f732790383ecf6b4f59161b887ca669a8864bd90606c2a034b3b7ed2a"
+    );
+    CredentialCleanupReservation::new(cleanup_id, LocatorKind::ActiveV2, active.clone()).unwrap();
+
+    let legacy = encode(
+        b"KIRJE-DELETE-ONLY-LOCATOR-V1\0",
+        &[&[2], b"dev.kirje.mail", b"synthetic_account_0"],
+    );
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&legacy)),
+        "f4408c6d31f3a0c78b2a31b09ffe3e0ad83c57be330042a90036c8828d3f7d3e"
+    );
+    CredentialCleanupReservation::new(cleanup_id, LocatorKind::LegacyV1, legacy.clone()).unwrap();
+
+    let mut malformed = vec![Vec::new(), vec![0_u8; 4]];
+    let mut wrong_domain = active.clone();
+    wrong_domain[0] ^= 1;
+    malformed.push(wrong_domain);
+    let mut wrong_count = active.clone();
+    let domain_len = b"KIRJE-DELETE-ONLY-LOCATOR-V1\0".len();
+    wrong_count[domain_len + 1] = 4;
+    malformed.push(wrong_count);
+    let mut wrong_tag = active.clone();
+    wrong_tag[domain_len + 3] = 2;
+    malformed.push(wrong_tag);
+    let mut trailing = active.clone();
+    trailing.push(0);
+    malformed.push(trailing);
+    malformed.push(encode(
+        b"KIRJE-DELETE-ONLY-LOCATOR-V1\0",
+        &[
+            &[1],
+            b"dev.kirje.mail",
+            b"v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ],
+    ));
+    malformed.push(encode(
+        b"KIRJE-DELETE-ONLY-LOCATOR-V1\0",
+        &[
+            &[1],
+            b"dev.kirje.mail.credentials.v2",
+            b"v2:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        ],
+    ));
+    malformed.push(encode(
+        b"KIRJE-DELETE-ONLY-LOCATOR-V1\0",
+        &[&[2], b"dev.kirje.mail", b"synthetic.account"],
+    ));
+    malformed.push(encode(
+        b"KIRJE-DELETE-ONLY-LOCATOR-V1\0",
+        &[&[2], b"dev.kirje.mail", &[0xff]],
+    ));
+    malformed.push(encode(
+        b"KIRJE-DELETE-ONLY-LOCATOR-V1\0",
+        &[&[2], b"dev.kirje.mail", b"synthetic\0account"],
+    ));
+    for material in malformed {
+        assert_eq!(
+            exact_error(CredentialCleanupReservation::new(
+                cleanup_id,
+                LocatorKind::ActiveV2,
+                material,
+            ))
+            .code,
+            MailErrorCode::InvalidInput
+        );
+    }
+    assert_eq!(
+        exact_error(CredentialCleanupReservation::new(
+            cleanup_id,
+            LocatorKind::LegacyV1,
+            active,
+        ))
+        .code,
+        MailErrorCode::InvalidInput
+    );
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn credential_cleanup_challenge_is_exact() {
+    let fixture = a003_updated_account_fixture();
+    let manifest = credential_cleanup_manifest(&fixture);
+    let connection = Connection::open(fixture.home.database_path()).unwrap();
+    let before = issuance_fingerprint(&connection);
+    assert_eq!(
+        scalar(
+            &connection,
+            "SELECT COUNT(*) FROM credential_cleanup WHERE state='ready'"
+        ),
+        1
+    );
+    drop(connection);
+
+    let origin = account_control_manifest(SensitiveAction::AccountUpdate, 60);
+    let tombstone = cleanup_tombstone_bytes(&fixture, &origin, 503_200);
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&tombstone)),
+        "4ec68c3cc2252bac288e771a0e958a910c7a865639580d6e85f60e2a9685d982"
+    );
+    for field_index in 0..14 {
+        let entropy = deterministic(vec![0x95; 48]);
+        let error = exact_error(open_ready(&fixture, entropy.clone()).create_challenge(
+            CreateChallengeRequest {
+                manifest: credential_cleanup_manifest_for_origin(
+                    &fixture,
+                    &origin,
+                    503_200,
+                    Some(Sha256Digest::digest(&mutate_transcript_field(
+                        tombstone.clone(),
+                        field_index,
+                    ))),
+                ),
+                observed_at_unix_ms: 509_900,
+                expires_at_unix_ms: 510_800,
+            },
+        ));
+        assert_eq!(error.code, MailErrorCode::CredentialCleanupInvalid);
+        assert_eq!(entropy.consumed_bytes(), 0);
+    }
+    assert_eq!(
+        issuance_fingerprint(&Connection::open(fixture.home.database_path()).unwrap()),
+        before
+    );
+
+    let entropy = deterministic(vec![0xa6; 48]);
+    let challenge = open_ready(&fixture, entropy.clone())
+        .create_challenge(CreateChallengeRequest {
+            manifest: manifest.clone(),
+            observed_at_unix_ms: 510_000,
+            expires_at_unix_ms: 510_900,
+        })
+        .unwrap();
+    assert_eq!(challenge.action, SensitiveAction::CredentialCleanup);
+    assert_eq!(challenge.target_kind, TargetKind::Cleanup);
+    assert_eq!(entropy.consumed_bytes(), 48);
+    assert!(
+        !challenge
+            .to_json_value()
+            .to_string()
+            .contains("dev.kirje.mail")
+    );
+    let after = issuance_fingerprint(&Connection::open(fixture.home.database_path()).unwrap());
+    assert_eq!(after.0, before.0 + 1);
+    assert_eq!(after.2, before.2 + 1);
+    assert_eq!(after.3, before.3);
+    assert_eq!(after.4, before.4);
+
+    let retry_entropy = deterministic(Vec::new());
+    let retry = open_ready(&fixture, retry_entropy.clone())
+        .create_challenge(CreateChallengeRequest {
+            manifest: manifest.clone(),
+            observed_at_unix_ms: 510_100,
+            expires_at_unix_ms: 510_900,
+        })
+        .unwrap();
+    assert_eq!(retry.challenge_id, challenge.challenge_id);
+    assert_eq!(retry_entropy.consumed_bytes(), 0);
+    let retry_fingerprint =
+        issuance_fingerprint(&Connection::open(fixture.home.database_path()).unwrap());
+    assert_eq!(
+        (
+            retry_fingerprint.0,
+            retry_fingerprint.1,
+            retry_fingerprint.2,
+            retry_fingerprint.3,
+            retry_fingerprint.4,
+        ),
+        (after.0, after.1, after.2, after.3, after.4)
+    );
+    assert_eq!(retry_fingerprint.5, (510_100, 510_100));
+
+    let restart_entropy = deterministic(Vec::new());
+    let restart = open_ready(&fixture, restart_entropy.clone())
+        .create_challenge(CreateChallengeRequest {
+            manifest: manifest.clone(),
+            observed_at_unix_ms: 510_200,
+            expires_at_unix_ms: 510_900,
+        })
+        .unwrap();
+    assert_eq!(restart.challenge_id, challenge.challenge_id);
+    assert_eq!(restart_entropy.consumed_bytes(), 0);
+
+    let replacement_entropy = deterministic(vec![0xa7; 48]);
+    let replacement = open_ready(&fixture, replacement_entropy.clone())
+        .create_challenge(CreateChallengeRequest {
+            manifest: manifest.clone(),
+            observed_at_unix_ms: 511_000,
+            expires_at_unix_ms: 511_900,
+        })
+        .unwrap();
+    assert_ne!(replacement.challenge_id, challenge.challenge_id);
+    assert_eq!(replacement_entropy.consumed_bytes(), 48);
+    let connection = Connection::open(fixture.home.database_path()).unwrap();
+    assert_eq!(
+        scalar(
+            &connection,
+            "SELECT COUNT(*) FROM authorization_challenges
+             WHERE action=290 AND state='expired'"
+        ),
+        1
+    );
+    assert_eq!(
+        scalar(
+            &connection,
+            "SELECT COUNT(*) FROM authorization_challenges
+             WHERE action=290 AND state='pending'"
+        ),
+        1
+    );
+    let lifecycle = connection
+        .prepare(
+            "SELECT e.event_code,e.occurred_at
+             FROM authority_events e
+             JOIN authorization_challenges c ON c.challenge_id=e.entity_id
+             WHERE e.entity_kind=8 AND c.action=290
+             ORDER BY e.sequence",
+        )
+        .unwrap()
+        .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(lifecycle, vec![(3, 510_000), (5, 511_000), (3, 511_000)]);
+    assert_eq!(scalar(&connection, "SELECT COUNT(*) FROM grant_uses"), 3);
+    assert_eq!(
+        scalar(
+            &connection,
+            "SELECT (SELECT COUNT(*) FROM challenge_effects)
+               + (SELECT COUNT(*) FROM remote_effects)
+               + (SELECT COUNT(*) FROM effect_claims)
+               + (SELECT COUNT(*) FROM effect_invocations)"
+        ),
+        0
+    );
+    assert_eq!(
+        scalar(
+            &connection,
+            "SELECT COUNT(*) FROM credential_cleanup
+             WHERE state='ready' AND claim_grant_id IS NULL AND deleted_at IS NULL"
+        ),
+        1
+    );
+    drop(connection);
+
+    let invalid_entropy = deterministic(vec![0xa8; 48]);
+    let invalid_before =
+        issuance_fingerprint(&Connection::open(fixture.home.database_path()).unwrap());
+    let invalid = exact_error(
+        open_ready(&fixture, invalid_entropy.clone()).create_challenge(CreateChallengeRequest {
+            manifest: credential_cleanup_manifest_for_origin(
+                &fixture,
+                &account_control_manifest(SensitiveAction::AccountUpdate, 60),
+                503_200,
+                Some(Sha256Digest::digest(b"synthetic-wrong-tombstone")),
+            ),
+            observed_at_unix_ms: 511_100,
+            expires_at_unix_ms: 512_000,
+        }),
+    );
+    assert_eq!(invalid.code, MailErrorCode::CredentialCleanupInvalid);
+    assert_eq!(invalid_entropy.consumed_bytes(), 0);
+    assert_eq!(
+        issuance_fingerprint(&Connection::open(fixture.home.database_path()).unwrap()),
+        invalid_before
+    );
+}
+
+#[test]
+fn credential_cleanup_challenge_concurrency_has_one_creator() {
+    let fixture = a003_updated_account_fixture();
+    let manifest = credential_cleanup_manifest(&fixture);
+    let barrier = Arc::new(Barrier::new(3));
+    let left_entropy = deterministic(vec![0xb1; 48]);
+    let right_entropy = deterministic(vec![0xb2; 48]);
+    let mut workers = Vec::new();
+    for entropy in [left_entropy.clone(), right_entropy.clone()] {
+        let home = fixture.home.clone();
+        let anchor = fixture.snapshot.anchor.clone();
+        let barrier = Arc::clone(&barrier);
+        let manifest = manifest.clone();
+        workers.push(thread::spawn(move || {
+            let store = AuthorityStore::open_isolated(
+                context(AnchorPresence::Present(anchor)),
+                home,
+                entropy,
+            )
+            .unwrap();
+            barrier.wait();
+            store.create_challenge(CreateChallengeRequest {
+                manifest,
+                observed_at_unix_ms: 510_000,
+                expires_at_unix_ms: 510_900,
+            })
+        }));
+    }
+    barrier.wait();
+    let left = workers.remove(0).join().unwrap().unwrap();
+    let right = workers.remove(0).join().unwrap().unwrap();
+    assert_eq!(left.challenge_id, right.challenge_id);
+    assert_eq!(
+        left_entropy.consumed_bytes() + right_entropy.consumed_bytes(),
+        48
+    );
+    let connection = Connection::open(fixture.home.database_path()).unwrap();
+    assert_eq!(
+        scalar(
+            &connection,
+            "SELECT COUNT(*) FROM authorization_challenges WHERE action=290"
+        ),
+        1
+    );
+    assert_eq!(
+        scalar(
+            &connection,
+            "SELECT COUNT(*) FROM authority_events WHERE entity_kind=8 AND event_code=3
+             AND entity_id IN (SELECT challenge_id FROM authorization_challenges WHERE action=290)"
+        ),
+        1
+    );
+}
+
+#[test]
+fn credential_cleanup_origin_eligibility_and_rollback_are_exact() {
+    let removed_fixture = a002_active_account_fixture();
+    let authorized = authorize_account_remove(&removed_fixture);
+    open_ready(&removed_fixture, deterministic(Vec::new()))
+        .prepare_account_transition(prepare_account_remove_request(&authorized, 504_200))
+        .unwrap();
+    open_ready(&removed_fixture, deterministic(Vec::new()))
+        .mark_config_committed(observe_account_remove(
+            AccountTransitionState::Prepared,
+            3,
+            account_remove_after_config_sha256(),
+            504_300,
+        ))
+        .unwrap();
+    open_ready(&removed_fixture, deterministic(Vec::new()))
+        .finalize_account_transition(observe_account_remove(
+            AccountTransitionState::ConfigCommitted,
+            3,
+            account_remove_after_config_sha256(),
+            504_400,
+        ))
+        .unwrap();
+    let remove_origin = account_control_manifest(SensitiveAction::AccountRemove, 70);
+    let removed_manifest =
+        credential_cleanup_manifest_for_origin(&removed_fixture, &remove_origin, 504_200, None);
+    let removed = open_ready(&removed_fixture, deterministic(vec![0xb3; 48]))
+        .create_challenge(CreateChallengeRequest {
+            manifest: removed_manifest,
+            observed_at_unix_ms: 505_000,
+            expires_at_unix_ms: 505_900,
+        })
+        .unwrap();
+    assert_eq!(removed.action, SensitiveAction::CredentialCleanup);
+
+    let fixture = a003_updated_account_fixture();
+    let manifest = credential_cleanup_manifest(&fixture);
+    open_ready(&fixture, deterministic(vec![0xb4; 48]))
+        .create_challenge(CreateChallengeRequest {
+            manifest: manifest.clone(),
+            observed_at_unix_ms: 504_000,
+            expires_at_unix_ms: 504_900,
+        })
+        .unwrap();
+    let remove = authorize_account_remove_after_update(&fixture);
+    open_ready(&fixture, deterministic(Vec::new()))
+        .prepare_account_transition(prepare_account_remove_request(&remove, 505_200))
+        .unwrap();
+
+    let before = issuance_fingerprint(&Connection::open(fixture.home.database_path()).unwrap());
+    let blocked_entropy = deterministic(vec![0xb5; 48]);
+    let blocked = exact_error(
+        open_ready(&fixture, blocked_entropy.clone()).create_challenge(CreateChallengeRequest {
+            manifest: manifest.clone(),
+            observed_at_unix_ms: 506_000,
+            expires_at_unix_ms: 506_900,
+        }),
+    );
+    assert_eq!(blocked.code, MailErrorCode::AccountUpdateConflict);
+    assert_eq!(blocked_entropy.consumed_bytes(), 0);
+    assert_eq!(
+        issuance_fingerprint(&Connection::open(fixture.home.database_path()).unwrap()),
+        before
+    );
+
+    open_ready(&fixture, deterministic(Vec::new()))
+        .mark_transition_recovery_required(observe_account_remove_transition(
+            71,
+            AccountTransitionState::Prepared,
+            5,
+            Sha256Digest::digest(b"synthetic-a006-unsafe-config"),
+            506_100,
+        ))
+        .unwrap();
+    let recovery_before =
+        issuance_fingerprint(&Connection::open(fixture.home.database_path()).unwrap());
+    let recovery_entropy = deterministic(vec![0xb6; 48]);
+    let recovery = exact_error(
+        open_ready(&fixture, recovery_entropy.clone()).create_challenge(CreateChallengeRequest {
+            manifest,
+            observed_at_unix_ms: 506_200,
+            expires_at_unix_ms: 507_100,
+        }),
+    );
+    assert_eq!(recovery.code, MailErrorCode::OwnerRecoveryRequired);
+    assert_eq!(recovery_entropy.consumed_bytes(), 0);
+    assert_eq!(
+        issuance_fingerprint(&Connection::open(fixture.home.database_path()).unwrap()),
+        recovery_before
+    );
+}
+
+#[test]
+fn credential_cleanup_manifest_state_and_origin_are_closed() {
+    let fixture = a003_updated_account_fixture();
+    let valid = credential_cleanup_manifest(&fixture);
+    let ManifestPayload::CredentialCleanup(cleanup) = valid.payload() else {
+        unreachable!();
+    };
+    let mut malformed_values = Vec::new();
+    for (transition_id, expected_state) in [
+        (None, CleanupState::Ready),
+        (
+            Some(t202c3_uuid::<TransitionId>(0x5300_0000, 999)),
+            CleanupState::Ready,
+        ),
+        (cleanup.transition_id, CleanupState::Provisional),
+        (cleanup.transition_id, CleanupState::Claimed),
+        (cleanup.transition_id, CleanupState::Deleted),
+    ] {
+        malformed_values.push(CredentialCleanupManifest {
+            transition_id,
+            expected_state,
+            ..cleanup.clone()
+        });
+    }
+    malformed_values.push(CredentialCleanupManifest {
+        locator_kind: LocatorKind::LegacyV1,
+        ..cleanup.clone()
+    });
+    malformed_values.push(CredentialCleanupManifest {
+        locator_sha256: Sha256Digest::digest(b"synthetic-wrong-locator-digest"),
+        ..cleanup.clone()
+    });
+    malformed_values.push(CredentialCleanupManifest {
+        tombstone_sha256: Sha256Digest::digest(b"synthetic-wrong-tombstone-digest"),
+        ..cleanup.clone()
+    });
+    for malformed_value in malformed_values {
+        let malformed = ActionManifest::new(
+            valid.context().clone(),
+            ManifestPayload::CredentialCleanup(malformed_value),
+        )
+        .unwrap();
+        let entropy = deterministic(vec![0xb7; 48]);
+        let error = exact_error(open_ready(&fixture, entropy.clone()).create_challenge(
+            CreateChallengeRequest {
+                manifest: malformed,
+                observed_at_unix_ms: 510_000,
+                expires_at_unix_ms: 510_900,
+            },
+        ));
+        assert_eq!(error.code, MailErrorCode::CredentialCleanupInvalid);
+        assert_eq!(entropy.consumed_bytes(), 0);
+    }
+
+    Connection::open(fixture.home.database_path())
+        .unwrap()
+        .execute("UPDATE credential_cleanup SET transition_id=NULL", [])
+        .unwrap();
+    assert_recovery_required(&fixture);
+}
+
+#[test]
 #[allow(clippy::too_many_lines)]
 fn account_update_transition_lifecycle_is_exact() {
     let fixture = a002_active_account_fixture();
@@ -4051,7 +4713,12 @@ fn account_update_transition_lifecycle_is_exact() {
         open_ready(&mismatch_fixture, deterministic(Vec::new())).prepare_account_transition(
             prepare_account_update_request_with_material(
                 &mismatch_authorized,
-                b"synthetic-wrong-delete-only-locator".to_vec(),
+                active_v2_locator_material(
+                    store_id(0),
+                    account_id(),
+                    t202c3_uuid::<CredentialId>(0x5500_0000, 999),
+                    account_binding().sha256(),
+                ),
                 503_200,
             ),
         ),
@@ -4316,11 +4983,7 @@ fn account_remove_transition_lifecycle_is_exact() {
     let updated_fixture = a003_updated_account_fixture();
     let updated_authorized = authorize_account_remove_after_update(&updated_fixture);
     open_ready(&updated_fixture, deterministic(Vec::new()))
-        .prepare_account_transition(prepare_account_remove_request_with_material(
-            &updated_authorized,
-            b"synthetic-current-active-locator-after-update".to_vec(),
-            505_200,
-        ))
+        .prepare_account_transition(prepare_account_remove_request(&updated_authorized, 505_200))
         .unwrap();
     open_ready(&updated_fixture, deterministic(Vec::new()))
         .mark_config_committed(observe_account_remove_transition(
@@ -4486,7 +5149,12 @@ fn account_remove_transition_lifecycle_is_exact() {
         open_ready(&mismatch_fixture, deterministic(Vec::new())).prepare_account_transition(
             prepare_account_remove_request_with_material(
                 &mismatch_authorized,
-                b"synthetic-wrong-remove-locator".to_vec(),
+                active_v2_locator_material(
+                    store_id(0),
+                    account_id(),
+                    t202c3_uuid::<CredentialId>(0x5500_0000, 998),
+                    account_binding().sha256(),
+                ),
                 504_200,
             ),
         ),

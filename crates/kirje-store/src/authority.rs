@@ -41,6 +41,12 @@ const ACCOUNT_DISPLAY_ID_DOMAIN: &[u8] = b"KIRJE-ACCOUNT-DISPLAY-ID-V1\0";
 const ACCOUNT_TRANSITION_DOMAIN: &[u8] = b"KIRJE-ACCOUNT-TRANSITION-V1\0";
 const ACCOUNT_TRANSITION_INTENT_DOMAIN: &[u8] = b"KIRJE-ACCOUNT-TRANSITION-INTENT-V1\0";
 const ACCOUNT_TRANSITION_RECOVERY_DOMAIN: &[u8] = b"KIRJE-ACCOUNT-TRANSITION-RECOVERY-V1\0";
+const CREDENTIAL_LOCATOR_V2_DOMAIN: &[u8] = b"KIRJE-CREDENTIAL-LOCATOR-V2\0";
+const DELETE_ONLY_LOCATOR_DOMAIN: &[u8] = b"KIRJE-DELETE-ONLY-LOCATOR-V1\0";
+const CREDENTIAL_CLEANUP_TOMBSTONE_DOMAIN: &[u8] = b"KIRJE-CREDENTIAL-CLEANUP-TOMBSTONE-V1\0";
+const ACTIVE_V2_LOCATOR_SERVICE: &[u8] = b"dev.kirje.mail.credentials.v2";
+const LEGACY_V1_LOCATOR_SERVICE: &[u8] = b"dev.kirje.mail";
+const LOWER_HEX: &[u8; 16] = b"0123456789abcdef";
 const AUTHORIZATION_LIFETIME_MS: i64 = 900_000;
 
 const TABLES: [&str; 20] = [
@@ -382,13 +388,19 @@ impl CredentialCleanupReservation {
     ///
     /// # Errors
     ///
-    /// Returns invalid-input when material is empty or exceeds the schema bound.
+    /// Returns invalid-input when material is not the canonical closed locator form.
     pub fn new(
         cleanup_id: CleanupId,
         locator_kind: LocatorKind,
         locator_material: Vec<u8>,
     ) -> Result<Self, MailError> {
-        if locator_material.is_empty() || locator_material.len() > 4096 {
+        let (encoded_kind, service, username) = parse_delete_only_locator(&locator_material)
+            .ok_or_else(|| {
+                MailError::invalid_input("cleanup locator material is outside the contract")
+            })?;
+        if encoded_kind != locator_kind
+            || !delete_only_locator_shape_is_valid(encoded_kind, service, username)
+        {
             return Err(MailError::invalid_input(
                 "cleanup locator material is outside the contract",
             ));
@@ -1459,6 +1471,11 @@ impl AuthorityStore {
             loaded.snapshot.trust_bundle_sha256,
         );
 
+        let cleanup_action = request.manifest.action() == SensitiveAction::CredentialCleanup;
+        if cleanup_action {
+            validate_fresh_manifest_context(&transaction, &loaded.snapshot, &request.manifest)?;
+        }
+
         if let Some(existing) = load_pending_challenge(&transaction, context_sha256)? {
             if effective_time <= existing.expires_at {
                 observe_clock_pair(&transaction, effective_time)?;
@@ -1489,7 +1506,9 @@ impl AuthorityStore {
                 .fault(TestFaultPoint::OldChallengeExpiredEvent)?;
         }
 
-        validate_fresh_manifest_context(&transaction, &request.manifest)?;
+        if !cleanup_action {
+            validate_fresh_manifest_context(&transaction, &loaded.snapshot, &request.manifest)?;
+        }
         validate_requested_expiry(effective_time, request.expires_at_unix_ms)?;
 
         let mut grant_bytes = [0_u8; 16];
@@ -2045,6 +2064,7 @@ impl AuthorityStore {
             }
         })?;
         validate_account_prepare_identity(&request, &challenge, &receipt)?;
+        validate_cleanup_reservation_origins(&loaded.snapshot, &request, &challenge)?;
         let intent_sha256 = account_prepare_intent(&request);
         if challenge.state == "expired" {
             validate_exact_enrollment_expiry(&transaction, &challenge, &receipt, intent_sha256)?;
@@ -3159,6 +3179,180 @@ fn cleanup_reservations_match(
             })
 }
 
+fn locator_kind_code(kind: LocatorKind) -> u8 {
+    match kind {
+        LocatorKind::ActiveV2 => 1,
+        LocatorKind::LegacyV1 => 2,
+    }
+}
+
+fn parse_delete_only_locator(material: &[u8]) -> Option<(LocatorKind, &[u8], &[u8])> {
+    if material.is_empty()
+        || material.len() > 4_096
+        || !material.starts_with(DELETE_ONLY_LOCATOR_DOMAIN)
+    {
+        return None;
+    }
+    let mut cursor = DELETE_ONLY_LOCATOR_DOMAIN.len();
+    let count = locator_read_u16(material, &mut cursor)?;
+    if count != 3 {
+        return None;
+    }
+    let mut fields = [&[][..]; 3];
+    for (index, field) in fields.iter_mut().enumerate() {
+        let tag = locator_read_u16(material, &mut cursor)?;
+        if tag != u16::try_from(index + 1).ok()? {
+            return None;
+        }
+        let length = usize::try_from(locator_read_u32(material, &mut cursor)?).ok()?;
+        let end = cursor.checked_add(length)?;
+        *field = material.get(cursor..end)?;
+        cursor = end;
+    }
+    if cursor != material.len() || fields[0].len() != 1 {
+        return None;
+    }
+    let kind = match fields[0][0] {
+        1 => LocatorKind::ActiveV2,
+        2 => LocatorKind::LegacyV1,
+        _ => return None,
+    };
+    Some((kind, fields[1], fields[2]))
+}
+
+fn locator_read_u16(bytes: &[u8], cursor: &mut usize) -> Option<u16> {
+    let end = cursor.checked_add(2)?;
+    let value = u16::from_be_bytes(bytes.get(*cursor..end)?.try_into().ok()?);
+    *cursor = end;
+    Some(value)
+}
+
+fn locator_read_u32(bytes: &[u8], cursor: &mut usize) -> Option<u32> {
+    let end = cursor.checked_add(4)?;
+    let value = u32::from_be_bytes(bytes.get(*cursor..end)?.try_into().ok()?);
+    *cursor = end;
+    Some(value)
+}
+
+fn delete_only_locator_shape_is_valid(kind: LocatorKind, service: &[u8], username: &[u8]) -> bool {
+    let Ok(service_text) = std::str::from_utf8(service) else {
+        return false;
+    };
+    let Ok(username_text) = std::str::from_utf8(username) else {
+        return false;
+    };
+    if service.is_empty()
+        || service.len() > 128
+        || service_text.chars().count() > 128
+        || username.is_empty()
+        || username.len() > 1_024
+        || username_text.chars().count() > 1_024
+        || service.contains(&0)
+        || username.contains(&0)
+    {
+        return false;
+    }
+    match kind {
+        LocatorKind::ActiveV2 => {
+            service == ACTIVE_V2_LOCATOR_SERVICE
+                && username.len() == 67
+                && username.starts_with(b"v2:")
+                && username[3..]
+                    .iter()
+                    .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+        }
+        LocatorKind::LegacyV1 => {
+            service == LEGACY_V1_LOCATOR_SERVICE
+                && username.len() <= 64
+                && username
+                    .iter()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        }
+    }
+}
+
+fn active_v2_username(
+    realm_id: OwnerRealmId,
+    store_id: StoreId,
+    account_id: AccountId,
+    credential_id: CredentialId,
+    binding_sha256: Sha256Digest,
+) -> Vec<u8> {
+    let mut hasher = Sha256::new();
+    hasher.update(CREDENTIAL_LOCATOR_V2_DOMAIN);
+    hasher.update(realm_id.as_bytes());
+    hasher.update(store_id.as_bytes());
+    hasher.update(account_id.as_bytes());
+    hasher.update(credential_id.as_bytes());
+    hasher.update(binding_sha256.as_bytes());
+    let digest = hasher.finalize();
+    let mut username = Vec::with_capacity(67);
+    username.extend_from_slice(b"v2:");
+    for byte in digest {
+        username.push(LOWER_HEX[usize::from(byte >> 4)]);
+        username.push(LOWER_HEX[usize::from(byte & 0x0f)]);
+    }
+    username
+}
+
+fn expected_delete_only_locator(
+    realm_id: OwnerRealmId,
+    store_id: StoreId,
+    before: &kirje_core::AccountSnapshot,
+    kind: LocatorKind,
+) -> Vec<u8> {
+    let kind_bytes = [locator_kind_code(kind)];
+    let (service, username) = match kind {
+        LocatorKind::ActiveV2 => (
+            ACTIVE_V2_LOCATOR_SERVICE,
+            active_v2_username(
+                realm_id,
+                store_id,
+                before.account_id,
+                before.credential_id,
+                before.binding_sha256,
+            ),
+        ),
+        LocatorKind::LegacyV1 => (
+            LEGACY_V1_LOCATOR_SERVICE,
+            before.display_id.as_bytes().to_vec(),
+        ),
+    };
+    encode_transcript(
+        DELETE_ONLY_LOCATOR_DOMAIN,
+        &[&kind_bytes, service, &username],
+    )
+}
+
+fn validate_cleanup_reservation_origins(
+    authority: &BootstrapSnapshot,
+    request: &PrepareAccountTransitionRequest,
+    challenge: &StoredChallenge,
+) -> Result<(), MailError> {
+    if request.cleanup_reservations.is_empty() {
+        return Ok(());
+    }
+    let mutation = account_mutation_manifest(challenge, request.kind)?;
+    let before = mutation
+        .before
+        .as_ref()
+        .ok_or_else(authorization_context_stale_error)?;
+    for reservation in &request.cleanup_reservations {
+        let expected = expected_delete_only_locator(
+            authority.realm_id,
+            mutation.config_cas.store_id,
+            before,
+            reservation.locator_kind,
+        );
+        if reservation.locator_material != expected
+            || reservation.locator_sha256 != Sha256Digest::digest(&expected)
+        {
+            return Err(authorization_context_stale_error());
+        }
+    }
+    Ok(())
+}
+
 const fn locator_kind_name(kind: LocatorKind) -> &'static str {
     match kind {
         LocatorKind::ActiveV2 => "active_v2",
@@ -4212,6 +4406,7 @@ fn ensure_supported_challenge_action(action: SensitiveAction) -> Result<(), Mail
         | SensitiveAction::AccountRemove
         | SensitiveAction::CredentialSet
         | SensitiveAction::CredentialDelete
+        | SensitiveAction::CredentialCleanup
         | SensitiveAction::OwnerRotate
         | SensitiveAction::RecoveryRotate
         | SensitiveAction::OwnerRecover => Ok(()),
@@ -4225,6 +4420,7 @@ fn ensure_supported_challenge_action(action: SensitiveAction) -> Result<(), Mail
 
 fn validate_fresh_manifest_context(
     connection: &Connection,
+    authority: &BootstrapSnapshot,
     manifest: &ActionManifest,
 ) -> Result<(), MailError> {
     match manifest.payload() {
@@ -4253,7 +4449,215 @@ fn validate_fresh_manifest_context(
         ManifestPayload::CredentialSet(value) | ManifestPayload::CredentialDelete(value) => {
             validate_fresh_account_mutation_context(connection, &value.account)?;
         }
+        ManifestPayload::CredentialCleanup(_) => {
+            validate_credential_cleanup_context(connection, authority, manifest, true)?;
+        }
         _ => {}
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_lines, clippy::type_complexity)]
+fn validate_credential_cleanup_context(
+    connection: &Connection,
+    authority: &BootstrapSnapshot,
+    manifest: &ActionManifest,
+    require_ready_eligibility: bool,
+) -> Result<(), MailError> {
+    let ManifestPayload::CredentialCleanup(cleanup_manifest) = manifest.payload() else {
+        return Err(credential_cleanup_invalid_error());
+    };
+    let transition_id = cleanup_manifest
+        .transition_id
+        .ok_or_else(credential_cleanup_invalid_error)?;
+    if cleanup_manifest.expected_state != CleanupState::Ready {
+        return Err(credential_cleanup_invalid_error());
+    }
+
+    let row: Option<(
+        Option<Vec<u8>>,
+        String,
+        Vec<u8>,
+        Vec<u8>,
+        String,
+        Option<Vec<u8>>,
+        i64,
+        Option<i64>,
+    )> = connection
+        .query_row(
+            "SELECT transition_id,locator_kind,locator_material,locator_sha256,state,
+                    claim_grant_id,created_at,deleted_at
+             FROM credential_cleanup WHERE cleanup_id=?1",
+            [cleanup_manifest.cleanup_id.as_bytes()],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|_| store_read_error())?;
+    let Some((
+        stored_transition,
+        stored_kind,
+        locator_material,
+        locator_digest,
+        cleanup_state,
+        claim_grant_id,
+        created_at,
+        deleted_at,
+    )) = row
+    else {
+        return Err(credential_cleanup_invalid_error());
+    };
+    let stored_transition: TransitionId = stored_transition
+        .ok_or_else(recovery_error)
+        .and_then(|bytes| uuid_from_blob_sql(bytes).map_err(|_| recovery_error()))?;
+    if stored_transition != transition_id {
+        return Err(credential_cleanup_invalid_error());
+    }
+
+    let transition = load_account_transition(connection, transition_id)?
+        .ok_or_else(credential_cleanup_invalid_error)?;
+    if transition.state != AccountTransitionState::Finalized
+        || !matches!(
+            transition.kind,
+            AccountTransitionKind::AccountUpdate | AccountTransitionKind::AccountRemove
+        )
+        || transition.prepared_at != created_at
+    {
+        return Err(credential_cleanup_invalid_error());
+    }
+    let origin_grant =
+        load_grant_use(connection, transition.grant_id)?.ok_or_else(recovery_error)?;
+    let origin_receipt =
+        load_receipt_by_id(connection, origin_grant.receipt_id)?.ok_or_else(recovery_error)?;
+    let origin_challenge =
+        load_challenge(connection, origin_receipt.challenge_id).map_err(|_| recovery_error())?;
+    let origin_manifest =
+        ActionManifest::parse(&origin_challenge.manifest).map_err(|_| recovery_error())?;
+    let ((AccountTransitionKind::AccountUpdate, ManifestPayload::AccountUpdate(mutation))
+    | (AccountTransitionKind::AccountRemove, ManifestPayload::AccountRemove(mutation))) =
+        (transition.kind, origin_manifest.payload())
+    else {
+        return Err(recovery_error());
+    };
+    let before = mutation.before.as_ref().ok_or_else(recovery_error)?;
+    if mutation.transition_id != transition.transition_id
+        || mutation.config_cas.store_id != transition.store_id
+        || before.account_id != transition.account_id
+        || manifest.context().store_id != Some(transition.store_id)
+        || manifest.context().account_id != Some(transition.account_id)
+        || manifest.context().account_binding_sha256 != Some(before.binding_sha256)
+    {
+        return Err(credential_cleanup_invalid_error());
+    }
+
+    let mut matching_descriptor = None;
+    for descriptor in &mutation.cleanup {
+        if descriptor.cleanup_id == cleanup_manifest.cleanup_id
+            && matching_descriptor.replace(descriptor).is_some()
+        {
+            return Err(credential_cleanup_invalid_error());
+        }
+    }
+    let descriptor = matching_descriptor.ok_or_else(credential_cleanup_invalid_error)?;
+    if descriptor.expected_state != CleanupState::Provisional
+        || descriptor.locator_kind != cleanup_manifest.locator_kind
+        || descriptor.locator_sha256 != cleanup_manifest.locator_sha256
+        || stored_kind != locator_kind_name(descriptor.locator_kind)
+        || locator_digest.as_slice() != descriptor.locator_sha256.as_bytes()
+    {
+        return Err(credential_cleanup_invalid_error());
+    }
+    let expected_locator = expected_delete_only_locator(
+        authority.realm_id,
+        transition.store_id,
+        before,
+        descriptor.locator_kind,
+    );
+    if locator_material != expected_locator
+        || Sha256Digest::digest(&locator_material) != descriptor.locator_sha256
+    {
+        return Err(credential_cleanup_invalid_error());
+    }
+
+    let historical_version_count: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM registered_account_versions
+             WHERE account_id=?1 AND store_id=?2 AND account_generation=?3
+               AND credential_id=?4 AND binding_sha256=?5",
+            params![
+                before.account_id.as_bytes(),
+                transition.store_id.as_bytes(),
+                i64::try_from(before.generation.get()).map_err(|_| recovery_error())?,
+                before.credential_id.as_bytes(),
+                before.binding_sha256.as_bytes(),
+            ],
+            |row| row.get(0),
+        )
+        .map_err(|_| store_read_error())?;
+    if historical_version_count != 1 {
+        return Err(recovery_error());
+    }
+
+    let generation = before.generation.get().to_be_bytes();
+    let kind = [locator_kind_code(descriptor.locator_kind)];
+    let created = created_at.to_be_bytes();
+    let expected_state = [1_u8];
+    let tombstone = encode_transcript(
+        CREDENTIAL_CLEANUP_TOMBSTONE_DOMAIN,
+        &[
+            authority.realm_id.as_bytes(),
+            cleanup_manifest.cleanup_id.as_bytes(),
+            transition.transition_id.as_bytes(),
+            transition.transition_sha256.as_bytes(),
+            origin_challenge.manifest_sha256.as_bytes(),
+            transition.store_id.as_bytes(),
+            transition.account_id.as_bytes(),
+            &generation,
+            before.credential_id.as_bytes(),
+            before.binding_sha256.as_bytes(),
+            &kind,
+            descriptor.locator_sha256.as_bytes(),
+            &created,
+            &expected_state,
+        ],
+    );
+    if cleanup_manifest.tombstone_sha256 != Sha256Digest::digest(&tombstone) {
+        return Err(credential_cleanup_invalid_error());
+    }
+
+    if require_ready_eligibility {
+        if cleanup_state != "ready" || claim_grant_id.is_some() || deleted_at.is_some() {
+            return Err(credential_cleanup_invalid_error());
+        }
+        let store = load_registered_store_by_id(connection, transition.store_id)?
+            .ok_or_else(credential_cleanup_invalid_error)?;
+        match store.state.as_str() {
+            "active" => {}
+            "recovery_required" => return Err(recovery_error()),
+            "blocked" => return Err(account_update_conflict_error()),
+            _ => return Err(credential_cleanup_invalid_error()),
+        }
+        let account = load_registered_account(connection, transition.account_id)?
+            .ok_or_else(credential_cleanup_invalid_error)?;
+        match account.state {
+            RegisteredAccountState::Active | RegisteredAccountState::Removed => {}
+            RegisteredAccountState::Blocked | RegisteredAccountState::Proposed => {
+                return Err(account_update_conflict_error());
+            }
+        }
+        if account.store_id != transition.store_id {
+            return Err(credential_cleanup_invalid_error());
+        }
     }
     Ok(())
 }
@@ -4462,6 +4866,7 @@ fn validate_intrinsic_manifest(
         ManifestPayload::CredentialSet(value) | ManifestPayload::CredentialDelete(value) => {
             validate_credential_mutation_intrinsic(value)?;
         }
+        ManifestPayload::CredentialCleanup(_) => {}
         ManifestPayload::OwnerRotate(value) => {
             validate_rotation_manifest(authority, value, OwnerKeyRole::Owner)?;
         }
@@ -6325,6 +6730,7 @@ fn validate_authorization_history(
     validate_registry_history(connection)
 }
 
+#[allow(clippy::too_many_lines)]
 fn validate_stored_challenge(
     connection: &Connection,
     authority: &BootstrapSnapshot,
@@ -6403,6 +6809,10 @@ fn validate_stored_challenge(
         return Err(recovery_error());
     }
     validate_intrinsic_manifest(authority, &manifest).map_err(|_| recovery_error())?;
+    if challenge.action == SensitiveAction::CredentialCleanup {
+        validate_credential_cleanup_context(connection, authority, &manifest, false)
+            .map_err(|_| recovery_error())?;
+    }
     let receipt = load_receipt_for_challenge(connection, challenge.challenge_id)?;
     let nonce = load_nonce_use(connection, challenge.challenge_id)?;
     match challenge.state.as_str() {
@@ -7282,6 +7692,19 @@ fn validate_transition_cleanup(
     } else {
         "provisional"
     };
+    let realm_id = if mutation.cleanup.is_empty() {
+        None
+    } else {
+        let bytes: Vec<u8> = connection
+            .query_row(
+                "SELECT realm_id FROM authority_meta WHERE singleton=1",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|_| store_read_error())?;
+        Some(OwnerRealmId::from_bytes(exact::<32>(&bytes)?))
+    };
+    let before = mutation.before.as_ref();
     for descriptor in &mutation.cleanup {
         record_validation_query(ValidationQueryKind::BoundedKeyed);
         let row: Option<(
@@ -7317,9 +7740,16 @@ fn validate_transition_cleanup(
             .map_err(|_| store_read_error())?;
         let (kind, material, digest, state, claim, deleted, created_at) =
             row.ok_or_else(recovery_error)?;
+        let expected_locator = expected_delete_only_locator(
+            realm_id.ok_or_else(recovery_error)?,
+            transition.store_id,
+            before.ok_or_else(recovery_error)?,
+            descriptor.locator_kind,
+        );
         if descriptor.expected_state != CleanupState::Provisional
             || kind != locator_kind_name(descriptor.locator_kind)
             || digest.as_slice() != descriptor.locator_sha256.as_bytes()
+            || material != expected_locator
             || Sha256Digest::digest(&material) != descriptor.locator_sha256
             || state != expected_state
             || claim.is_some()
@@ -9393,5 +9823,12 @@ fn account_already_exists_error() -> MailError {
     MailError::stable(
         MailErrorCode::AccountAlreadyExists,
         "account display identity is already active",
+    )
+}
+
+fn credential_cleanup_invalid_error() -> MailError {
+    MailError::stable(
+        MailErrorCode::CredentialCleanupInvalid,
+        "credential cleanup is invalid",
     )
 }
