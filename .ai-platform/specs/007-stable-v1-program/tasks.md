@@ -119,7 +119,10 @@ Evidence required:
 
 ## T110: Complete Authority Lifecycles
 
-Status: Draft
+Status: Running
+Execution state: T109 is Accepted. T110 runs as four strict serial security
+batches; the active batch is T202C3-A001 challenge issuance. No later batch is
+Ready until its predecessor is reviewed and accepted.
 Priority: P0
 Depends on: T109 Accepted
 Blocks: T111
@@ -148,7 +151,8 @@ Test targets:
 - T202C3-T202E acceptance matrices in `008-security-baseline/tasks.md`.
 
 Deliverables:
-- One reviewed authority-lifecycle commit and evidence summary.
+- Reviewed, independently revertible authority-lifecycle commits and evidence
+  summaries for T202C3, T202C4, T202D, and T202E.
 
 Acceptance criteria:
 - Remaining authority lifecycles are exact, immutable, crash-safe, bounded, and
@@ -172,6 +176,20 @@ Packet path:
 
 Evidence required:
 - RED/GREEN commands, state/fault matrix, hashes, review, and residual risk.
+
+### Execution Batches
+
+1. `T202C3`: account update/remove, credential set/delete/cleanup. The first
+   bounded attempt, `T202C3-A001`, enables exact effect-free challenge issuance
+   only; transition and cleanup state changes remain unsupported until later
+   T202C3 attempts.
+2. `T202C4`: remote challenge registry binding and planner-owned effect row.
+3. `T202D`: effect claim, invocation permit, observation, and ambiguity.
+4. `T202E`: owner rotation/recovery, audit, and aggregate authority acceptance.
+
+Each batch and each high-risk attempt starts from a self-contained packet,
+records discriminating RED/GREEN evidence, and produces a reviewable commit.
+T110 becomes `Needs_Review` only after all four security batches pass.
 
 ## T111: Integrate Safe Local State And Runtime Authorization
 

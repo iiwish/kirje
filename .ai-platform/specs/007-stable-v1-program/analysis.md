@@ -122,6 +122,20 @@ before those tasks become Ready.
 
 Blocking packet gaps for the first checkpoint: none after user approval.
 
+## T110 Just-In-Time Split
+
+T110 crosses four security-baseline state machines (`T202C3` through `T202E`)
+and cannot safely be executed as one long attempt. Following the user's
+step-by-step instruction, T110 is a serial controller task with one reviewed
+commit per bounded attempt. The first attempt is `T202C3-A001`: exact,
+effect-free challenge issuance for account update/remove and credential
+set/delete. It changes no transition, cleanup, effect, schema, core transcript,
+runtime, CLI, MCP, keyring, protocol, or network behavior.
+
+The implementation packet is `.ai-platform/specs/007-stable-v1-program/packets/T110.yaml`.
+Its first attempt has no blocking packet finding. T202C3 remains Running after
+the attempt because transition execution and cleanup are explicitly excluded.
+
 ## Current Implementation Evidence Check
 
 T109 recovered and reviewed the interrupted T202C2 attempt:
