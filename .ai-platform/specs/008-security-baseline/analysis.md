@@ -3,8 +3,8 @@
 ## Metadata
 
 - Feature ID: `008-security-baseline`
-- Status: T202A_Accepted_T202B_Ready
-- Updated: 2026-08-28
+- Status: T202A_Accepted_T202B_A003_Ready
+- Updated: 2026-08-30
 - Inputs: `spec.md`, `checklists/requirements.md`, `plan.md`, `research.md`,
   `data-model.md`, `contracts/**`, `tasks.md`, project constitution and AGENTS
 - Review basis: local code/dependency inspection plus five independent
@@ -13,14 +13,21 @@
 ## Gate Result
 
 - Critical findings: 0 unresolved
-- High findings: 0 unresolved. The nine T202 authority-store packetization
+- High findings: 0 unresolved. The A003 packet accepts the
+  current A002 implementation as its immutable baseline and narrows execution
+  to lifecycle/schema REDs; its stop conditions permit only the declared
+  additive amendment. Independent packet re-review confirms both findings are
+  resolved. The nine T202 authority-store packetization
   findings and four focused T202A artifact-review findings are resolved by the
   canonical authority-store contract, transaction-body DDL, composite SQLite
   relationships, minimal validated core public-key prerequisite, fail-closed
   staged ownership, exact durable transcripts/replay tables, closed transaction
   requests, and rotation/recovery state machine.
-- Medium findings: 0 unresolved. Public target/receipt projection, audit bounds,
-  state derivation, and event privacy are closed in the same contract.
+- Medium findings: 0 unresolved. Canonical schema ownership
+  is assigned to T202B and propagated through T202C-T202E, the unreleased T202A
+  development fence has an explicit fail-closed disposal boundary, and the
+  schema target/hash gates are present at task and packet level. Independent
+  packet re-review confirms all three findings are resolved.
 - Low findings: 3 accepted watch items: future policy/assurance snapshot schemas
   remain executable fail-closed unsupported; the generic artifact validator
   cannot select letter-suffixed child IDs independently; and the frozen
@@ -29,13 +36,15 @@ reports even though its exact byte hash is required. The generated unified-diff
 evidence is excluded from whitespace lint because its context lines use the
 standard single-space patch marker.
 - Execution decision: T201 and T202A are Accepted. T202 remains a Draft
-  acceptance umbrella split into strict serial T202A-T202E. T202B is the only
-  Ready production task; T202C-T202E and T203-T212 remain Draft. T204 and every
+  acceptance umbrella split into strict serial T202A-T202E. T202B-A003 is the
+  only Ready production task. T202C-T202E and T203-T212 remain Draft. T204 and
+  every
   later task directly require the T202 umbrella to be Accepted.
 
 The product requirements remain confirmed and do not add a remote mailbox
 effect or broaden authentication/protocol scope. T202A owns the accepted
-schema/bootstrap behavior; later authority operations reuse its exact schema
+bootstrap behavior and relationship structure; T202B owns the sole pre-release
+lifecycle column/index amendment. T202C-T202E reuse the canonical T202B schema
 and cannot invent a second authority format.
 
 ## Artifact Consistency
@@ -350,9 +359,9 @@ receipt/POP verification, and adds T202A's minimal core `OwnerPublicKey` plus
 SQLite key/role/epoch constraints. T202A does not acquire the full T202B payload
 snapshot or any staged mutation API.
 
-Executable SQLite validation of the remediated fence reports SHA-256
-`3a59cf60ebe57affad3e440c3eb3f70e09d8e3c90974fc57318861560c4fb632`, 17 user
-tables, 14 declared indexes, and 3 triggers. The body parses with foreign keys
+Executable SQLite validation of the canonical fence reports SHA-256
+`572a73ba5fa83c763188d804ce9767a3c21373410d8b170f6d97b49be0a86454`, 17 user
+tables, 15 declared indexes, and 3 triggers. The body parses with foreign keys
 enabled; valid receipt/nonce/grant and two complete remote-effect through
 observation chains insert successfully; `PRAGMA foreign_key_check` returns zero
 rows and `PRAGMA integrity_check` returns `ok`. Cross-linked receipt, nonce use,
@@ -361,7 +370,13 @@ observation inserts each fail with `FOREIGN KEY constraint failed` and leave zer
 invalid child rows. Equal public keys fail the unique constraint, swapped roles
 fail the role trigger, and initial-staged plus epoch-gap rows fail checks.
 
-The outer-transaction rollback probe observed 34 user objects and five initial
+The challenge table carries the exact created-event sequence and a declared
+`(context_sha256, created_event_sequence, challenge_id)` lifecycle index. The
+restart validator can therefore stream same-context histories in causal order
+with O(1) application memory and indexed event lookups; it does not execute a
+history-quadratic correlated scan or rely on timestamp ordering.
+
+The outer-transaction rollback probe observes 35 user objects and five initial
 rows with application ID `1263096394` and user version `1` before rollback; after
 rollback it observed zero user objects, application ID `0`, and user version `0`.
 This closes the reproduced nested-transaction/crash counterexample.
@@ -381,8 +396,9 @@ and `git diff --check` passes.
 - Owner public key: exact 32-byte parsed non-weak `OwnerPublicKey`, distinct
   owner/recovery values, no serde/default/private/signing surface in T202A.
 - Fixed authority: platform anchor/journal/apply-lock paths, no normal override.
-- Authority DB identity: `application_id=0x4B49524A` (`KIRJ`), user version 1,
-  full schema created by T202A and reused unchanged by T202B-T202E.
+- Authority DB identity: `application_id=0x4B49524A` (`KIRJ`), user version 1;
+  T202A owns bootstrap structure and T202B owns the sole pre-release lifecycle
+  column/index amendment. T202C-T202E reuse the canonical T202B fence unchanged.
 - Bootstrap: one outer transaction owns schema body, initial rows, application
   ID/version, and commit; create-only external anchor write then exact confirm.
   Anchor-present/DB-missing, every third-state mismatch, and every T202A staged
@@ -465,13 +481,13 @@ its digest.
 
 ## Execution Gate
 
-`APPROVED_FOR_T202B_PACKETIZATION`
+`APPROVED_FOR_T202B_A003_EXECUTION`
 
 T202A is accepted from four test-first attempts, independent security and QA
-review, the exact canonical schema digest, and fresh packet/workspace gates.
-T202B's stage boundary, clock-pair recovery, proof/replay truth table, exact
-event map, streaming validator, deterministic fault matrix, later-task ownership,
-and privacy exceptions have two independent read-only packet reviews with no
-unresolved Critical, High, or Medium finding. T202B may edit only its declared
-core snapshot and challenge/proof/receipt files and must begin with its declared
-RED evidence. The T202 umbrella remains non-Accepted.
+review, its bootstrap-schema digest, and fresh packet/workspace gates. A003
+retains the A001/A002 RED evidence and implementation as a hash-pinned baseline,
+then adds only lifecycle linkage/schema REDs and their minimum implementation.
+Its amended packet must receive an independent no-Critical/High/Medium pass
+before execution. That pass is recorded as `T202B_A003_PACKET_REVIEW_PASS`;
+T202B-A003 may execute only its hash-pinned lifecycle/schema amendment. The T202
+umbrella remains non-Accepted.

@@ -67,12 +67,24 @@ user_version = 1
 busy_timeout = 5000 milliseconds
 ```
 
-An existing database is accepted only when `application_id` is `KIRJ` and
-`user_version` is exactly 1. A nonzero foreign application ID, a zero application
+An existing database is accepted only when `application_id` is `KIRJ`,
+`user_version` is exactly 1, and the complete object inventory and canonical SQL
+match Authority SQLite v1. A nonzero foreign application ID, a zero application
 ID on a database containing any user object or row, a `KIRJ` database with a
-zero/unsupported schema version, and any version newer than 1 fail closed. A
-zero-ID pristine database with no user objects is the only existing file that
-may enter v1 initialization.
+zero/unsupported schema version or noncanonical inventory, and any version newer
+than 1 fail closed. A zero-ID pristine database with no user objects is the only
+existing file that may enter v1 initialization.
+
+The T202A-only development fence at commit `f292132` is not a supported database
+version. At the 2026-08-30 A003 governance freeze it had never entered `main`, a
+remote branch, or a release tag, and no runtime, CLI, MCP, or protocol authority
+entry point referenced it. The durable product rule is that this old fence was
+never released or integrated. It can contain only bootstrap trust rows, not
+registered accounts, credentials, remote effects, or mail operations. A
+manually created developer database with that inventory fails closed and must
+be removed together with its paired developer anchor before re-bootstrap.
+Production code never auto-migrates, silently repairs, or deletes such a
+database. Authority SQLite v1 begins at the canonical T202B fence.
 
 ## Authority Home
 
@@ -487,6 +499,16 @@ clock pair. Once the old row is authorized or expired, a fresh request may
 commit a new challenge with a new 16-byte UUIDv4 grant plus 32-byte nonce. T202E
 adds invalidated-state replacement. The planner, not this transaction, owns
 remote effect-ID generation.
+
+Every committed challenge stores the exact sequence of its `challenge_created`
+event in `created_event_sequence`. The value is linked inside the same
+transaction after the event append and before commit; `NULL` is only an
+uncommitted intermediate state. Restart validation streams the
+`authorization_challenges_context_created_sequence` index and requires each
+same-context predecessor to have an exact `challenge_authorized` or
+`challenge_expired` terminal event whose sequence is lower than the successor's
+created-event sequence. This makes same-context lifecycle intervals
+non-overlapping even when multiple events share one effective timestamp.
 
 `VerifyProofRequest` carries a bounded `AuthorizationProof` and observed time.
 The transaction compares exact persisted bytes, active role/mask/key/epoch/bundle,

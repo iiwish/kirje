@@ -165,7 +165,8 @@ Deliverables:
 
 Acceptance criteria:
 - T202A-T202E are Accepted with no unresolved Critical/High finding.
-- Fresh combined store/core validation uses the exact schema created by T202A.
+- Fresh combined store/core validation uses the bootstrap structure created by
+  T202A and the sole pre-release lifecycle column/index amendment owned by T202B.
 
 TDD plan:
 - RED: Child tasks own behavior RED evidence; umbrella review fails while any
@@ -336,6 +337,8 @@ Allowed files:
 - `crates/kirje-core/tests/authorization_contract.rs`
 - `crates/kirje-store/src/lib.rs`
 - `crates/kirje-store/src/authority.rs`
+- `crates/kirje-store/src/authority/schema_v1.sql`
+- `crates/kirje-store/tests/authority_schema.rs`
 - `crates/kirje-store/tests/authority_authorization.rs`
 - `crates/kirje-store/tests/fixtures/authority/authorization/**`
 
@@ -357,7 +360,9 @@ Test targets:
   high-water pair, committed-expiry exact retry/response-loss recovery, no TTL
   extension or revival
 - Exact ready-bootstrap prefix, B causal row graphs, fixed event numeric/detail
-  mapping, contiguous sequence/high-water, corruption and bounded BLOB loading
+  mapping, persisted created-event linkage, non-overlapping same-context
+  lifecycle intervals, contiguous sequence/high-water, corruption and bounded
+  BLOB loading
 - Explicit bounded owner challenge export, receipt target/state projection
   (`Unclaimed`/`Expired` in B), and ordinary output omission of proof/signature/
   nonce/manifest/realm/location material
@@ -372,14 +377,14 @@ Acceptance criteria:
 - One first proof creates exactly one immutable receipt/nonce use; historical
   exact replay returns it without fresh authority.
 - Restart-open validates every B row/event causally while retaining the exact
-  T202A DDL and initial trust-root constraints.
+  initial trust-root constraints and the canonical lifecycle index.
 
 TDD plan:
 - RED: Add accessor/sealing compile tests, transcript mutations, stage-support,
   full replay/effective-time matrix, restart/concurrency/fault, causal corruption,
   bounded-load, event, and output-privacy failures.
 - GREEN: Expose the minimum read-only core projection and implement one proof
-  transaction against the fixed A schema.
+  transaction against the canonical v1 schema with exact created-event linkage.
 - REFACTOR: Consolidate transcript builders only after independent byte goldens
   and parser-nonduplication review pass.
 
@@ -387,17 +392,21 @@ Validation commands:
 ```bash
 cargo test -p kirje-core --test authorization_contract --all-features --locked
 cargo test -p kirje-store --test authority_authorization --all-features --locked
+cargo test -p kirje-store --test authority_schema --all-features --locked
 cargo test -p kirje-core -p kirje-store --all-features --locked
 cargo test -p kirje-store --no-default-features --locked
 cargo clippy -p kirje-core -p kirje-store --all-targets --all-features --locked -- -D warnings
 cargo +1.88 check -p kirje-core -p kirje-store --all-features --locked
+test "$(shasum -a 256 crates/kirje-store/src/authority/schema_v1.sql | cut -d ' ' -f1)" = "572a73ba5fa83c763188d804ce9767a3c21373410d8b170f6d97b49be0a86454"
 ```
 
 Definition of Done:
 - Projection ownership, proof/receipt bytes, exact replay truth table, nonce
   uniqueness, stage support, effective clock bounds, event/causal validation,
   crash recovery, and public omission are executable and reviewed.
-- T202A schema remains byte-for-byte unchanged.
+- The canonical v1 schema has exactly one additive challenge lifecycle column
+  and one declared lifecycle index, with unchanged application ID/user version,
+  tables, triggers, and trust-root semantics.
 - Real post-rotation/invalidation replay remains explicitly assigned to T202E.
 
 Packet path:
@@ -478,7 +487,7 @@ cargo clippy -p kirje-store --all-targets --all-features --locked -- -D warnings
 Definition of Done:
 - Exact enrollment, account lifecycle, transition recovery, cleanup state, FK,
   challenge issuance/effect, event, and projection tests pass without changing
-  the A schema.
+  the canonical T202B schema.
 - No registry API returns location material, credential ID/binding digest, clear
   display/email/endpoint, locator bytes, or cross-account state normally.
 
@@ -568,7 +577,8 @@ Definition of Done:
 - All six durable transcript domains, typed rechecks, exact recovery, global
   uniqueness, permit ownership, result bounds, crash ambiguity, and projection
   privacy are executable and reviewed.
-- T202A schema remains unchanged and no adapter implementation enters store.
+- The canonical T202B schema remains unchanged and no adapter implementation
+  enters store.
 
 Packet path:
 - `.ai-platform/specs/008-security-baseline/packets/T202D.yaml`
@@ -660,7 +670,7 @@ cargo clippy -p kirje-core -p kirje-store --all-targets --all-features --locked 
 
 Definition of Done:
 - Rotation/recovery/audit behavior and the combined authority suite pass against
-  the unchanged T202A schema with private history retained.
+  the unchanged canonical T202B schema with private history retained.
 - Independent spec/security/engineering/QA reviews find no blocking issue.
 - T202 remains non-Accepted until its aggregate evidence receives recorded
   acceptance from the delegated project owner.
@@ -1552,8 +1562,8 @@ Evidence required:
 
 Confirmed on 2026-08-28 under the user's explicit standing project-owner
 delegation and instruction to continue without per-step approval. T202A is
-Accepted and T202B is the only Ready production task. T202C-T202E and T203-T212
-are Draft; the T202
+Accepted and T202B-A003 is the only Ready production task after independent
+packet review. T202C-T202E and T203-T212 are Draft; the T202
 umbrella is Draft and cannot become Accepted before T202E evidence and recorded
 delegated acceptance. Individual task acceptance remains evidence-based rather
 than inferred from this graph confirmation; a failed or missing gate still stops

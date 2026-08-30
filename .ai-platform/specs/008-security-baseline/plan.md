@@ -583,8 +583,9 @@ Additional security gates include:
 ## User Review Gate
 
 Confirmed on 2026-08-28 under the user's delegated project-owner authority.
-T202 is a serial umbrella. T202A is Accepted and T202B is the only Ready child;
-T202C-T202E remain Draft until their predecessor is Accepted. T204 and every
+T202 is a serial umbrella. T202A is Accepted and T202B-A003 is the only Ready
+production task after independent packet review. T202C-T202E remain Draft until
+their predecessor is Accepted. T204 and every
 later production task additionally require the T202 umbrella to be Accepted.
 Execution still requires one self-contained packet per ready task, verified RED
 evidence, and review.
