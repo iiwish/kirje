@@ -8,18 +8,23 @@ use std::{
 };
 
 use kirje_core::{
-    ActionManifest, AuthorizationGrantId, AuthorizationProof, AuthorizationReceiptProjection,
-    AuthorizationReceiptState, ConfigCas, MailError, MailErrorCode, ManifestContext,
-    ManifestPayload, ManifestTarget, OwnerPublicKey, PlatformLocationMaterial, SensitiveAction,
-    Sha256Digest, StoreEnrollManifest, StoreEnrollmentState, StoreId, TargetKind, TransitionId,
+    AccountBinding, AccountId, AccountSnapshot, AccountStateReason, ActionManifest,
+    AuthorizationGrantId, AuthorizationProof, AuthorizationReceiptProjection,
+    AuthorizationReceiptState, BindingState, ConfigCas, CredentialId, CredentialKind, Endpoint,
+    EndpointSnapshot, HostKind, MailAccountConfig, MailError, MailErrorCode, ManifestContext,
+    ManifestPayload, ManifestTarget, OwnerPublicKey, PlatformLocationMaterial, Protocol,
+    SensitiveAction, Sha256Digest, StoreEnrollManifest, StoreEnrollmentState, StoreId,
+    StoredCredentialState, TargetKind, TransitionId, TransportSecurity,
 };
 use kirje_store::{
-    AnchorPresence, AuthorityFaultPoint, AuthorityOpenContext, AuthorityOpenState, AuthorityStore,
-    AuthorityValidationQueryCounts, AuthorizationChallengeExport, BootstrapInput,
-    BootstrapSnapshot, CreateChallengeRequest, DeterministicEntropy, EnrollStoreRequest,
-    EnrolledStoreProjection, EnrolledStoreState, GrantUseRequest, IsolatedAuthorityHome,
-    JournalLocationDigest, VerifyProofRequest, reset_authority_validation_query_counts,
-    take_authority_validation_query_counts,
+    AccountTransitionKind, AccountTransitionObservationRequest, AccountTransitionProjection,
+    AccountTransitionState, AnchorPresence, AuthorityFaultPoint, AuthorityOpenContext,
+    AuthorityOpenState, AuthorityStore, AuthorityValidationQueryCounts,
+    AuthorizationChallengeExport, BootstrapInput, BootstrapSnapshot, CreateChallengeRequest,
+    DeterministicEntropy, EnrollStoreRequest, EnrolledStoreProjection, EnrolledStoreState,
+    GrantUseRequest, IsolatedAuthorityHome, JournalLocationDigest, PrepareAccountTransitionRequest,
+    RegisteredAccountState, RegisteredStoreTransitionState, VerifyProofRequest,
+    reset_authority_validation_query_counts, take_authority_validation_query_counts,
 };
 use rusqlite::{Connection, params};
 use sha2::{Digest as _, Sha256};
@@ -31,6 +36,8 @@ const RECOVERY_PUBLIC_KEY: &str =
     "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c";
 const SIGNATURES: &str =
     include_str!("fixtures/authority/registry/store_enrollment/signatures.txt");
+const ACCOUNT_CREATE_VECTORS: &str =
+    include_str!("fixtures/authority/registry/account_create/vectors.txt");
 
 struct ReadyFixture {
     _temp: TempDir,
@@ -67,6 +74,10 @@ fn signature(index: usize) -> [u8; 64] {
     hex(value)
 }
 
+fn account_signature(name: &str) -> [u8; 64] {
+    hex(account_vector(name))
+}
+
 fn location() -> JournalLocationDigest {
     JournalLocationDigest::from_bytes([0x91; 32])
 }
@@ -83,6 +94,10 @@ fn deterministic(bytes: Vec<u8>) -> DeterministicEntropy {
 }
 
 fn ready_fixture() -> ReadyFixture {
+    ready_fixture_with_owner(OWNER_PUBLIC_KEY)
+}
+
+fn ready_fixture_with_owner(owner_public_key: &str) -> ReadyFixture {
     let temp = TempDir::new().unwrap();
     let home = IsolatedAuthorityHome::new(temp.path().to_path_buf()).unwrap();
     let pending = AuthorityStore::open_isolated(
@@ -93,7 +108,7 @@ fn ready_fixture() -> ReadyFixture {
     .unwrap()
     .prepare_bootstrap(BootstrapInput {
         journal_location_sha256: location(),
-        owner_public_key: key(OWNER_PUBLIC_KEY),
+        owner_public_key: key(owner_public_key),
         recovery_public_key: key(RECOVERY_PUBLIC_KEY),
         observed_at_unix_ms: 400_000,
     })
@@ -113,11 +128,64 @@ fn ready_fixture() -> ReadyFixture {
     }
 }
 
+fn account_ready_fixture() -> ReadyFixture {
+    ready_fixture_with_owner(account_vector("owner_public_key"))
+}
+
+fn enroll_account_fixture_store(fixture: &ReadyFixture) -> AuthorizedFixture {
+    let challenge = create_challenge(fixture, 0);
+    let proof = AuthorizationProof::new(
+        challenge.challenge_id,
+        challenge.key_id,
+        challenge.signing_payload_sha256,
+        account_signature("store_signature"),
+    );
+    let receipt = open_ready(
+        fixture,
+        deterministic(hex::<16>(account_vector("store_receipt_entropy")).to_vec()),
+    )
+    .verify_proof(VerifyProofRequest {
+        proof: proof.clone(),
+        observed_at_unix_ms: issued_at(0) + 100,
+    })
+    .unwrap();
+    let connection = Connection::open(fixture.home.database_path()).unwrap();
+    let grant: Vec<u8> = connection
+        .query_row(
+            "SELECT grant_id FROM authorization_challenges WHERE challenge_id=?1",
+            [challenge.challenge_id.as_bytes()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let authorized = AuthorizedFixture {
+        challenge,
+        receipt,
+        proof,
+        manifest: manifest(0),
+        grant_id: AuthorizationGrantId::try_from(Uuid::from_slice(&grant).unwrap()).unwrap(),
+    };
+    open_ready(fixture, deterministic(Vec::new()))
+        .enroll_store(enrollment_request(0, &authorized, issued_at(0) + 200))
+        .unwrap();
+    authorized
+}
+
 fn open_ready(fixture: &ReadyFixture, entropy: DeterministicEntropy) -> AuthorityStore {
     let store = AuthorityStore::open_isolated(
         context(AnchorPresence::Present(fixture.snapshot.anchor.clone())),
         fixture.home.clone(),
         entropy,
+    )
+    .unwrap();
+    assert!(matches!(store.state(), AuthorityOpenState::Ready(_)));
+    store
+}
+
+fn open_ready_with_fault(fixture: &ReadyFixture, fault: AuthorityFaultPoint) -> AuthorityStore {
+    let store = AuthorityStore::open_isolated(
+        context(AnchorPresence::Present(fixture.snapshot.anchor.clone())),
+        fixture.home.clone().with_authority_fault(fault),
+        deterministic(Vec::new()),
     )
     .unwrap();
     assert!(matches!(store.state(), AuthorityOpenState::Ready(_)));
@@ -162,6 +230,243 @@ fn location_sha256(index: usize) -> Sha256Digest {
 
 fn config_sha256(index: usize) -> Sha256Digest {
     Sha256Digest::digest(format!("synthetic-config-{}", profile(index).2).as_bytes())
+}
+
+fn account_vector(name: &str) -> &'static str {
+    ACCOUNT_CREATE_VECTORS
+        .lines()
+        .filter_map(|line| line.split_once('='))
+        .find_map(|(key, value)| (key == name).then_some(value))
+        .unwrap()
+}
+
+fn account_id() -> AccountId {
+    AccountId::from_str(account_vector("account_id")).unwrap()
+}
+
+fn credential_id() -> CredentialId {
+    CredentialId::from_str(account_vector("credential_id")).unwrap()
+}
+
+fn account_transition_id() -> TransitionId {
+    TransitionId::from_str(account_vector("transition_id")).unwrap()
+}
+
+fn account_after_config_sha256() -> Sha256Digest {
+    Sha256Digest::from_bytes(hex(account_vector("after_config_sha256")))
+}
+
+fn account_third_config_sha256() -> Sha256Digest {
+    Sha256Digest::from_bytes(hex(account_vector("third_config_sha256")))
+}
+
+fn account_binding() -> AccountBinding {
+    AccountBinding::from_config(&MailAccountConfig {
+        id: account_vector("display_id").to_owned(),
+        email: account_vector("email").to_owned(),
+        username: account_vector("username").to_owned(),
+        incoming: Endpoint {
+            protocol: Protocol::Imap,
+            host: account_vector("incoming_host").to_owned(),
+            port: 993,
+            security: TransportSecurity::ImplicitTls,
+        },
+        outgoing: Some(Endpoint {
+            protocol: Protocol::Smtp,
+            host: account_vector("outgoing_host").to_owned(),
+            port: 465,
+            security: TransportSecurity::ImplicitTls,
+        }),
+        credential_kind: CredentialKind::AppPassword,
+    })
+    .unwrap()
+}
+
+fn account_manifest() -> ActionManifest {
+    account_manifest_with_state_reason(Some(AccountStateReason::CredentialReentryRequired))
+}
+
+fn account_manifest_with_state_reason(state_reason: Option<AccountStateReason>) -> ActionManifest {
+    let account_id = account_id();
+    let binding_sha256 = account_binding().sha256();
+    let after = AccountSnapshot {
+        display_id: account_vector("display_id").to_owned(),
+        account_id,
+        generation: NonZeroU64::new(1).unwrap(),
+        email: account_vector("email").to_owned(),
+        username: account_vector("username").to_owned(),
+        credential_kind: CredentialKind::AppPassword,
+        credential_id: credential_id(),
+        binding_version: 1,
+        binding_sha256,
+        binding_state: BindingState::Proposed,
+        credential_state: StoredCredentialState::ReentryRequired,
+        state_reason,
+        incoming: EndpointSnapshot {
+            protocol: Protocol::Imap,
+            exact_host: account_vector("incoming_host").to_owned(),
+            host_kind: HostKind::Dns,
+            canonical_host: account_vector("incoming_host").to_owned(),
+            port: 993,
+            security: TransportSecurity::ImplicitTls,
+        },
+        outgoing: Some(EndpointSnapshot {
+            protocol: Protocol::Smtp,
+            exact_host: account_vector("outgoing_host").to_owned(),
+            host_kind: HostKind::Dns,
+            canonical_host: account_vector("outgoing_host").to_owned(),
+            port: 465,
+            security: TransportSecurity::ImplicitTls,
+        }),
+        cleanup_ids: Vec::new(),
+    };
+    ActionManifest::new(
+        ManifestContext {
+            target: ManifestTarget::Account(account_id),
+            store_id: Some(store_id(0)),
+            account_id: Some(account_id),
+            account_binding_sha256: Some(binding_sha256),
+            policy_sha256: None,
+            effect_id: None,
+        },
+        ManifestPayload::AccountCreate(kirje_core::AccountMutationManifest {
+            transition_id: account_transition_id(),
+            config_cas: ConfigCas {
+                store_id: store_id(0),
+                generation: NonZeroU64::new(1).unwrap(),
+                exact_content_sha256: config_sha256(0),
+                location_sha256: location_sha256(0),
+            },
+            before: None,
+            after: Some(after),
+            next_config_generation: NonZeroU64::new(2).unwrap(),
+            after_config_sha256: account_after_config_sha256(),
+            cleanup: Vec::new(),
+        }),
+    )
+    .unwrap()
+}
+
+fn second_account_id() -> AccountId {
+    AccountId::from_str(account_vector("second_account_id")).unwrap()
+}
+
+fn second_credential_id() -> CredentialId {
+    CredentialId::from_str(account_vector("second_credential_id")).unwrap()
+}
+
+fn second_account_transition_id() -> TransitionId {
+    TransitionId::from_str(account_vector("second_transition_id")).unwrap()
+}
+
+fn second_account_after_config_sha256() -> Sha256Digest {
+    Sha256Digest::from_bytes(hex(account_vector("second_after_config_sha256")))
+}
+
+fn second_account_binding() -> AccountBinding {
+    AccountBinding::from_config(&MailAccountConfig {
+        id: account_vector("second_display_id").to_owned(),
+        email: account_vector("second_email").to_owned(),
+        username: account_vector("second_username").to_owned(),
+        incoming: Endpoint {
+            protocol: Protocol::Imap,
+            host: account_vector("incoming_host").to_owned(),
+            port: 993,
+            security: TransportSecurity::ImplicitTls,
+        },
+        outgoing: Some(Endpoint {
+            protocol: Protocol::Smtp,
+            host: account_vector("outgoing_host").to_owned(),
+            port: 465,
+            security: TransportSecurity::ImplicitTls,
+        }),
+        credential_kind: CredentialKind::AppPassword,
+    })
+    .unwrap()
+}
+
+fn second_account_manifest() -> ActionManifest {
+    second_account_manifest_from(
+        NonZeroU64::new(2).unwrap(),
+        account_after_config_sha256(),
+        NonZeroU64::new(3).unwrap(),
+        second_account_after_config_sha256(),
+    )
+}
+
+fn second_account_manifest_after_abort() -> ActionManifest {
+    second_account_manifest_from(
+        NonZeroU64::new(1).unwrap(),
+        config_sha256(0),
+        NonZeroU64::new(2).unwrap(),
+        second_account_after_config_sha256(),
+    )
+}
+
+fn second_account_manifest_from(
+    generation: NonZeroU64,
+    before_config_sha256: Sha256Digest,
+    next_generation: NonZeroU64,
+    after_config_sha256: Sha256Digest,
+) -> ActionManifest {
+    let account_id = second_account_id();
+    let binding_sha256 = second_account_binding().sha256();
+    let after = AccountSnapshot {
+        display_id: account_vector("second_display_id").to_owned(),
+        account_id,
+        generation: NonZeroU64::new(1).unwrap(),
+        email: account_vector("second_email").to_owned(),
+        username: account_vector("second_username").to_owned(),
+        credential_kind: CredentialKind::AppPassword,
+        credential_id: second_credential_id(),
+        binding_version: 1,
+        binding_sha256,
+        binding_state: BindingState::Proposed,
+        credential_state: StoredCredentialState::ReentryRequired,
+        state_reason: Some(AccountStateReason::CredentialReentryRequired),
+        incoming: EndpointSnapshot {
+            protocol: Protocol::Imap,
+            exact_host: account_vector("incoming_host").to_owned(),
+            host_kind: HostKind::Dns,
+            canonical_host: account_vector("incoming_host").to_owned(),
+            port: 993,
+            security: TransportSecurity::ImplicitTls,
+        },
+        outgoing: Some(EndpointSnapshot {
+            protocol: Protocol::Smtp,
+            exact_host: account_vector("outgoing_host").to_owned(),
+            host_kind: HostKind::Dns,
+            canonical_host: account_vector("outgoing_host").to_owned(),
+            port: 465,
+            security: TransportSecurity::ImplicitTls,
+        }),
+        cleanup_ids: Vec::new(),
+    };
+    ActionManifest::new(
+        ManifestContext {
+            target: ManifestTarget::Account(account_id),
+            store_id: Some(store_id(0)),
+            account_id: Some(account_id),
+            account_binding_sha256: Some(binding_sha256),
+            policy_sha256: None,
+            effect_id: None,
+        },
+        ManifestPayload::AccountCreate(kirje_core::AccountMutationManifest {
+            transition_id: second_account_transition_id(),
+            config_cas: ConfigCas {
+                store_id: store_id(0),
+                generation,
+                exact_content_sha256: before_config_sha256,
+                location_sha256: location_sha256(0),
+            },
+            before: None,
+            after: Some(after),
+            next_config_generation: next_generation,
+            after_config_sha256,
+            cleanup: Vec::new(),
+        }),
+    )
+    .unwrap()
 }
 
 fn manifest(index: usize) -> ActionManifest {
@@ -284,6 +589,258 @@ fn enrollment_request(
     .unwrap()
 }
 
+fn authorize_account_create(fixture: &ReadyFixture) -> (AuthorizedFixture, AuthorizedFixture) {
+    let enrollment = enroll_account_fixture_store(fixture);
+    let manifest = account_manifest();
+    let challenge = open_ready(
+        fixture,
+        deterministic(hex::<48>(account_vector("challenge_entropy")).to_vec()),
+    )
+    .create_challenge(CreateChallengeRequest {
+        manifest: manifest.clone(),
+        observed_at_unix_ms: 501_000,
+        expires_at_unix_ms: 501_900,
+    })
+    .unwrap();
+    let proof = AuthorizationProof::new(
+        challenge.challenge_id,
+        challenge.key_id,
+        challenge.signing_payload_sha256,
+        account_signature("account_signature"),
+    );
+    let receipt = open_ready(
+        fixture,
+        deterministic(hex::<16>(account_vector("receipt_entropy")).to_vec()),
+    )
+    .verify_proof(VerifyProofRequest {
+        proof: proof.clone(),
+        observed_at_unix_ms: 501_100,
+    })
+    .unwrap();
+    let connection = Connection::open(fixture.home.database_path()).unwrap();
+    let grant: Vec<u8> = connection
+        .query_row(
+            "SELECT grant_id FROM authorization_challenges WHERE challenge_id=?1",
+            [challenge.challenge_id.as_bytes()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let account = AuthorizedFixture {
+        challenge,
+        receipt,
+        proof,
+        manifest,
+        grant_id: AuthorizationGrantId::try_from(Uuid::from_slice(&grant).unwrap()).unwrap(),
+    };
+    (account, enrollment)
+}
+
+fn authorize_second_account_create(fixture: &ReadyFixture) -> AuthorizedFixture {
+    authorize_successor_account_create(
+        fixture,
+        second_account_manifest(),
+        "second_challenge_entropy",
+        "second_receipt_entropy",
+        "second_account_signature",
+        501_500,
+    )
+}
+
+fn authorize_second_account_create_after_abort(fixture: &ReadyFixture) -> AuthorizedFixture {
+    authorize_successor_account_create(
+        fixture,
+        second_account_manifest_after_abort(),
+        "second_after_abort_challenge_entropy",
+        "second_after_abort_receipt_entropy",
+        "second_after_abort_account_signature",
+        501_400,
+    )
+}
+
+fn authorize_successor_account_create(
+    fixture: &ReadyFixture,
+    manifest: ActionManifest,
+    challenge_entropy: &str,
+    receipt_entropy: &str,
+    signature: &str,
+    issued_at_unix_ms: i64,
+) -> AuthorizedFixture {
+    let challenge = open_ready(
+        fixture,
+        deterministic(hex::<48>(account_vector(challenge_entropy)).to_vec()),
+    )
+    .create_challenge(CreateChallengeRequest {
+        manifest: manifest.clone(),
+        observed_at_unix_ms: issued_at_unix_ms,
+        expires_at_unix_ms: issued_at_unix_ms + 900,
+    })
+    .unwrap();
+    let proof = AuthorizationProof::new(
+        challenge.challenge_id,
+        challenge.key_id,
+        challenge.signing_payload_sha256,
+        account_signature(signature),
+    );
+    let receipt = open_ready(
+        fixture,
+        deterministic(hex::<16>(account_vector(receipt_entropy)).to_vec()),
+    )
+    .verify_proof(VerifyProofRequest {
+        proof: proof.clone(),
+        observed_at_unix_ms: issued_at_unix_ms + 100,
+    })
+    .unwrap();
+    let connection = Connection::open(fixture.home.database_path()).unwrap();
+    let grant: Vec<u8> = connection
+        .query_row(
+            "SELECT grant_id FROM authorization_challenges WHERE challenge_id=?1",
+            [challenge.challenge_id.as_bytes()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    AuthorizedFixture {
+        challenge,
+        receipt,
+        proof,
+        manifest,
+        grant_id: AuthorizationGrantId::try_from(Uuid::from_slice(&grant).unwrap()).unwrap(),
+    }
+}
+
+fn account_grant_request(value: &AuthorizedFixture) -> GrantUseRequest {
+    GrantUseRequest::new(
+        value.grant_id,
+        value.receipt.receipt_id,
+        SensitiveAction::AccountCreate,
+        TargetKind::Account,
+        account_id().as_bytes().to_vec(),
+        value.manifest.sha256(),
+    )
+    .unwrap()
+}
+
+fn prepare_account_request(
+    authorized: &AuthorizedFixture,
+    observed_at_unix_ms: i64,
+) -> PrepareAccountTransitionRequest {
+    PrepareAccountTransitionRequest::new(
+        account_grant_request(authorized),
+        account_transition_id(),
+        store_id(0),
+        account_id(),
+        AccountTransitionKind::AccountCreate,
+        config_sha256(0),
+        account_after_config_sha256(),
+        NonZeroU64::new(1).unwrap(),
+        NonZeroU64::new(2).unwrap(),
+        Sha256Digest::digest(&encode(
+            b"KIRJE-ACCOUNT-DISPLAY-ID-V1\0",
+            &[account_vector("display_id").as_bytes()],
+        )),
+        NonZeroU64::new(1).unwrap(),
+        credential_id(),
+        account_binding().sha256(),
+        observed_at_unix_ms,
+    )
+    .unwrap()
+}
+
+fn observe_account(
+    state: AccountTransitionState,
+    generation: u64,
+    config_sha256: Sha256Digest,
+    observed_at_unix_ms: i64,
+) -> AccountTransitionObservationRequest {
+    AccountTransitionObservationRequest::new(
+        account_transition_id(),
+        state,
+        NonZeroU64::new(generation).unwrap(),
+        config_sha256,
+        observed_at_unix_ms,
+    )
+    .unwrap()
+}
+
+fn prepare_second_account_request(
+    authorized: &AuthorizedFixture,
+    observed_at_unix_ms: i64,
+) -> PrepareAccountTransitionRequest {
+    prepare_second_account_request_from(
+        authorized,
+        NonZeroU64::new(2).unwrap(),
+        account_after_config_sha256(),
+        NonZeroU64::new(3).unwrap(),
+        observed_at_unix_ms,
+    )
+}
+
+fn prepare_second_account_request_after_abort(
+    authorized: &AuthorizedFixture,
+    observed_at_unix_ms: i64,
+) -> PrepareAccountTransitionRequest {
+    prepare_second_account_request_from(
+        authorized,
+        NonZeroU64::new(1).unwrap(),
+        config_sha256(0),
+        NonZeroU64::new(2).unwrap(),
+        observed_at_unix_ms,
+    )
+}
+
+fn prepare_second_account_request_from(
+    authorized: &AuthorizedFixture,
+    expected_generation: NonZeroU64,
+    before_config_sha256: Sha256Digest,
+    next_generation: NonZeroU64,
+    observed_at_unix_ms: i64,
+) -> PrepareAccountTransitionRequest {
+    let grant = GrantUseRequest::new(
+        authorized.grant_id,
+        authorized.receipt.receipt_id,
+        SensitiveAction::AccountCreate,
+        TargetKind::Account,
+        second_account_id().as_bytes().to_vec(),
+        authorized.manifest.sha256(),
+    )
+    .unwrap();
+    PrepareAccountTransitionRequest::new(
+        grant,
+        second_account_transition_id(),
+        store_id(0),
+        second_account_id(),
+        AccountTransitionKind::AccountCreate,
+        before_config_sha256,
+        second_account_after_config_sha256(),
+        expected_generation,
+        next_generation,
+        Sha256Digest::digest(&encode(
+            b"KIRJE-ACCOUNT-DISPLAY-ID-V1\0",
+            &[account_vector("second_display_id").as_bytes()],
+        )),
+        NonZeroU64::new(1).unwrap(),
+        second_credential_id(),
+        second_account_binding().sha256(),
+        observed_at_unix_ms,
+    )
+    .unwrap()
+}
+
+fn observe_second_account(
+    state: AccountTransitionState,
+    generation: u64,
+    config_sha256: Sha256Digest,
+    observed_at_unix_ms: i64,
+) -> AccountTransitionObservationRequest {
+    AccountTransitionObservationRequest::new(
+        second_account_transition_id(),
+        state,
+        NonZeroU64::new(generation).unwrap(),
+        config_sha256,
+        observed_at_unix_ms,
+    )
+    .unwrap()
+}
+
 fn scalar(connection: &Connection, sql: &str) -> i64 {
     connection.query_row(sql, [], |row| row.get(0)).unwrap()
 }
@@ -318,6 +875,26 @@ fn issuance_fingerprint(connection: &Connection) -> (i64, i64, i64, i64, i64, (i
         scalar(connection, "SELECT COUNT(*) FROM authority_events"),
         scalar(connection, "SELECT COUNT(*) FROM grant_uses"),
         scalar(connection, "SELECT COUNT(*) FROM registered_stores"),
+        clock_pair(connection),
+    )
+}
+
+#[allow(clippy::type_complexity)]
+fn account_registry_fingerprint(
+    connection: &Connection,
+) -> (i64, i64, i64, i64, i64, i64, i64, i64, (i64, i64)) {
+    (
+        scalar(connection, "SELECT COUNT(*) FROM grant_uses"),
+        scalar(connection, "SELECT COUNT(*) FROM registered_stores"),
+        scalar(connection, "SELECT COUNT(*) FROM registered_accounts"),
+        scalar(connection, "SELECT COUNT(*) FROM account_transitions"),
+        scalar(connection, "SELECT COUNT(*) FROM registered_credentials"),
+        scalar(connection, "SELECT COUNT(*) FROM registered_store_versions"),
+        scalar(
+            connection,
+            "SELECT COUNT(*) FROM registered_account_versions",
+        ),
+        scalar(connection, "SELECT COUNT(*) FROM authority_events"),
         clock_pair(connection),
     )
 }
@@ -476,11 +1053,18 @@ fn public_declaration<'a>(source: &'a str, name: &str) -> &'a str {
     panic!("unterminated declaration {name}")
 }
 
-const PRIVATE_TRAIT_TYPES: [&str; 4] = [
+const PRIVATE_TRAIT_TYPES: [&str; 11] = [
     "GrantUseRequest",
     "EnrollStoreRequest",
     "EnrolledStoreState",
     "EnrolledStoreProjection",
+    "AccountTransitionKind",
+    "AccountTransitionState",
+    "RegisteredAccountState",
+    "RegisteredStoreTransitionState",
+    "PrepareAccountTransitionRequest",
+    "AccountTransitionObservationRequest",
+    "AccountTransitionProjection",
 ];
 const FORBIDDEN_PUBLIC_TRAITS: [&str; 4] = ["Debug", "Display", "Serialize", "JsonSchema"];
 
@@ -745,6 +1329,26 @@ fn request_bounds_privacy_and_grant_transcript_are_exact() {
     ] {
         assert!(!projection.contains(private));
     }
+    let transition_projection =
+        public_declaration(source, "pub struct AccountTransitionProjection");
+    for private in [
+        "store_id",
+        "credential_id",
+        "display",
+        "binding",
+        "config_sha256",
+        "location",
+        "manifest",
+        "receipt",
+        "grant",
+        "proof",
+        "signature",
+        "nonce",
+        "key",
+        "path",
+    ] {
+        assert!(!transition_projection.contains(private));
+    }
 }
 
 #[test]
@@ -818,6 +1422,15 @@ fn first_use_exact_recovery_and_receipt_priority_use_effective_time() {
         open_ready(&fixture, deterministic(Vec::new())).state(),
         AuthorityOpenState::Ready(_)
     ));
+    reset_authority_validation_query_counts();
+    assert!(matches!(
+        open_ready(&fixture, deterministic(Vec::new())).state(),
+        AuthorityOpenState::Ready(_)
+    ));
+    assert_eq!(
+        take_authority_validation_query_counts().registry_parent_preflight,
+        1
+    );
 }
 
 #[test]
@@ -1533,7 +2146,16 @@ fn equal_timestamp_successor_and_final_event_order_is_exact() {
             _ => unreachable!(),
         }
         drop(connection);
-        assert_recovery_required(&fixture);
+        let reopened = AuthorityStore::open_isolated(
+            context(AnchorPresence::Present(fixture.snapshot.anchor.clone())),
+            fixture.home.clone(),
+            deterministic(Vec::new()),
+        )
+        .unwrap();
+        assert!(
+            matches!(reopened.state(), AuthorityOpenState::RecoveryRequired),
+            "accepted corruption: {mutation}"
+        );
     }
 }
 
@@ -1607,10 +2229,10 @@ fn restart_rejects_corruption_oversize_orphans_and_every_later_stage_table() {
             deterministic(Vec::new()),
         )
         .unwrap();
-        assert!(matches!(
-            reopened.state(),
-            AuthorityOpenState::RecoveryRequired
-        ));
+        assert!(
+            matches!(reopened.state(), AuthorityOpenState::RecoveryRequired),
+            "unexpectedly accepted isolated row in {table}"
+        );
     }
 
     for mutation in [
@@ -1693,7 +2315,16 @@ fn restart_rejects_corruption_oversize_orphans_and_every_later_stage_table() {
             .unwrap();
         connection.execute(mutation, []).unwrap();
         drop(connection);
-        assert_recovery_required(&fixture);
+        let reopened = AuthorityStore::open_isolated(
+            context(AnchorPresence::Present(fixture.snapshot.anchor.clone())),
+            fixture.home.clone(),
+            deterministic(Vec::new()),
+        )
+        .unwrap();
+        assert!(
+            matches!(reopened.state(), AuthorityOpenState::RecoveryRequired),
+            "accepted bounded corruption: {mutation}"
+        );
     }
 
     for mutation in ["duplicate", "orphan"] {
@@ -1874,6 +2505,7 @@ fn complete_128_row_history_restarts_with_indexed_streams() {
         grant_preflight,
         store_preflight,
         event_preflight,
+        registry_parent_preflight,
         registry_stream,
         bounded_keyed,
     } = take_authority_validation_query_counts();
@@ -1883,8 +2515,9 @@ fn complete_128_row_history_restarts_with_indexed_streams() {
     assert_eq!(grant_preflight, 1);
     assert_eq!(store_preflight, 1);
     assert_eq!(event_preflight, 1);
-    assert_eq!(registry_stream, 4);
-    assert_eq!(bounded_keyed, 28 * 128);
+    assert_eq!(registry_parent_preflight, 1);
+    assert_eq!(registry_stream, 5 + 128);
+    assert_eq!(bounded_keyed, 29 * 128);
     let connection = Connection::open(fixture.home.database_path()).unwrap();
     assert_eq!(scalar(&connection, "SELECT COUNT(*) FROM grant_uses"), 128);
     assert_eq!(
@@ -1947,4 +2580,1313 @@ fn complete_128_row_history_restarts_with_indexed_streams() {
         .find("\nfn ")
         .map_or(source.len(), |offset| start + offset);
     assert!(!source[start..end].contains("collect::<Vec"));
+}
+
+#[test]
+fn c2_transition_surface_and_parent_preflight_counter_are_required() {
+    assert_eq!(AccountTransitionKind::AccountCreate.code(), 1);
+    assert_eq!(AccountTransitionKind::AccountUpdate.code(), 2);
+    assert_eq!(AccountTransitionKind::AccountRemove.code(), 3);
+    assert_eq!(AccountTransitionKind::CredentialSet.code(), 4);
+    assert_eq!(AccountTransitionKind::CredentialDelete.code(), 5);
+
+    let _: fn(
+        &AuthorityStore,
+        PrepareAccountTransitionRequest,
+    ) -> Result<AccountTransitionProjection, MailError> =
+        AuthorityStore::prepare_account_transition;
+    let _: fn(
+        &AuthorityStore,
+        AccountTransitionObservationRequest,
+    ) -> Result<AccountTransitionProjection, MailError> = AuthorityStore::mark_config_committed;
+    let _: fn(
+        &AuthorityStore,
+        AccountTransitionObservationRequest,
+    ) -> Result<AccountTransitionProjection, MailError> =
+        AuthorityStore::finalize_account_transition;
+    let _: fn(
+        &AuthorityStore,
+        AccountTransitionObservationRequest,
+    ) -> Result<AccountTransitionProjection, MailError> = AuthorityStore::abort_transition;
+    let _: fn(
+        &AuthorityStore,
+        AccountTransitionObservationRequest,
+    ) -> Result<AccountTransitionProjection, MailError> =
+        AuthorityStore::mark_transition_recovery_required;
+
+    let fixture = ready_fixture();
+    reset_authority_validation_query_counts();
+    assert!(matches!(
+        open_ready(&fixture, deterministic(Vec::new())).state(),
+        AuthorityOpenState::Ready(_)
+    ));
+    let counts = take_authority_validation_query_counts();
+    assert_eq!(counts.registry_parent_preflight, 1);
+}
+
+#[test]
+fn account_store_events_use_the_bounded_entity_event_stream() {
+    let source = include_str!("../src/authority.rs");
+    let start = source.find("fn account_store_event_is_exact").unwrap();
+    let end = source[start..]
+        .find("\nfn ")
+        .map_or(source.len(), |offset| start + offset);
+    let validator = &source[start..end];
+    assert!(validator.contains("FROM authority_events"));
+    assert!(validator.contains("authority_events_entity_sequence"));
+    assert!(validator.contains("ORDER BY sequence"));
+    assert!(!validator.contains("FROM account_transitions"));
+
+    let fixture = account_ready_fixture();
+    let (authorized, _) = authorize_account_create(&fixture);
+    open_ready(&fixture, deterministic(Vec::new()))
+        .prepare_account_transition(prepare_account_request(&authorized, 501_200))
+        .unwrap();
+    let connection = Connection::open(fixture.home.database_path()).unwrap();
+    let plan = query_plan(
+        &connection,
+        "SELECT sequence,event_code,source,occurred_at,detail,detail_sha256
+         FROM authority_events INDEXED BY authority_events_entity_sequence
+         WHERE entity_kind=4 AND entity_id=zeroblob(16) ORDER BY sequence",
+    );
+    assert!(
+        plan.iter()
+            .any(|line| line.contains("authority_events_entity_sequence"))
+    );
+    for line in plan {
+        assert!(!line.contains("TEMP B-TREE"));
+        assert!(!line.contains("CORRELATED"));
+    }
+}
+
+#[test]
+fn account_restart_validation_has_a_constant_per_transition_query_slope() {
+    let counts = |include_second: bool| {
+        let fixture = account_ready_fixture();
+        let (first, _) = authorize_account_create(&fixture);
+        open_ready(&fixture, deterministic(Vec::new()))
+            .prepare_account_transition(prepare_account_request(&first, 501_200))
+            .unwrap();
+        open_ready(&fixture, deterministic(Vec::new()))
+            .mark_config_committed(observe_account(
+                AccountTransitionState::Prepared,
+                2,
+                account_after_config_sha256(),
+                501_300,
+            ))
+            .unwrap();
+        open_ready(&fixture, deterministic(Vec::new()))
+            .finalize_account_transition(observe_account(
+                AccountTransitionState::ConfigCommitted,
+                2,
+                account_after_config_sha256(),
+                501_400,
+            ))
+            .unwrap();
+        if include_second {
+            let second = authorize_second_account_create(&fixture);
+            open_ready(&fixture, deterministic(Vec::new()))
+                .prepare_account_transition(prepare_second_account_request(&second, 501_700))
+                .unwrap();
+            open_ready(&fixture, deterministic(Vec::new()))
+                .mark_config_committed(observe_second_account(
+                    AccountTransitionState::Prepared,
+                    3,
+                    second_account_after_config_sha256(),
+                    501_800,
+                ))
+                .unwrap();
+            open_ready(&fixture, deterministic(Vec::new()))
+                .finalize_account_transition(observe_second_account(
+                    AccountTransitionState::ConfigCommitted,
+                    3,
+                    second_account_after_config_sha256(),
+                    501_900,
+                ))
+                .unwrap();
+        }
+        reset_authority_validation_query_counts();
+        assert!(matches!(
+            open_ready(&fixture, deterministic(Vec::new())).state(),
+            AuthorityOpenState::Ready(_)
+        ));
+        take_authority_validation_query_counts()
+    };
+    let one = counts(false);
+    let two = counts(true);
+    assert_eq!(one.registry_parent_preflight, 1);
+    assert_eq!(two.registry_parent_preflight, 1);
+    assert_eq!(one.registry_stream, 6);
+    assert_eq!(two.registry_stream, 6);
+    assert_eq!(one.bounded_keyed, 29 + 79);
+    assert_eq!(two.bounded_keyed, 29 + 79 * 2);
+    assert_eq!(two.bounded_keyed - one.bounded_keyed, 79);
+}
+
+#[test]
+fn account_create_challenge_is_intrinsic_reusable_and_effect_free() {
+    let fixture = ready_fixture();
+    let enrolled = authorize(&fixture, 0);
+    open_ready(&fixture, deterministic(Vec::new()))
+        .enroll_store(enrollment_request(0, &enrolled, issued_at(0) + 200))
+        .unwrap();
+
+    let entropy = deterministic(hex::<48>(account_vector("challenge_entropy")).to_vec());
+    let request = CreateChallengeRequest {
+        manifest: account_manifest(),
+        observed_at_unix_ms: 501_000,
+        expires_at_unix_ms: 501_900,
+    };
+    let first = open_ready(&fixture, entropy.clone())
+        .create_challenge(request.clone())
+        .unwrap();
+    assert_eq!(entropy.consumed_bytes(), 48);
+    assert_eq!(first.action, SensitiveAction::AccountCreate);
+    assert_eq!(first.target_kind, TargetKind::Account);
+    assert_eq!(first.target_id, account_id().to_string());
+
+    let retry_entropy = deterministic(Vec::new());
+    let retry = open_ready(&fixture, retry_entropy.clone())
+        .create_challenge(request)
+        .unwrap();
+    assert_eq!(retry.challenge_id, first.challenge_id);
+    assert_eq!(retry_entropy.consumed_bytes(), 0);
+    let connection = Connection::open(fixture.home.database_path()).unwrap();
+    assert_eq!(
+        scalar(
+            &connection,
+            "SELECT COUNT(*) FROM challenge_effects WHERE challenge_id IN
+             (SELECT challenge_id FROM authorization_challenges WHERE action=272)"
+        ),
+        0
+    );
+}
+
+#[test]
+fn account_create_challenge_requires_the_reentry_state_reason() {
+    let fixture = account_ready_fixture();
+    enroll_account_fixture_store(&fixture);
+    let connection = Connection::open(fixture.home.database_path()).unwrap();
+    let before = issuance_fingerprint(&connection);
+    drop(connection);
+
+    let error = exact_error(
+        open_ready(&fixture, deterministic(Vec::new())).create_challenge(CreateChallengeRequest {
+            manifest: account_manifest_with_state_reason(None),
+            observed_at_unix_ms: 501_000,
+            expires_at_unix_ms: 501_900,
+        }),
+    );
+
+    assert_eq!(error.code, MailErrorCode::AuthorizationContextStale);
+    assert_eq!(
+        issuance_fingerprint(&Connection::open(fixture.home.database_path()).unwrap()),
+        before
+    );
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn account_create_challenge_entropy_replacement_and_concurrency_are_exact() {
+    let fixture = account_ready_fixture();
+    enroll_account_fixture_store(&fixture);
+    let before = issuance_fingerprint(&Connection::open(fixture.home.database_path()).unwrap());
+    let exhausted = deterministic(hex::<48>(account_vector("challenge_entropy"))[..47].to_vec());
+    let error = exact_error(open_ready(&fixture, exhausted.clone()).create_challenge(
+        CreateChallengeRequest {
+            manifest: account_manifest(),
+            observed_at_unix_ms: 501_000,
+            expires_at_unix_ms: 501_900,
+        },
+    ));
+    assert_eq!(error.code, MailErrorCode::Internal);
+    assert_eq!(exhausted.consumed_bytes(), 16);
+    assert_eq!(
+        issuance_fingerprint(&Connection::open(fixture.home.database_path()).unwrap()),
+        before
+    );
+
+    let first = open_ready(
+        &fixture,
+        deterministic(hex::<48>(account_vector("challenge_entropy")).to_vec()),
+    )
+    .create_challenge(CreateChallengeRequest {
+        manifest: account_manifest(),
+        observed_at_unix_ms: 501_000,
+        expires_at_unix_ms: 501_900,
+    })
+    .unwrap();
+    let replacement_entropy =
+        deterministic(hex::<48>(account_vector("replacement_challenge_entropy")).to_vec());
+    let replacement = open_ready(&fixture, replacement_entropy.clone())
+        .create_challenge(CreateChallengeRequest {
+            manifest: account_manifest(),
+            observed_at_unix_ms: 502_000,
+            expires_at_unix_ms: 502_900,
+        })
+        .unwrap();
+    assert_ne!(replacement.challenge_id, first.challenge_id);
+    assert_eq!(replacement_entropy.consumed_bytes(), 48);
+    let connection = Connection::open(fixture.home.database_path()).unwrap();
+    assert_eq!(
+        scalar(
+            &connection,
+            "SELECT COUNT(*) FROM authorization_challenges WHERE action=272 AND state='expired'"
+        ),
+        1
+    );
+    assert_eq!(
+        scalar(
+            &connection,
+            "SELECT COUNT(*) FROM authorization_challenges WHERE action=272 AND state='pending'"
+        ),
+        1
+    );
+    drop(connection);
+    let restart_entropy = deterministic(Vec::new());
+    let restart = open_ready(&fixture, restart_entropy.clone())
+        .create_challenge(CreateChallengeRequest {
+            manifest: account_manifest(),
+            observed_at_unix_ms: 502_100,
+            expires_at_unix_ms: 502_900,
+        })
+        .unwrap();
+    assert_eq!(restart.challenge_id, replacement.challenge_id);
+    assert_eq!(restart_entropy.consumed_bytes(), 0);
+
+    let fixture = account_ready_fixture();
+    enroll_account_fixture_store(&fixture);
+    let barrier = Arc::new(Barrier::new(3));
+    let left_entropy =
+        deterministic(hex::<48>(account_vector("concurrent_left_challenge_entropy")).to_vec());
+    let right_entropy =
+        deterministic(hex::<48>(account_vector("concurrent_right_challenge_entropy")).to_vec());
+    let mut workers = Vec::new();
+    for entropy in [left_entropy.clone(), right_entropy.clone()] {
+        let home = fixture.home.clone();
+        let anchor = fixture.snapshot.anchor.clone();
+        let barrier = Arc::clone(&barrier);
+        workers.push(thread::spawn(move || {
+            let store = AuthorityStore::open_isolated(
+                context(AnchorPresence::Present(anchor)),
+                home,
+                entropy,
+            )
+            .unwrap();
+            barrier.wait();
+            store.create_challenge(CreateChallengeRequest {
+                manifest: account_manifest(),
+                observed_at_unix_ms: 501_000,
+                expires_at_unix_ms: 501_900,
+            })
+        }));
+    }
+    barrier.wait();
+    let left = workers.remove(0).join().unwrap().unwrap();
+    let right = workers.remove(0).join().unwrap().unwrap();
+    assert_eq!(left.challenge_id, right.challenge_id);
+    assert_eq!(
+        left_entropy.consumed_bytes() + right_entropy.consumed_bytes(),
+        48
+    );
+}
+
+#[test]
+fn account_create_prepare_commit_finalize_and_enrollment_retry_are_exact() {
+    let fixture = account_ready_fixture();
+    let (authorized, enrollment) = authorize_account_create(&fixture);
+    let store = open_ready(&fixture, deterministic(Vec::new()));
+    let prepared = store
+        .prepare_account_transition(prepare_account_request(&authorized, 501_200))
+        .unwrap();
+    assert_eq!(prepared.transition_id, account_transition_id());
+    assert_eq!(prepared.account_id, account_id());
+    assert!(prepared.transition_state == AccountTransitionState::Prepared);
+    assert!(prepared.account_state == RegisteredAccountState::Proposed);
+    assert!(prepared.store_state == RegisteredStoreTransitionState::Blocked);
+    assert_eq!(prepared.config_generation.get(), 1);
+    assert_eq!(prepared.account_generation.get(), 1);
+
+    let same = open_ready(&fixture, deterministic(Vec::new()))
+        .mark_config_committed(observe_account(
+            AccountTransitionState::Prepared,
+            1,
+            config_sha256(0),
+            501_250,
+        ))
+        .unwrap();
+    assert!(same.transition_state == AccountTransitionState::Prepared);
+
+    let committed = open_ready(&fixture, deterministic(Vec::new()))
+        .mark_config_committed(observe_account(
+            AccountTransitionState::Prepared,
+            2,
+            account_after_config_sha256(),
+            501_300,
+        ))
+        .unwrap();
+    assert!(committed.transition_state == AccountTransitionState::ConfigCommitted);
+    assert_eq!(committed.config_generation.get(), 2);
+
+    let finalized = open_ready(&fixture, deterministic(Vec::new()))
+        .finalize_account_transition(observe_account(
+            AccountTransitionState::ConfigCommitted,
+            2,
+            account_after_config_sha256(),
+            501_400,
+        ))
+        .unwrap();
+    assert!(finalized.transition_state == AccountTransitionState::Finalized);
+    assert!(finalized.account_state == RegisteredAccountState::Active);
+    assert!(finalized.store_state == RegisteredStoreTransitionState::Active);
+
+    let replay = open_ready(&fixture, deterministic(Vec::new()))
+        .prepare_account_transition(prepare_account_request(&authorized, 501_500))
+        .unwrap();
+    assert!(replay.transition_state == AccountTransitionState::Finalized);
+    let original = open_ready(&fixture, deterministic(Vec::new()))
+        .enroll_store(enrollment_request(0, &enrollment, 501_550))
+        .unwrap();
+    assert_eq!(original.config_generation.get(), 1);
+    assert!(matches!(
+        open_ready(&fixture, deterministic(Vec::new())).state(),
+        AuthorityOpenState::Ready(_)
+    ));
+}
+
+#[test]
+fn account_create_abort_and_terminal_recovery_are_restart_exact() {
+    let aborted_fixture = account_ready_fixture();
+    let (aborted_authorized, _) = authorize_account_create(&aborted_fixture);
+    open_ready(&aborted_fixture, deterministic(Vec::new()))
+        .prepare_account_transition(prepare_account_request(&aborted_authorized, 501_200))
+        .unwrap();
+    let aborted = open_ready(&aborted_fixture, deterministic(Vec::new()))
+        .abort_transition(observe_account(
+            AccountTransitionState::Prepared,
+            1,
+            config_sha256(0),
+            501_300,
+        ))
+        .unwrap();
+    assert!(aborted.transition_state == AccountTransitionState::Aborted);
+    assert!(aborted.account_state == RegisteredAccountState::Removed);
+    assert!(aborted.store_state == RegisteredStoreTransitionState::Active);
+    let abort_retry = open_ready(&aborted_fixture, deterministic(Vec::new()))
+        .prepare_account_transition(prepare_account_request(&aborted_authorized, 501_400))
+        .unwrap();
+    assert!(abort_retry.transition_state == AccountTransitionState::Aborted);
+
+    let recovery_fixture = account_ready_fixture();
+    let (recovery_authorized, _) = authorize_account_create(&recovery_fixture);
+    open_ready(&recovery_fixture, deterministic(Vec::new()))
+        .prepare_account_transition(prepare_account_request(&recovery_authorized, 501_200))
+        .unwrap();
+    let recovery = open_ready(&recovery_fixture, deterministic(Vec::new()))
+        .mark_transition_recovery_required(observe_account(
+            AccountTransitionState::Prepared,
+            3,
+            account_third_config_sha256(),
+            501_300,
+        ))
+        .unwrap();
+    assert!(recovery.transition_state == AccountTransitionState::RecoveryRequired);
+    assert!(recovery.account_state == RegisteredAccountState::Blocked);
+    assert!(recovery.store_state == RegisteredStoreTransitionState::RecoveryRequired);
+    assert_eq!(recovery.config_generation.get(), 3);
+    let recovery_retry = open_ready(&recovery_fixture, deterministic(Vec::new()))
+        .prepare_account_transition(prepare_account_request(&recovery_authorized, 501_400))
+        .unwrap();
+    assert!(recovery_retry.transition_state == AccountTransitionState::RecoveryRequired);
+    let changed = exact_error(
+        open_ready(&recovery_fixture, deterministic(Vec::new())).mark_transition_recovery_required(
+            observe_account(
+                AccountTransitionState::Prepared,
+                4,
+                account_third_config_sha256(),
+                501_500,
+            ),
+        ),
+    );
+    assert_eq!(changed.code, MailErrorCode::AccountUpdateConflict);
+}
+
+#[test]
+fn config_commit_retry_recovers_the_later_terminal_transition() {
+    let fixture = account_ready_fixture();
+    let (authorized, _) = authorize_account_create(&fixture);
+    open_ready(&fixture, deterministic(Vec::new()))
+        .prepare_account_transition(prepare_account_request(&authorized, 501_200))
+        .unwrap();
+    open_ready(&fixture, deterministic(Vec::new()))
+        .mark_config_committed(observe_account(
+            AccountTransitionState::Prepared,
+            2,
+            account_after_config_sha256(),
+            501_300,
+        ))
+        .unwrap();
+    let recovery = open_ready(&fixture, deterministic(Vec::new()))
+        .finalize_account_transition(observe_account(
+            AccountTransitionState::ConfigCommitted,
+            1,
+            config_sha256(0),
+            501_400,
+        ))
+        .unwrap();
+    assert!(recovery.transition_state == AccountTransitionState::RecoveryRequired);
+
+    let retry = open_ready(&fixture, deterministic(Vec::new()))
+        .mark_config_committed(observe_account(
+            AccountTransitionState::Prepared,
+            2,
+            account_after_config_sha256(),
+            501_500,
+        ))
+        .unwrap();
+    assert!(retry.transition_state == AccountTransitionState::RecoveryRequired);
+    assert_eq!(retry.config_generation.get(), 1);
+
+    let recovery_retry = open_ready(&fixture, deterministic(Vec::new()))
+        .mark_transition_recovery_required(observe_account(
+            AccountTransitionState::ConfigCommitted,
+            1,
+            config_sha256(0),
+            501_600,
+        ))
+        .unwrap();
+    assert!(recovery_retry.transition_state == AccountTransitionState::RecoveryRequired);
+}
+
+#[test]
+fn unsafe_config_pairs_take_precedence_over_a_stale_method_state() {
+    let prepared_fixture = account_ready_fixture();
+    let (prepared_authorized, _) = authorize_account_create(&prepared_fixture);
+    open_ready(&prepared_fixture, deterministic(Vec::new()))
+        .prepare_account_transition(prepare_account_request(&prepared_authorized, 501_200))
+        .unwrap();
+    let prepared_recovery = open_ready(&prepared_fixture, deterministic(Vec::new()))
+        .finalize_account_transition(observe_account(
+            AccountTransitionState::ConfigCommitted,
+            3,
+            account_third_config_sha256(),
+            501_300,
+        ))
+        .unwrap();
+    assert!(prepared_recovery.transition_state == AccountTransitionState::RecoveryRequired);
+    let prepared_retry = open_ready(&prepared_fixture, deterministic(Vec::new()))
+        .finalize_account_transition(observe_account(
+            AccountTransitionState::ConfigCommitted,
+            3,
+            account_third_config_sha256(),
+            501_400,
+        ))
+        .unwrap();
+    assert!(prepared_retry.transition_state == AccountTransitionState::RecoveryRequired);
+
+    let committed_fixture = account_ready_fixture();
+    let (committed_authorized, _) = authorize_account_create(&committed_fixture);
+    open_ready(&committed_fixture, deterministic(Vec::new()))
+        .prepare_account_transition(prepare_account_request(&committed_authorized, 501_200))
+        .unwrap();
+    open_ready(&committed_fixture, deterministic(Vec::new()))
+        .mark_config_committed(observe_account(
+            AccountTransitionState::Prepared,
+            2,
+            account_after_config_sha256(),
+            501_300,
+        ))
+        .unwrap();
+    let committed_recovery = open_ready(&committed_fixture, deterministic(Vec::new()))
+        .abort_transition(observe_account(
+            AccountTransitionState::Prepared,
+            1,
+            config_sha256(0),
+            501_400,
+        ))
+        .unwrap();
+    assert!(committed_recovery.transition_state == AccountTransitionState::RecoveryRequired);
+    let committed_retry = open_ready(&committed_fixture, deterministic(Vec::new()))
+        .abort_transition(observe_account(
+            AccountTransitionState::Prepared,
+            1,
+            config_sha256(0),
+            501_500,
+        ))
+        .unwrap();
+    assert!(committed_retry.transition_state == AccountTransitionState::RecoveryRequired);
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn finalized_transition_retries_are_scoped_after_every_second_transition_state() {
+    for second_state in [
+        AccountTransitionState::Prepared,
+        AccountTransitionState::ConfigCommitted,
+        AccountTransitionState::Finalized,
+        AccountTransitionState::Aborted,
+        AccountTransitionState::RecoveryRequired,
+    ] {
+        let fixture = account_ready_fixture();
+        let (first, enrollment) = authorize_account_create(&fixture);
+        open_ready(&fixture, deterministic(Vec::new()))
+            .prepare_account_transition(prepare_account_request(&first, 501_200))
+            .unwrap();
+        open_ready(&fixture, deterministic(Vec::new()))
+            .mark_config_committed(observe_account(
+                AccountTransitionState::Prepared,
+                2,
+                account_after_config_sha256(),
+                501_300,
+            ))
+            .unwrap();
+        open_ready(&fixture, deterministic(Vec::new()))
+            .finalize_account_transition(observe_account(
+                AccountTransitionState::ConfigCommitted,
+                2,
+                account_after_config_sha256(),
+                501_400,
+            ))
+            .unwrap();
+
+        let second = authorize_second_account_create(&fixture);
+        open_ready(&fixture, deterministic(Vec::new()))
+            .prepare_account_transition(prepare_second_account_request(&second, 501_700))
+            .unwrap();
+        match second_state {
+            AccountTransitionState::Prepared => {}
+            AccountTransitionState::ConfigCommitted | AccountTransitionState::Finalized => {
+                open_ready(&fixture, deterministic(Vec::new()))
+                    .mark_config_committed(observe_second_account(
+                        AccountTransitionState::Prepared,
+                        3,
+                        second_account_after_config_sha256(),
+                        501_800,
+                    ))
+                    .unwrap();
+                if second_state == AccountTransitionState::Finalized {
+                    open_ready(&fixture, deterministic(Vec::new()))
+                        .finalize_account_transition(observe_second_account(
+                            AccountTransitionState::ConfigCommitted,
+                            3,
+                            second_account_after_config_sha256(),
+                            501_900,
+                        ))
+                        .unwrap();
+                }
+            }
+            AccountTransitionState::Aborted => {
+                open_ready(&fixture, deterministic(Vec::new()))
+                    .abort_transition(observe_second_account(
+                        AccountTransitionState::Prepared,
+                        2,
+                        account_after_config_sha256(),
+                        501_800,
+                    ))
+                    .unwrap();
+            }
+            AccountTransitionState::RecoveryRequired => {
+                open_ready(&fixture, deterministic(Vec::new()))
+                    .mark_transition_recovery_required(observe_second_account(
+                        AccountTransitionState::Prepared,
+                        4,
+                        account_third_config_sha256(),
+                        501_800,
+                    ))
+                    .unwrap();
+                let entropy =
+                    deterministic(hex::<48>(account_vector("blocked_challenge_entropy")).to_vec());
+                let error = exact_error(open_ready(&fixture, entropy.clone()).create_challenge(
+                    CreateChallengeRequest {
+                        manifest: second_account_manifest(),
+                        observed_at_unix_ms: 501_900,
+                        expires_at_unix_ms: 502_400,
+                    },
+                ));
+                assert_eq!(error.code, MailErrorCode::OwnerRecoveryRequired);
+                assert_eq!(entropy.consumed_bytes(), 0);
+            }
+        }
+
+        let prepare_retry = open_ready(&fixture, deterministic(Vec::new()))
+            .prepare_account_transition(prepare_account_request(&first, 502_000))
+            .unwrap();
+        let commit_retry = open_ready(&fixture, deterministic(Vec::new()))
+            .mark_config_committed(observe_account(
+                AccountTransitionState::Prepared,
+                2,
+                account_after_config_sha256(),
+                502_100,
+            ))
+            .unwrap();
+        let finalize_retry = open_ready(&fixture, deterministic(Vec::new()))
+            .finalize_account_transition(observe_account(
+                AccountTransitionState::ConfigCommitted,
+                2,
+                account_after_config_sha256(),
+                502_200,
+            ))
+            .unwrap();
+        for retry in [prepare_retry, commit_retry, finalize_retry] {
+            assert!(retry.transition_state == AccountTransitionState::Finalized);
+            assert_eq!(retry.config_generation.get(), 2);
+        }
+        let original = open_ready(&fixture, deterministic(Vec::new()))
+            .enroll_store(enrollment_request(0, &enrollment, 502_300))
+            .unwrap();
+        assert_eq!(original.config_generation.get(), 1);
+        assert!(matches!(
+            open_ready(&fixture, deterministic(Vec::new())).state(),
+            AuthorityOpenState::Ready(_)
+        ));
+    }
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn aborted_transition_retries_are_scoped_after_every_second_transition_state() {
+    for second_state in [
+        AccountTransitionState::Prepared,
+        AccountTransitionState::ConfigCommitted,
+        AccountTransitionState::Finalized,
+        AccountTransitionState::Aborted,
+        AccountTransitionState::RecoveryRequired,
+    ] {
+        let fixture = account_ready_fixture();
+        let (first, enrollment) = authorize_account_create(&fixture);
+        open_ready(&fixture, deterministic(Vec::new()))
+            .prepare_account_transition(prepare_account_request(&first, 501_200))
+            .unwrap();
+        open_ready(&fixture, deterministic(Vec::new()))
+            .abort_transition(observe_account(
+                AccountTransitionState::Prepared,
+                1,
+                config_sha256(0),
+                501_300,
+            ))
+            .unwrap();
+
+        let second = authorize_second_account_create_after_abort(&fixture);
+        open_ready(&fixture, deterministic(Vec::new()))
+            .prepare_account_transition(prepare_second_account_request_after_abort(
+                &second, 501_600,
+            ))
+            .unwrap();
+        match second_state {
+            AccountTransitionState::Prepared => {}
+            AccountTransitionState::ConfigCommitted | AccountTransitionState::Finalized => {
+                open_ready(&fixture, deterministic(Vec::new()))
+                    .mark_config_committed(observe_second_account(
+                        AccountTransitionState::Prepared,
+                        2,
+                        second_account_after_config_sha256(),
+                        501_700,
+                    ))
+                    .unwrap();
+                if second_state == AccountTransitionState::Finalized {
+                    open_ready(&fixture, deterministic(Vec::new()))
+                        .finalize_account_transition(observe_second_account(
+                            AccountTransitionState::ConfigCommitted,
+                            2,
+                            second_account_after_config_sha256(),
+                            501_800,
+                        ))
+                        .unwrap();
+                }
+            }
+            AccountTransitionState::Aborted => {
+                open_ready(&fixture, deterministic(Vec::new()))
+                    .abort_transition(observe_second_account(
+                        AccountTransitionState::Prepared,
+                        1,
+                        config_sha256(0),
+                        501_700,
+                    ))
+                    .unwrap();
+            }
+            AccountTransitionState::RecoveryRequired => {
+                open_ready(&fixture, deterministic(Vec::new()))
+                    .mark_transition_recovery_required(observe_second_account(
+                        AccountTransitionState::Prepared,
+                        3,
+                        account_third_config_sha256(),
+                        501_700,
+                    ))
+                    .unwrap();
+            }
+        }
+
+        let prepare_retry = open_ready(&fixture, deterministic(Vec::new()))
+            .prepare_account_transition(prepare_account_request(&first, 501_900))
+            .unwrap();
+        let abort_retry = open_ready(&fixture, deterministic(Vec::new()))
+            .abort_transition(observe_account(
+                AccountTransitionState::Prepared,
+                1,
+                config_sha256(0),
+                502_000,
+            ))
+            .unwrap();
+        for retry in [prepare_retry, abort_retry] {
+            assert!(retry.transition_state == AccountTransitionState::Aborted);
+            assert_eq!(retry.config_generation.get(), 1);
+        }
+        let original = open_ready(&fixture, deterministic(Vec::new()))
+            .enroll_store(enrollment_request(0, &enrollment, 502_100))
+            .unwrap();
+        assert_eq!(original.config_generation.get(), 1);
+        assert!(matches!(
+            open_ready(&fixture, deterministic(Vec::new())).state(),
+            AuthorityOpenState::Ready(_)
+        ));
+    }
+}
+
+#[test]
+fn account_prepare_and_config_commit_fault_boundaries_are_atomic() {
+    for fault in [
+        AuthorityFaultPoint::GrantUseInserted,
+        AuthorityFaultPoint::GrantUsedEvent,
+        AuthorityFaultPoint::AccountStoreBlocked,
+        AuthorityFaultPoint::AccountForeignKeysDeferred,
+        AuthorityFaultPoint::RegisteredAccountInserted,
+        AuthorityFaultPoint::AccountTransitionInserted,
+        AuthorityFaultPoint::RegisteredCredentialInserted,
+        AuthorityFaultPoint::AccountForeignKeyChecked,
+        AuthorityFaultPoint::AccountStoreBlockedEvent,
+        AuthorityFaultPoint::AccountTransitionPreparedEvent,
+        AuthorityFaultPoint::AccountPrepareClockUpdated,
+        AuthorityFaultPoint::AccountPrepareBeforeCommit,
+    ] {
+        let fixture = account_ready_fixture();
+        let (authorized, _) = authorize_account_create(&fixture);
+        let before =
+            account_registry_fingerprint(&Connection::open(fixture.home.database_path()).unwrap());
+        let error = exact_error(
+            open_ready_with_fault(&fixture, fault)
+                .prepare_account_transition(prepare_account_request(&authorized, 501_200)),
+        );
+        assert_eq!(error.code, MailErrorCode::StoreWrite);
+        assert_eq!(
+            account_registry_fingerprint(&Connection::open(fixture.home.database_path()).unwrap()),
+            before
+        );
+        assert!(matches!(
+            open_ready(&fixture, deterministic(Vec::new())).state(),
+            AuthorityOpenState::Ready(_)
+        ));
+    }
+
+    for fault in [
+        AuthorityFaultPoint::AccountStoreVersionInserted,
+        AuthorityFaultPoint::AccountVersionInserted,
+        AuthorityFaultPoint::AccountTransitionCommitted,
+        AuthorityFaultPoint::AccountStoreCommitted,
+        AuthorityFaultPoint::AccountConfigCommittedEvent,
+        AuthorityFaultPoint::AccountConfigClockUpdated,
+        AuthorityFaultPoint::AccountConfigBeforeCommit,
+    ] {
+        let fixture = account_ready_fixture();
+        let (authorized, _) = authorize_account_create(&fixture);
+        open_ready(&fixture, deterministic(Vec::new()))
+            .prepare_account_transition(prepare_account_request(&authorized, 501_200))
+            .unwrap();
+        let before =
+            account_registry_fingerprint(&Connection::open(fixture.home.database_path()).unwrap());
+        let error = exact_error(
+            open_ready_with_fault(&fixture, fault).mark_config_committed(observe_account(
+                AccountTransitionState::Prepared,
+                2,
+                account_after_config_sha256(),
+                501_300,
+            )),
+        );
+        assert_eq!(error.code, MailErrorCode::StoreWrite);
+        assert_eq!(
+            account_registry_fingerprint(&Connection::open(fixture.home.database_path()).unwrap()),
+            before
+        );
+        assert!(matches!(
+            open_ready(&fixture, deterministic(Vec::new())).state(),
+            AuthorityOpenState::Ready(_)
+        ));
+    }
+
+    let fixture = account_ready_fixture();
+    let (authorized, _) = authorize_account_create(&fixture);
+    let error = exact_error(
+        open_ready_with_fault(&fixture, AuthorityFaultPoint::AccountPrepareAfterCommit)
+            .prepare_account_transition(prepare_account_request(&authorized, 501_200)),
+    );
+    assert_eq!(error.code, MailErrorCode::StoreWrite);
+    let retry = open_ready(&fixture, deterministic(Vec::new()))
+        .prepare_account_transition(prepare_account_request(&authorized, 501_300))
+        .unwrap();
+    assert!(retry.transition_state == AccountTransitionState::Prepared);
+
+    let error = exact_error(
+        open_ready_with_fault(&fixture, AuthorityFaultPoint::AccountConfigAfterCommit)
+            .mark_config_committed(observe_account(
+                AccountTransitionState::Prepared,
+                2,
+                account_after_config_sha256(),
+                501_400,
+            )),
+    );
+    assert_eq!(error.code, MailErrorCode::StoreWrite);
+    let retry = open_ready(&fixture, deterministic(Vec::new()))
+        .mark_config_committed(observe_account(
+            AccountTransitionState::Prepared,
+            2,
+            account_after_config_sha256(),
+            501_500,
+        ))
+        .unwrap();
+    assert!(retry.transition_state == AccountTransitionState::ConfigCommitted);
+}
+
+#[test]
+fn account_prepare_expiry_is_committed_once_before_occupancy() {
+    let fixture = account_ready_fixture();
+    let (authorized, _) = authorize_account_create(&fixture);
+    let first = exact_error(
+        open_ready(&fixture, deterministic(Vec::new()))
+            .prepare_account_transition(prepare_account_request(&authorized, 502_000)),
+    );
+    assert_eq!(first.code, MailErrorCode::AuthorizationExpired);
+    let connection = Connection::open(fixture.home.database_path()).unwrap();
+    assert_eq!(
+        scalar(&connection, "SELECT COUNT(*) FROM account_transitions"),
+        0
+    );
+    assert_eq!(
+        scalar(
+            &connection,
+            "SELECT COUNT(*) FROM authority_events WHERE entity_kind=8 AND event_code=5"
+        ),
+        1
+    );
+    drop(connection);
+    let retry = exact_error(
+        open_ready(&fixture, deterministic(Vec::new()))
+            .prepare_account_transition(prepare_account_request(&authorized, 502_100)),
+    );
+    assert_eq!(retry.code, MailErrorCode::AuthorizationExpired);
+    assert!(matches!(
+        open_ready(&fixture, deterministic(Vec::new())).state(),
+        AuthorityOpenState::Ready(_)
+    ));
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn account_terminal_lifecycle_precommit_faults_rollback_exactly() {
+    for fault in [
+        AuthorityFaultPoint::AccountFinalizeAccountUpdated,
+        AuthorityFaultPoint::AccountFinalizeTransitionUpdated,
+        AuthorityFaultPoint::AccountFinalizeStoreUpdated,
+        AuthorityFaultPoint::AccountFinalizeTransitionEvent,
+        AuthorityFaultPoint::AccountFinalizeStoreEvent,
+        AuthorityFaultPoint::AccountFinalizeClockUpdated,
+        AuthorityFaultPoint::AccountFinalizeBeforeCommit,
+    ] {
+        let fixture = account_ready_fixture();
+        let (authorized, _) = authorize_account_create(&fixture);
+        open_ready(&fixture, deterministic(Vec::new()))
+            .prepare_account_transition(prepare_account_request(&authorized, 501_200))
+            .unwrap();
+        open_ready(&fixture, deterministic(Vec::new()))
+            .mark_config_committed(observe_account(
+                AccountTransitionState::Prepared,
+                2,
+                account_after_config_sha256(),
+                501_300,
+            ))
+            .unwrap();
+        let before =
+            account_registry_fingerprint(&Connection::open(fixture.home.database_path()).unwrap());
+        let error = exact_error(
+            open_ready_with_fault(&fixture, fault).finalize_account_transition(observe_account(
+                AccountTransitionState::ConfigCommitted,
+                2,
+                account_after_config_sha256(),
+                501_400,
+            )),
+        );
+        assert_eq!(error.code, MailErrorCode::StoreWrite);
+        assert_eq!(
+            account_registry_fingerprint(&Connection::open(fixture.home.database_path()).unwrap()),
+            before
+        );
+    }
+
+    for fault in [
+        AuthorityFaultPoint::AccountAbortAccountUpdated,
+        AuthorityFaultPoint::AccountAbortTransitionUpdated,
+        AuthorityFaultPoint::AccountAbortStoreUpdated,
+        AuthorityFaultPoint::AccountAbortTransitionEvent,
+        AuthorityFaultPoint::AccountAbortStoreEvent,
+        AuthorityFaultPoint::AccountAbortClockUpdated,
+        AuthorityFaultPoint::AccountAbortBeforeCommit,
+    ] {
+        let fixture = account_ready_fixture();
+        let (authorized, _) = authorize_account_create(&fixture);
+        open_ready(&fixture, deterministic(Vec::new()))
+            .prepare_account_transition(prepare_account_request(&authorized, 501_200))
+            .unwrap();
+        let before =
+            account_registry_fingerprint(&Connection::open(fixture.home.database_path()).unwrap());
+        let error = exact_error(open_ready_with_fault(&fixture, fault).abort_transition(
+            observe_account(
+                AccountTransitionState::Prepared,
+                1,
+                config_sha256(0),
+                501_300,
+            ),
+        ));
+        assert_eq!(error.code, MailErrorCode::StoreWrite);
+        assert_eq!(
+            account_registry_fingerprint(&Connection::open(fixture.home.database_path()).unwrap()),
+            before
+        );
+    }
+
+    for fault in [
+        AuthorityFaultPoint::AccountRecoveryAccountUpdated,
+        AuthorityFaultPoint::AccountRecoveryTransitionUpdated,
+        AuthorityFaultPoint::AccountRecoveryStoreUpdated,
+        AuthorityFaultPoint::AccountRecoveryStoreEvent,
+        AuthorityFaultPoint::AccountRecoveryTransitionEvent,
+        AuthorityFaultPoint::AccountRecoveryClockUpdated,
+        AuthorityFaultPoint::AccountRecoveryBeforeCommit,
+    ] {
+        let fixture = account_ready_fixture();
+        let (authorized, _) = authorize_account_create(&fixture);
+        open_ready(&fixture, deterministic(Vec::new()))
+            .prepare_account_transition(prepare_account_request(&authorized, 501_200))
+            .unwrap();
+        let before =
+            account_registry_fingerprint(&Connection::open(fixture.home.database_path()).unwrap());
+        let error = exact_error(
+            open_ready_with_fault(&fixture, fault).mark_transition_recovery_required(
+                observe_account(
+                    AccountTransitionState::Prepared,
+                    3,
+                    account_third_config_sha256(),
+                    501_300,
+                ),
+            ),
+        );
+        assert_eq!(error.code, MailErrorCode::StoreWrite);
+        assert_eq!(
+            account_registry_fingerprint(&Connection::open(fixture.home.database_path()).unwrap()),
+            before
+        );
+    }
+
+    let fixture = account_ready_fixture();
+    let (authorized, _) = authorize_account_create(&fixture);
+    open_ready(&fixture, deterministic(Vec::new()))
+        .prepare_account_transition(prepare_account_request(&authorized, 501_200))
+        .unwrap();
+    open_ready(&fixture, deterministic(Vec::new()))
+        .mark_config_committed(observe_account(
+            AccountTransitionState::Prepared,
+            2,
+            account_after_config_sha256(),
+            501_300,
+        ))
+        .unwrap();
+    assert_eq!(
+        exact_error(
+            open_ready_with_fault(&fixture, AuthorityFaultPoint::AccountFinalizeAfterCommit)
+                .finalize_account_transition(observe_account(
+                    AccountTransitionState::ConfigCommitted,
+                    2,
+                    account_after_config_sha256(),
+                    501_400,
+                ))
+        )
+        .code,
+        MailErrorCode::StoreWrite
+    );
+    let retry = open_ready(&fixture, deterministic(Vec::new()))
+        .finalize_account_transition(observe_account(
+            AccountTransitionState::ConfigCommitted,
+            2,
+            account_after_config_sha256(),
+            501_500,
+        ))
+        .unwrap();
+    assert!(retry.transition_state == AccountTransitionState::Finalized);
+
+    let fixture = account_ready_fixture();
+    let (authorized, _) = authorize_account_create(&fixture);
+    open_ready(&fixture, deterministic(Vec::new()))
+        .prepare_account_transition(prepare_account_request(&authorized, 501_200))
+        .unwrap();
+    assert_eq!(
+        exact_error(
+            open_ready_with_fault(&fixture, AuthorityFaultPoint::AccountAbortAfterCommit)
+                .abort_transition(observe_account(
+                    AccountTransitionState::Prepared,
+                    1,
+                    config_sha256(0),
+                    501_300,
+                ))
+        )
+        .code,
+        MailErrorCode::StoreWrite
+    );
+    let retry = open_ready(&fixture, deterministic(Vec::new()))
+        .abort_transition(observe_account(
+            AccountTransitionState::Prepared,
+            1,
+            config_sha256(0),
+            501_400,
+        ))
+        .unwrap();
+    assert!(retry.transition_state == AccountTransitionState::Aborted);
+
+    let fixture = account_ready_fixture();
+    let (authorized, _) = authorize_account_create(&fixture);
+    open_ready(&fixture, deterministic(Vec::new()))
+        .prepare_account_transition(prepare_account_request(&authorized, 501_200))
+        .unwrap();
+    assert_eq!(
+        exact_error(
+            open_ready_with_fault(&fixture, AuthorityFaultPoint::AccountRecoveryAfterCommit)
+                .mark_transition_recovery_required(observe_account(
+                    AccountTransitionState::Prepared,
+                    3,
+                    account_third_config_sha256(),
+                    501_300,
+                ))
+        )
+        .code,
+        MailErrorCode::StoreWrite
+    );
+    let retry = open_ready(&fixture, deterministic(Vec::new()))
+        .mark_transition_recovery_required(observe_account(
+            AccountTransitionState::Prepared,
+            3,
+            account_third_config_sha256(),
+            501_400,
+        ))
+        .unwrap();
+    assert!(retry.transition_state == AccountTransitionState::RecoveryRequired);
+}
+
+#[test]
+fn account_rows_events_and_versions_fail_closed_on_corruption() {
+    for (table, mutation, typeof_sql) in [
+        (
+            "registered_accounts",
+            "UPDATE registered_accounts SET account_generation='wrong-storage-class'",
+            "SELECT typeof(account_generation) FROM registered_accounts",
+        ),
+        (
+            "account_transitions",
+            "UPDATE account_transitions SET expected_generation='wrong-storage-class'",
+            "SELECT typeof(expected_generation) FROM account_transitions",
+        ),
+    ] {
+        let fixture = account_ready_fixture();
+        let (authorized, _) = authorize_account_create(&fixture);
+        open_ready(&fixture, deterministic(Vec::new()))
+            .prepare_account_transition(prepare_account_request(&authorized, 501_200))
+            .unwrap();
+        install_wrong_storage_class(&fixture.home, table, mutation, typeof_sql);
+        assert_recovery_required(&fixture);
+    }
+
+    for mutation in [
+        "UPDATE account_transitions SET transition_sha256=zeroblob(32)",
+        "DELETE FROM registered_credentials",
+        "UPDATE authority_events SET detail=zeroblob(length(detail)),
+         detail_sha256=zeroblob(32) WHERE event_code=10",
+    ] {
+        let fixture = account_ready_fixture();
+        let (authorized, _) = authorize_account_create(&fixture);
+        open_ready(&fixture, deterministic(Vec::new()))
+            .prepare_account_transition(prepare_account_request(&authorized, 501_200))
+            .unwrap();
+        let connection = Connection::open(fixture.home.database_path()).unwrap();
+        connection
+            .execute_batch("PRAGMA foreign_keys=OFF; PRAGMA ignore_check_constraints=ON;")
+            .unwrap();
+        connection.execute(mutation, []).unwrap();
+        drop(connection);
+        assert_recovery_required(&fixture);
+    }
+
+    let fixture = account_ready_fixture();
+    let (authorized, _) = authorize_account_create(&fixture);
+    open_ready(&fixture, deterministic(Vec::new()))
+        .prepare_account_transition(prepare_account_request(&authorized, 501_200))
+        .unwrap();
+    open_ready(&fixture, deterministic(Vec::new()))
+        .mark_config_committed(observe_account(
+            AccountTransitionState::Prepared,
+            2,
+            account_after_config_sha256(),
+            501_300,
+        ))
+        .unwrap();
+    let connection = Connection::open(fixture.home.database_path()).unwrap();
+    connection
+        .execute_batch("PRAGMA foreign_keys=OFF;")
+        .unwrap();
+    connection
+        .execute(
+            "DELETE FROM registered_account_versions WHERE committed_transition_id=?1",
+            [account_transition_id().as_bytes()],
+        )
+        .unwrap();
+    drop(connection);
+    assert_recovery_required(&fixture);
+}
+
+#[test]
+fn finalized_account_history_rejects_a_tampered_current_store_pair() {
+    let fixture = account_ready_fixture();
+    let (authorized, _) = authorize_account_create(&fixture);
+    open_ready(&fixture, deterministic(Vec::new()))
+        .prepare_account_transition(prepare_account_request(&authorized, 501_200))
+        .unwrap();
+    open_ready(&fixture, deterministic(Vec::new()))
+        .mark_config_committed(observe_account(
+            AccountTransitionState::Prepared,
+            2,
+            account_after_config_sha256(),
+            501_300,
+        ))
+        .unwrap();
+    open_ready(&fixture, deterministic(Vec::new()))
+        .finalize_account_transition(observe_account(
+            AccountTransitionState::ConfigCommitted,
+            2,
+            account_after_config_sha256(),
+            501_400,
+        ))
+        .unwrap();
+
+    let connection = Connection::open(fixture.home.database_path()).unwrap();
+    connection
+        .execute(
+            "UPDATE registered_stores SET config_generation=3,config_sha256=?1",
+            [account_third_config_sha256().as_bytes()],
+        )
+        .unwrap();
+    drop(connection);
+
+    assert_recovery_required(&fixture);
+}
+
+#[test]
+fn concurrent_account_prepare_has_one_graph_and_exact_loser_recovery() {
+    let fixture = account_ready_fixture();
+    let (authorized, _) = authorize_account_create(&fixture);
+    let request = prepare_account_request(&authorized, 501_200);
+    let barrier = Arc::new(Barrier::new(3));
+    let mut workers = Vec::new();
+    for _ in 0..2 {
+        let home = fixture.home.clone();
+        let anchor = fixture.snapshot.anchor.clone();
+        let request = request.clone();
+        let barrier = Arc::clone(&barrier);
+        workers.push(thread::spawn(move || {
+            barrier.wait();
+            AuthorityStore::open_isolated(
+                context(AnchorPresence::Present(anchor)),
+                home,
+                deterministic(Vec::new()),
+            )
+            .unwrap()
+            .prepare_account_transition(request)
+        }));
+    }
+    barrier.wait();
+    let left = workers.remove(0).join().unwrap().unwrap();
+    let right = workers.remove(0).join().unwrap().unwrap();
+    assert!(left.transition_state == AccountTransitionState::Prepared);
+    assert!(right.transition_state == AccountTransitionState::Prepared);
+    assert_eq!(left.transition_id, right.transition_id);
+    let connection = Connection::open(fixture.home.database_path()).unwrap();
+    assert_eq!(
+        scalar(
+            &connection,
+            "SELECT COUNT(*) FROM grant_uses WHERE action=272"
+        ),
+        1
+    );
+    assert_eq!(
+        scalar(&connection, "SELECT COUNT(*) FROM account_transitions"),
+        1
+    );
+    assert_eq!(
+        scalar(&connection, "SELECT COUNT(*) FROM registered_accounts"),
+        1
+    );
+    assert_eq!(
+        scalar(&connection, "SELECT COUNT(*) FROM registered_credentials"),
+        1
+    );
+}
+
+#[test]
+fn distinct_account_prepare_contenders_have_one_store_wide_winner() {
+    let fixture = account_ready_fixture();
+    let (first, _) = authorize_account_create(&fixture);
+    let second = authorize_second_account_create_after_abort(&fixture);
+    let requests = [
+        prepare_account_request(&first, 501_600),
+        prepare_second_account_request_after_abort(&second, 501_600),
+    ];
+    let barrier = Arc::new(Barrier::new(3));
+    let mut workers = Vec::new();
+    for request in requests {
+        let home = fixture.home.clone();
+        let anchor = fixture.snapshot.anchor.clone();
+        let barrier = Arc::clone(&barrier);
+        workers.push(thread::spawn(move || {
+            barrier.wait();
+            AuthorityStore::open_isolated(
+                context(AnchorPresence::Present(anchor)),
+                home,
+                deterministic(Vec::new()),
+            )
+            .unwrap()
+            .prepare_account_transition(request)
+        }));
+    }
+    barrier.wait();
+    let results = [
+        workers.remove(0).join().unwrap(),
+        workers.remove(0).join().unwrap(),
+    ];
+    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    let loser = results.into_iter().find_map(Result::err).unwrap();
+    assert_eq!(loser.code, MailErrorCode::AccountUpdateConflict);
+    assert!(!loser.retryable);
+    let connection = Connection::open(fixture.home.database_path()).unwrap();
+    assert_eq!(
+        scalar(
+            &connection,
+            "SELECT COUNT(*) FROM grant_uses WHERE action=272"
+        ),
+        1
+    );
+    assert_eq!(
+        scalar(&connection, "SELECT COUNT(*) FROM account_transitions"),
+        1
+    );
+    assert_eq!(
+        scalar(&connection, "SELECT COUNT(*) FROM registered_accounts"),
+        1
+    );
+    assert_eq!(
+        scalar(&connection, "SELECT COUNT(*) FROM registered_credentials"),
+        1
+    );
 }

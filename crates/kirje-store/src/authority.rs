@@ -13,11 +13,12 @@ use std::sync::{Arc, Barrier, Mutex};
 use chrono::{DateTime, SecondsFormat, TimeZone as _, Utc};
 use directories::ProjectDirs;
 use kirje_core::{
-    ActionManifest, AuthorizationGrantId, AuthorizationPayload, AuthorizationProof,
-    AuthorizationReceiptId, AuthorizationReceiptProjection, AuthorizationReceiptState, JournalId,
-    MailError, MailErrorCode, ManifestPayload, OwnerKeyRole, OwnerPublicKey, OwnerRealmId,
-    PlatformLocationMaterial, SensitiveAction, Sha256Digest, StoreEnrollmentState, StoreId,
-    TargetKind, TrustPermissionMask, owner_key_id, verify_authorization_signature,
+    AccountId, ActionManifest, AuthorizationGrantId, AuthorizationPayload, AuthorizationProof,
+    AuthorizationReceiptId, AuthorizationReceiptProjection, AuthorizationReceiptState,
+    CredentialId, JournalId, MailError, MailErrorCode, ManifestPayload, OwnerKeyRole,
+    OwnerPublicKey, OwnerRealmId, PlatformLocationMaterial, SensitiveAction, Sha256Digest,
+    StoreEnrollmentState, StoreId, TargetKind, TransitionId, TrustPermissionMask, owner_key_id,
+    verify_authorization_signature,
 };
 use rusqlite::{
     Connection, OpenFlags, OptionalExtension as _, Transaction, TransactionBehavior, params,
@@ -36,6 +37,10 @@ const AUTHORIZATION_CONTEXT_DOMAIN: &[u8] = b"KIRJE-AUTHORIZATION-CONTEXT-V1\0";
 const AUTHORIZATION_RECEIPT_DOMAIN: &[u8] = b"KIRJE-AUTHORIZATION-RECEIPT-V1\0";
 const GRANT_USE_DOMAIN: &[u8] = b"KIRJE-GRANT-USE-V1\0";
 const STORE_ENROLLMENT_INTENT_DOMAIN: &[u8] = b"KIRJE-STORE-ENROLLMENT-INTENT-V1\0";
+const ACCOUNT_DISPLAY_ID_DOMAIN: &[u8] = b"KIRJE-ACCOUNT-DISPLAY-ID-V1\0";
+const ACCOUNT_TRANSITION_DOMAIN: &[u8] = b"KIRJE-ACCOUNT-TRANSITION-V1\0";
+const ACCOUNT_TRANSITION_INTENT_DOMAIN: &[u8] = b"KIRJE-ACCOUNT-TRANSITION-INTENT-V1\0";
+const ACCOUNT_TRANSITION_RECOVERY_DOMAIN: &[u8] = b"KIRJE-ACCOUNT-TRANSITION-RECOVERY-V1\0";
 const AUTHORIZATION_LIFETIME_MS: i64 = 900_000;
 
 const TABLES: [&str; 20] = [
@@ -293,6 +298,196 @@ pub struct EnrolledStoreProjection {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum AccountTransitionKind {
+    AccountCreate,
+    AccountUpdate,
+    AccountRemove,
+    CredentialSet,
+    CredentialDelete,
+}
+
+impl AccountTransitionKind {
+    #[must_use]
+    pub const fn code(self) -> u8 {
+        match self {
+            Self::AccountCreate => 1,
+            Self::AccountUpdate => 2,
+            Self::AccountRemove => 3,
+            Self::CredentialSet => 4,
+            Self::CredentialDelete => 5,
+        }
+    }
+
+    const fn database_name(self) -> &'static str {
+        match self {
+            Self::AccountCreate => "account_create",
+            Self::AccountUpdate => "account_update",
+            Self::AccountRemove => "account_remove",
+            Self::CredentialSet => "credential_set",
+            Self::CredentialDelete => "credential_delete",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum AccountTransitionState {
+    Prepared,
+    ConfigCommitted,
+    Finalized,
+    Aborted,
+    RecoveryRequired,
+}
+
+impl AccountTransitionState {
+    const fn event_state(self) -> u16 {
+        match self {
+            Self::Prepared => 0x0601,
+            Self::ConfigCommitted => 0x0602,
+            Self::Finalized => 0x0603,
+            Self::Aborted => 0x0604,
+            Self::RecoveryRequired => 0x0605,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum RegisteredAccountState {
+    Proposed,
+    Active,
+    Blocked,
+    Removed,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum RegisteredStoreTransitionState {
+    Active,
+    Blocked,
+    RecoveryRequired,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct PrepareAccountTransitionRequest {
+    grant_use: GrantUseRequest,
+    transition_id: TransitionId,
+    store_id: StoreId,
+    account_id: AccountId,
+    kind: AccountTransitionKind,
+    before_config_sha256: Sha256Digest,
+    after_config_sha256: Sha256Digest,
+    expected_generation: NonZeroU64,
+    next_generation: NonZeroU64,
+    display_id_sha256: Sha256Digest,
+    account_generation: NonZeroU64,
+    credential_id: CredentialId,
+    binding_sha256: Sha256Digest,
+    observed_at_unix_ms: i64,
+}
+
+impl PrepareAccountTransitionRequest {
+    /// Bind an exact account transition reservation to one authorized grant.
+    ///
+    /// # Errors
+    ///
+    /// Returns invalid-input when generations, time, or create identity are invalid.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        grant_use: GrantUseRequest,
+        transition_id: TransitionId,
+        store_id: StoreId,
+        account_id: AccountId,
+        kind: AccountTransitionKind,
+        before_config_sha256: Sha256Digest,
+        after_config_sha256: Sha256Digest,
+        expected_generation: NonZeroU64,
+        next_generation: NonZeroU64,
+        display_id_sha256: Sha256Digest,
+        account_generation: NonZeroU64,
+        credential_id: CredentialId,
+        binding_sha256: Sha256Digest,
+        observed_at_unix_ms: i64,
+    ) -> Result<Self, MailError> {
+        input_utc_millis(observed_at_unix_ms)?;
+        let max = u64::try_from(i64::MAX).unwrap_or(u64::MAX);
+        if expected_generation.get() > max
+            || next_generation.get() > max
+            || expected_generation.get().checked_add(1) != Some(next_generation.get())
+            || before_config_sha256 == after_config_sha256
+            || (kind == AccountTransitionKind::AccountCreate && account_generation.get() != 1)
+        {
+            return Err(MailError::invalid_input(
+                "account transition request is outside the contract",
+            ));
+        }
+        Ok(Self {
+            grant_use,
+            transition_id,
+            store_id,
+            account_id,
+            kind,
+            before_config_sha256,
+            after_config_sha256,
+            expected_generation,
+            next_generation,
+            display_id_sha256,
+            account_generation,
+            credential_id,
+            binding_sha256,
+            observed_at_unix_ms,
+        })
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct AccountTransitionObservationRequest {
+    transition_id: TransitionId,
+    source_state: AccountTransitionState,
+    actual_config_generation: NonZeroU64,
+    actual_config_sha256: Sha256Digest,
+    observed_at_unix_ms: i64,
+}
+
+impl AccountTransitionObservationRequest {
+    /// Bind one exact local config observation to a declared transition phase.
+    ///
+    /// # Errors
+    ///
+    /// Returns invalid-input for a nonrepresentable time or generation.
+    pub fn new(
+        transition_id: TransitionId,
+        source_state: AccountTransitionState,
+        actual_config_generation: NonZeroU64,
+        actual_config_sha256: Sha256Digest,
+        observed_at_unix_ms: i64,
+    ) -> Result<Self, MailError> {
+        input_utc_millis(observed_at_unix_ms)?;
+        if actual_config_generation.get() > u64::try_from(i64::MAX).unwrap_or(u64::MAX) {
+            return Err(MailError::invalid_input(
+                "account transition generation is outside the store range",
+            ));
+        }
+        Ok(Self {
+            transition_id,
+            source_state,
+            actual_config_generation,
+            actual_config_sha256,
+            observed_at_unix_ms,
+        })
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct AccountTransitionProjection {
+    pub transition_id: TransitionId,
+    pub account_id: AccountId,
+    pub transition_state: AccountTransitionState,
+    pub account_state: RegisteredAccountState,
+    pub store_state: RegisteredStoreTransitionState,
+    pub config_generation: NonZeroU64,
+    pub account_generation: NonZeroU64,
+    pub prepared_at: DateTime<Utc>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ChallengeReview {
     pub bounded: bool,
@@ -506,6 +701,49 @@ pub enum AuthorityFaultPoint {
     EnrollmentExpiryEvent,
     EnrollmentExpiryAfterCommit,
     EnrollmentChallengeRead,
+    AccountStoreBlocked,
+    AccountForeignKeysDeferred,
+    RegisteredAccountInserted,
+    AccountTransitionInserted,
+    RegisteredCredentialInserted,
+    AccountForeignKeyChecked,
+    AccountStoreBlockedEvent,
+    AccountTransitionPreparedEvent,
+    AccountPrepareClockUpdated,
+    AccountPrepareBeforeCommit,
+    AccountPrepareAfterCommit,
+    AccountStoreVersionInserted,
+    AccountVersionInserted,
+    AccountTransitionCommitted,
+    AccountStoreCommitted,
+    AccountConfigCommittedEvent,
+    AccountConfigClockUpdated,
+    AccountConfigBeforeCommit,
+    AccountConfigAfterCommit,
+    AccountFinalizeAccountUpdated,
+    AccountFinalizeTransitionUpdated,
+    AccountFinalizeStoreUpdated,
+    AccountFinalizeTransitionEvent,
+    AccountFinalizeStoreEvent,
+    AccountFinalizeClockUpdated,
+    AccountFinalizeBeforeCommit,
+    AccountFinalizeAfterCommit,
+    AccountAbortAccountUpdated,
+    AccountAbortTransitionUpdated,
+    AccountAbortStoreUpdated,
+    AccountAbortTransitionEvent,
+    AccountAbortStoreEvent,
+    AccountAbortClockUpdated,
+    AccountAbortBeforeCommit,
+    AccountAbortAfterCommit,
+    AccountRecoveryAccountUpdated,
+    AccountRecoveryTransitionUpdated,
+    AccountRecoveryStoreUpdated,
+    AccountRecoveryStoreEvent,
+    AccountRecoveryTransitionEvent,
+    AccountRecoveryClockUpdated,
+    AccountRecoveryBeforeCommit,
+    AccountRecoveryAfterCommit,
 }
 
 #[cfg(feature = "test-support")]
@@ -517,6 +755,7 @@ pub struct AuthorityValidationQueryCounts {
     pub grant_preflight: u64,
     pub store_preflight: u64,
     pub event_preflight: u64,
+    pub registry_parent_preflight: u64,
     pub registry_stream: u64,
     pub bounded_keyed: u64,
 }
@@ -531,6 +770,7 @@ std::thread_local! {
             grant_preflight: 0,
             store_preflight: 0,
             event_preflight: 0,
+            registry_parent_preflight: 0,
             registry_stream: 0,
             bounded_keyed: 0,
         }) };
@@ -557,6 +797,7 @@ enum ValidationQueryKind {
     GrantPreflight,
     StorePreflight,
     EventPreflight,
+    RegistryParentPreflight,
     RegistryStream,
     BoundedKeyed,
 }
@@ -572,6 +813,9 @@ fn record_validation_query(kind: ValidationQueryKind) {
             ValidationQueryKind::GrantPreflight => counts.grant_preflight += 1,
             ValidationQueryKind::StorePreflight => counts.store_preflight += 1,
             ValidationQueryKind::EventPreflight => counts.event_preflight += 1,
+            ValidationQueryKind::RegistryParentPreflight => {
+                counts.registry_parent_preflight += 1;
+            }
             ValidationQueryKind::RegistryStream => counts.registry_stream += 1,
             ValidationQueryKind::BoundedKeyed => counts.bounded_keyed += 1,
         }
@@ -669,6 +913,49 @@ enum TestFaultPoint {
     EnrollmentExpiryEvent,
     EnrollmentExpiryAfterCommit,
     EnrollmentChallengeRead,
+    AccountStoreBlocked,
+    AccountForeignKeysDeferred,
+    RegisteredAccountInserted,
+    AccountTransitionInserted,
+    RegisteredCredentialInserted,
+    AccountForeignKeyChecked,
+    AccountStoreBlockedEvent,
+    AccountTransitionPreparedEvent,
+    AccountPrepareClockUpdated,
+    AccountPrepareBeforeCommit,
+    AccountPrepareAfterCommit,
+    AccountStoreVersionInserted,
+    AccountVersionInserted,
+    AccountTransitionCommitted,
+    AccountStoreCommitted,
+    AccountConfigCommittedEvent,
+    AccountConfigClockUpdated,
+    AccountConfigBeforeCommit,
+    AccountConfigAfterCommit,
+    AccountFinalizeAccountUpdated,
+    AccountFinalizeTransitionUpdated,
+    AccountFinalizeStoreUpdated,
+    AccountFinalizeTransitionEvent,
+    AccountFinalizeStoreEvent,
+    AccountFinalizeClockUpdated,
+    AccountFinalizeBeforeCommit,
+    AccountFinalizeAfterCommit,
+    AccountAbortAccountUpdated,
+    AccountAbortTransitionUpdated,
+    AccountAbortStoreUpdated,
+    AccountAbortTransitionEvent,
+    AccountAbortStoreEvent,
+    AccountAbortClockUpdated,
+    AccountAbortBeforeCommit,
+    AccountAbortAfterCommit,
+    AccountRecoveryAccountUpdated,
+    AccountRecoveryTransitionUpdated,
+    AccountRecoveryStoreUpdated,
+    AccountRecoveryStoreEvent,
+    AccountRecoveryTransitionEvent,
+    AccountRecoveryClockUpdated,
+    AccountRecoveryBeforeCommit,
+    AccountRecoveryAfterCommit,
 }
 
 #[cfg(feature = "test-support")]
@@ -708,6 +995,53 @@ impl From<TestFaultPoint> for AuthorityFaultPoint {
             TestFaultPoint::EnrollmentExpiryEvent => Self::EnrollmentExpiryEvent,
             TestFaultPoint::EnrollmentExpiryAfterCommit => Self::EnrollmentExpiryAfterCommit,
             TestFaultPoint::EnrollmentChallengeRead => Self::EnrollmentChallengeRead,
+            TestFaultPoint::AccountStoreBlocked => Self::AccountStoreBlocked,
+            TestFaultPoint::AccountForeignKeysDeferred => Self::AccountForeignKeysDeferred,
+            TestFaultPoint::RegisteredAccountInserted => Self::RegisteredAccountInserted,
+            TestFaultPoint::AccountTransitionInserted => Self::AccountTransitionInserted,
+            TestFaultPoint::RegisteredCredentialInserted => Self::RegisteredCredentialInserted,
+            TestFaultPoint::AccountForeignKeyChecked => Self::AccountForeignKeyChecked,
+            TestFaultPoint::AccountStoreBlockedEvent => Self::AccountStoreBlockedEvent,
+            TestFaultPoint::AccountTransitionPreparedEvent => Self::AccountTransitionPreparedEvent,
+            TestFaultPoint::AccountPrepareClockUpdated => Self::AccountPrepareClockUpdated,
+            TestFaultPoint::AccountPrepareBeforeCommit => Self::AccountPrepareBeforeCommit,
+            TestFaultPoint::AccountPrepareAfterCommit => Self::AccountPrepareAfterCommit,
+            TestFaultPoint::AccountStoreVersionInserted => Self::AccountStoreVersionInserted,
+            TestFaultPoint::AccountVersionInserted => Self::AccountVersionInserted,
+            TestFaultPoint::AccountTransitionCommitted => Self::AccountTransitionCommitted,
+            TestFaultPoint::AccountStoreCommitted => Self::AccountStoreCommitted,
+            TestFaultPoint::AccountConfigCommittedEvent => Self::AccountConfigCommittedEvent,
+            TestFaultPoint::AccountConfigClockUpdated => Self::AccountConfigClockUpdated,
+            TestFaultPoint::AccountConfigBeforeCommit => Self::AccountConfigBeforeCommit,
+            TestFaultPoint::AccountConfigAfterCommit => Self::AccountConfigAfterCommit,
+            TestFaultPoint::AccountFinalizeAccountUpdated => Self::AccountFinalizeAccountUpdated,
+            TestFaultPoint::AccountFinalizeTransitionUpdated => {
+                Self::AccountFinalizeTransitionUpdated
+            }
+            TestFaultPoint::AccountFinalizeStoreUpdated => Self::AccountFinalizeStoreUpdated,
+            TestFaultPoint::AccountFinalizeTransitionEvent => Self::AccountFinalizeTransitionEvent,
+            TestFaultPoint::AccountFinalizeStoreEvent => Self::AccountFinalizeStoreEvent,
+            TestFaultPoint::AccountFinalizeClockUpdated => Self::AccountFinalizeClockUpdated,
+            TestFaultPoint::AccountFinalizeBeforeCommit => Self::AccountFinalizeBeforeCommit,
+            TestFaultPoint::AccountFinalizeAfterCommit => Self::AccountFinalizeAfterCommit,
+            TestFaultPoint::AccountAbortAccountUpdated => Self::AccountAbortAccountUpdated,
+            TestFaultPoint::AccountAbortTransitionUpdated => Self::AccountAbortTransitionUpdated,
+            TestFaultPoint::AccountAbortStoreUpdated => Self::AccountAbortStoreUpdated,
+            TestFaultPoint::AccountAbortTransitionEvent => Self::AccountAbortTransitionEvent,
+            TestFaultPoint::AccountAbortStoreEvent => Self::AccountAbortStoreEvent,
+            TestFaultPoint::AccountAbortClockUpdated => Self::AccountAbortClockUpdated,
+            TestFaultPoint::AccountAbortBeforeCommit => Self::AccountAbortBeforeCommit,
+            TestFaultPoint::AccountAbortAfterCommit => Self::AccountAbortAfterCommit,
+            TestFaultPoint::AccountRecoveryAccountUpdated => Self::AccountRecoveryAccountUpdated,
+            TestFaultPoint::AccountRecoveryTransitionUpdated => {
+                Self::AccountRecoveryTransitionUpdated
+            }
+            TestFaultPoint::AccountRecoveryStoreUpdated => Self::AccountRecoveryStoreUpdated,
+            TestFaultPoint::AccountRecoveryStoreEvent => Self::AccountRecoveryStoreEvent,
+            TestFaultPoint::AccountRecoveryTransitionEvent => Self::AccountRecoveryTransitionEvent,
+            TestFaultPoint::AccountRecoveryClockUpdated => Self::AccountRecoveryClockUpdated,
+            TestFaultPoint::AccountRecoveryBeforeCommit => Self::AccountRecoveryBeforeCommit,
+            TestFaultPoint::AccountRecoveryAfterCommit => Self::AccountRecoveryAfterCommit,
         }
     }
 }
@@ -1571,6 +1905,678 @@ impl AuthorityStore {
         })
     }
 
+    /// Reserve one authorized account-create transition.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable transition, authorization, clock, recovery, or store error.
+    #[allow(clippy::too_many_lines, clippy::needless_pass_by_value)]
+    pub fn prepare_account_transition(
+        &self,
+        request: PrepareAccountTransitionRequest,
+    ) -> Result<AccountTransitionProjection, MailError> {
+        if request.kind != AccountTransitionKind::AccountCreate {
+            return Err(authorization_context_stale_error());
+        }
+        if !matches!(self.state, AuthorityOpenState::Ready(_)) {
+            return Err(recovery_error());
+        }
+        let _apply_lock = acquire_apply_lock(&self.home)?;
+        if !authority_database_exists(&self.home.database)? {
+            return Err(recovery_error());
+        }
+        let mut connection = existing_authority_read_connection(&self.home.database)?;
+        if classify_database(&connection)? != DatabaseClass::AuthorityV1 {
+            return Err(recovery_error());
+        }
+        configure_authority_pragmas(&connection)?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| store_write_error())?;
+        let loaded = self.validate_ready_transaction(&transaction)?;
+        let effective_time = checked_clock(loaded.last_observed_at, request.observed_at_unix_ms)?;
+        utc_millis(effective_time)?;
+
+        if let Some(grant) = load_grant_use(&transaction, request.grant_use.grant_id)? {
+            if !grant.matches_request(&request.grant_use) {
+                return Err(grant_already_used_error());
+            }
+            let transition = load_account_transition_by_grant(&transaction, grant.grant_id)?
+                .ok_or_else(recovery_error)?;
+            validate_prepare_retry_identity(&transaction, &request, &transition)?;
+            let projection = transition_projection(&transaction, &transition)?;
+            observe_clock_pair(&transaction, effective_time)?;
+            transaction.commit().map_err(|_| store_write_error())?;
+            secure_authority_files(&self.home.database)?;
+            return Ok(projection);
+        }
+
+        let receipt = load_receipt_by_id(&transaction, request.grant_use.receipt_id)?
+            .ok_or_else(authorization_context_stale_error)?;
+        let challenge = load_challenge(&transaction, receipt.challenge_id).map_err(|error| {
+            match error.code {
+                MailErrorCode::AuthorizationMalformed => authorization_context_stale_error(),
+                _ => error,
+            }
+        })?;
+        validate_account_prepare_identity(&request, &challenge, &receipt)?;
+        let intent_sha256 = account_prepare_intent(&request);
+        if challenge.state == "expired" {
+            validate_exact_enrollment_expiry(&transaction, &challenge, &receipt, intent_sha256)?;
+            observe_clock_pair(&transaction, effective_time)?;
+            transaction.commit().map_err(|_| store_write_error())?;
+            secure_authority_files(&self.home.database)?;
+            return Err(authorization_expired_error());
+        }
+        if challenge.state != "authorized" {
+            return Err(authorization_context_stale_error());
+        }
+        if effective_time > receipt.expires_at {
+            let changed = transaction
+                .execute(
+                    "UPDATE authorization_challenges SET state='expired'
+                     WHERE challenge_id=?1 AND state='authorized'",
+                    [challenge.challenge_id.as_bytes()],
+                )
+                .map_err(|_| store_write_error())?;
+            if changed != 1 {
+                return Err(recovery_error());
+            }
+            self.test_hooks
+                .fault(TestFaultPoint::EnrollmentExpiredState)?;
+            observe_clock_pair(&transaction, effective_time)?;
+            self.test_hooks
+                .fault(TestFaultPoint::EnrollmentExpiryClockUpdated)?;
+            insert_enrollment_expiry_event(
+                &transaction,
+                &challenge,
+                &receipt,
+                intent_sha256,
+                effective_time,
+            )?;
+            self.test_hooks
+                .fault(TestFaultPoint::EnrollmentExpiryEvent)?;
+            transaction.commit().map_err(|_| store_write_error())?;
+            secure_authority_files(&self.home.database)?;
+            self.test_hooks
+                .fault(TestFaultPoint::EnrollmentExpiryAfterCommit)?;
+            return Err(authorization_expired_error());
+        }
+
+        validate_prepare_occupancy(&transaction, &request)?;
+        let transition_sha256 = account_transition_digest(&request, effective_time);
+        let collision: i64 = transaction
+            .query_row(
+                "SELECT COUNT(*) FROM account_transitions WHERE transition_sha256=?1",
+                [transition_sha256.as_bytes()],
+                |row| row.get(0),
+            )
+            .map_err(|_| store_read_error())?;
+        if collision != 0 {
+            return Err(account_identity_conflict_error());
+        }
+
+        let use_receipt = grant_use_transcript(&request.grant_use, effective_time);
+        let use_sha256 = Sha256Digest::digest(&use_receipt);
+        insert_grant_use(
+            &transaction,
+            &request.grant_use,
+            &use_receipt,
+            use_sha256,
+            effective_time,
+        )?;
+        self.test_hooks.fault(TestFaultPoint::GrantUseInserted)?;
+        insert_grant_used_event(
+            &transaction,
+            request.grant_use.grant_id,
+            receipt.receipt_id,
+            use_sha256,
+            effective_time,
+        )?;
+        self.test_hooks.fault(TestFaultPoint::GrantUsedEvent)?;
+        let changed = transaction
+            .execute(
+                "UPDATE registered_stores SET state='blocked',updated_at=?1
+                 WHERE store_id=?2 AND state='active' AND config_generation=?3
+                   AND config_sha256=?4 AND location_sha256=?5",
+                params![
+                    effective_time,
+                    request.store_id.as_bytes(),
+                    i64::try_from(request.expected_generation.get())
+                        .map_err(|_| authorization_context_stale_error())?,
+                    request.before_config_sha256.as_bytes(),
+                    account_manifest_location_sha256(&challenge)?.as_bytes(),
+                ],
+            )
+            .map_err(|_| store_write_error())?;
+        if changed != 1 {
+            return Err(account_update_conflict_error());
+        }
+        self.test_hooks.fault(TestFaultPoint::AccountStoreBlocked)?;
+        transaction
+            .execute_batch("PRAGMA defer_foreign_keys=ON")
+            .map_err(|_| store_write_error())?;
+        if pragma_i64(&transaction, "defer_foreign_keys")? != 1 {
+            return Err(recovery_error());
+        }
+        self.test_hooks
+            .fault(TestFaultPoint::AccountForeignKeysDeferred)?;
+        let inserted = transaction
+            .execute(
+                "INSERT INTO registered_accounts
+                 (account_id,store_id,display_id_sha256,account_generation,credential_id,
+                  binding_sha256,state,authorized_receipt_id,active_transition_id,
+                  created_at,updated_at,removed_at)
+                 VALUES(?1,?2,?3,?4,?5,?6,'proposed',?7,?8,?9,?9,NULL)",
+                params![
+                    request.account_id.as_bytes(),
+                    request.store_id.as_bytes(),
+                    request.display_id_sha256.as_bytes(),
+                    i64::try_from(request.account_generation.get())
+                        .map_err(|_| authorization_context_stale_error())?,
+                    request.credential_id.as_bytes(),
+                    request.binding_sha256.as_bytes(),
+                    receipt.receipt_id.as_bytes(),
+                    request.transition_id.as_bytes(),
+                    effective_time,
+                ],
+            )
+            .map_err(|_| store_write_error())?;
+        if inserted != 1 {
+            return Err(store_write_error());
+        }
+        self.test_hooks
+            .fault(TestFaultPoint::RegisteredAccountInserted)?;
+        let inserted = transaction
+            .execute(
+                "INSERT INTO account_transitions
+                 (transition_id,grant_id,store_id,account_id,kind,before_config_sha256,
+                  after_config_sha256,expected_generation,next_generation,transition_sha256,
+                  state,prepared_at,config_committed_at,finalized_at,resolved_at)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,'prepared',?11,NULL,NULL,NULL)",
+                params![
+                    request.transition_id.as_bytes(),
+                    request.grant_use.grant_id.as_bytes(),
+                    request.store_id.as_bytes(),
+                    request.account_id.as_bytes(),
+                    request.kind.database_name(),
+                    request.before_config_sha256.as_bytes(),
+                    request.after_config_sha256.as_bytes(),
+                    i64::try_from(request.expected_generation.get())
+                        .map_err(|_| authorization_context_stale_error())?,
+                    i64::try_from(request.next_generation.get())
+                        .map_err(|_| authorization_context_stale_error())?,
+                    transition_sha256.as_bytes(),
+                    effective_time,
+                ],
+            )
+            .map_err(|_| store_write_error())?;
+        if inserted != 1 {
+            return Err(store_write_error());
+        }
+        self.test_hooks
+            .fault(TestFaultPoint::AccountTransitionInserted)?;
+        let inserted = transaction
+            .execute(
+                "INSERT INTO registered_credentials
+                 (credential_id,account_id,store_id,created_transition_id,created_at)
+                 VALUES(?1,?2,?3,?4,?5)",
+                params![
+                    request.credential_id.as_bytes(),
+                    request.account_id.as_bytes(),
+                    request.store_id.as_bytes(),
+                    request.transition_id.as_bytes(),
+                    effective_time,
+                ],
+            )
+            .map_err(|_| store_write_error())?;
+        if inserted != 1 {
+            return Err(store_write_error());
+        }
+        self.test_hooks
+            .fault(TestFaultPoint::RegisteredCredentialInserted)?;
+        if foreign_key_violation_count(&transaction)? != 0 {
+            return Err(recovery_error());
+        }
+        self.test_hooks
+            .fault(TestFaultPoint::AccountForeignKeyChecked)?;
+        insert_account_transition_event(
+            &transaction,
+            request.store_id.as_bytes(),
+            4,
+            9,
+            4,
+            6,
+            request.transition_id.as_bytes(),
+            0x0401,
+            0x0402,
+            transition_sha256,
+            receipt.receipt_id,
+            effective_time,
+        )?;
+        self.test_hooks
+            .fault(TestFaultPoint::AccountStoreBlockedEvent)?;
+        insert_account_transition_event(
+            &transaction,
+            request.transition_id.as_bytes(),
+            6,
+            10,
+            4,
+            5,
+            request.account_id.as_bytes(),
+            0,
+            AccountTransitionState::Prepared.event_state(),
+            transition_sha256,
+            receipt.receipt_id,
+            effective_time,
+        )?;
+        self.test_hooks
+            .fault(TestFaultPoint::AccountTransitionPreparedEvent)?;
+        observe_clock_pair(&transaction, effective_time)?;
+        self.test_hooks
+            .fault(TestFaultPoint::AccountPrepareClockUpdated)?;
+        self.test_hooks
+            .fault(TestFaultPoint::AccountPrepareBeforeCommit)?;
+        transaction.commit().map_err(|_| store_write_error())?;
+        secure_authority_files(&self.home.database)?;
+        self.test_hooks
+            .fault(TestFaultPoint::AccountPrepareAfterCommit)?;
+        Ok(AccountTransitionProjection {
+            transition_id: request.transition_id,
+            account_id: request.account_id,
+            transition_state: AccountTransitionState::Prepared,
+            account_state: RegisteredAccountState::Proposed,
+            store_state: RegisteredStoreTransitionState::Blocked,
+            config_generation: request.expected_generation,
+            account_generation: request.account_generation,
+            prepared_at: utc_millis(effective_time)?,
+        })
+    }
+
+    /// Record an exact config-commit observation.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable transition, clock, recovery, or store error.
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn mark_config_committed(
+        &self,
+        request: AccountTransitionObservationRequest,
+    ) -> Result<AccountTransitionProjection, MailError> {
+        self.apply_account_observation(&request, AccountObservationOperation::ConfigCommitted)
+    }
+
+    /// Finalize one config-committed account transition.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable transition, clock, recovery, or store error.
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn finalize_account_transition(
+        &self,
+        request: AccountTransitionObservationRequest,
+    ) -> Result<AccountTransitionProjection, MailError> {
+        self.apply_account_observation(&request, AccountObservationOperation::Finalize)
+    }
+
+    /// Abort one prepared account transition with known no config effect.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable transition, clock, recovery, or store error.
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn abort_transition(
+        &self,
+        request: AccountTransitionObservationRequest,
+    ) -> Result<AccountTransitionProjection, MailError> {
+        self.apply_account_observation(&request, AccountObservationOperation::Abort)
+    }
+
+    /// Persist one exact unsafe config observation as terminal recovery-required state.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable transition, clock, recovery, or store error.
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn mark_transition_recovery_required(
+        &self,
+        request: AccountTransitionObservationRequest,
+    ) -> Result<AccountTransitionProjection, MailError> {
+        self.apply_account_observation(&request, AccountObservationOperation::Recovery)
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn apply_account_observation(
+        &self,
+        request: &AccountTransitionObservationRequest,
+        operation: AccountObservationOperation,
+    ) -> Result<AccountTransitionProjection, MailError> {
+        if !matches!(self.state, AuthorityOpenState::Ready(_)) {
+            return Err(recovery_error());
+        }
+        let _apply_lock = acquire_apply_lock(&self.home)?;
+        if !authority_database_exists(&self.home.database)? {
+            return Err(recovery_error());
+        }
+        let mut connection = existing_authority_read_connection(&self.home.database)?;
+        if classify_database(&connection)? != DatabaseClass::AuthorityV1 {
+            return Err(recovery_error());
+        }
+        configure_authority_pragmas(&connection)?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| store_write_error())?;
+        let loaded = self.validate_ready_transaction(&transaction)?;
+        let effective_time = checked_clock(loaded.last_observed_at, request.observed_at_unix_ms)?;
+        utc_millis(effective_time)?;
+        let transition = load_account_transition(&transaction, request.transition_id)?
+            .ok_or_else(account_update_conflict_error)?;
+        if transition.kind != AccountTransitionKind::AccountCreate {
+            return Err(account_update_conflict_error());
+        }
+        let pair = classify_observed_pair(&transition, request);
+
+        if transition.state == AccountTransitionState::RecoveryRequired {
+            let store = load_registered_store_by_id(&transaction, transition.store_id)?
+                .ok_or_else(recovery_error)?;
+            let prior = if transition.config_committed_at.is_some() {
+                AccountTransitionState::ConfigCommitted
+            } else {
+                AccountTransitionState::Prepared
+            };
+            let exact_recovery_observation = match prior {
+                AccountTransitionState::Prepared => pair == ObservedConfigPair::Third,
+                AccountTransitionState::ConfigCommitted => pair != ObservedConfigPair::After,
+                _ => false,
+            };
+            let exact_config_commit_retry = operation
+                == AccountObservationOperation::ConfigCommitted
+                && prior == AccountTransitionState::ConfigCommitted
+                && request.source_state == AccountTransitionState::Prepared
+                && pair == ObservedConfigPair::After;
+            if (!exact_recovery_observation && !exact_config_commit_retry)
+                || (exact_recovery_observation
+                    && (request.actual_config_generation != store.config_generation
+                        || request.actual_config_sha256 != store.config_sha256))
+            {
+                return Err(account_update_conflict_error());
+            }
+            let projection = transition_projection(&transaction, &transition)?;
+            observe_clock_pair(&transaction, effective_time)?;
+            transaction.commit().map_err(|_| store_write_error())?;
+            secure_authority_files(&self.home.database)?;
+            return Ok(projection);
+        }
+
+        let completed = match operation {
+            AccountObservationOperation::ConfigCommitted => matches!(
+                transition.state,
+                AccountTransitionState::ConfigCommitted
+                    | AccountTransitionState::Finalized
+                    | AccountTransitionState::RecoveryRequired
+            ),
+            AccountObservationOperation::Finalize => {
+                transition.state == AccountTransitionState::Finalized
+            }
+            AccountObservationOperation::Abort => {
+                transition.state == AccountTransitionState::Aborted
+            }
+            AccountObservationOperation::Recovery => {
+                transition.state == AccountTransitionState::RecoveryRequired
+            }
+        };
+        if completed {
+            let exact = match operation {
+                AccountObservationOperation::ConfigCommitted => {
+                    request.source_state == AccountTransitionState::Prepared
+                        && pair == ObservedConfigPair::After
+                }
+                AccountObservationOperation::Finalize => {
+                    request.source_state == AccountTransitionState::ConfigCommitted
+                        && pair == ObservedConfigPair::After
+                }
+                AccountObservationOperation::Abort => {
+                    request.source_state == AccountTransitionState::Prepared
+                        && pair == ObservedConfigPair::Before
+                }
+                AccountObservationOperation::Recovery => false,
+            };
+            if !exact {
+                return Err(account_update_conflict_error());
+            }
+            let projection = transition_projection(&transaction, &transition)?;
+            observe_clock_pair(&transaction, effective_time)?;
+            transaction.commit().map_err(|_| store_write_error())?;
+            secure_authority_files(&self.home.database)?;
+            return Ok(projection);
+        }
+
+        let unsafe_pair = (transition.state == AccountTransitionState::Prepared
+            && pair == ObservedConfigPair::Third)
+            || (transition.state == AccountTransitionState::ConfigCommitted
+                && pair != ObservedConfigPair::After);
+        if unsafe_pair {
+            let projection = commit_account_recovery(
+                &transaction,
+                &transition,
+                request,
+                effective_time,
+                &self.test_hooks,
+            )?;
+            self.test_hooks
+                .fault(TestFaultPoint::AccountRecoveryBeforeCommit)?;
+            transaction.commit().map_err(|_| store_write_error())?;
+            secure_authority_files(&self.home.database)?;
+            self.test_hooks
+                .fault(TestFaultPoint::AccountRecoveryAfterCommit)?;
+            return Ok(projection);
+        }
+
+        match operation {
+            AccountObservationOperation::ConfigCommitted
+                if request.source_state == AccountTransitionState::Prepared
+                    && transition.state == AccountTransitionState::Prepared
+                    && pair == ObservedConfigPair::Before =>
+            {
+                let projection = transition_projection(&transaction, &transition)?;
+                observe_clock_pair(&transaction, effective_time)?;
+                transaction.commit().map_err(|_| store_write_error())?;
+                secure_authority_files(&self.home.database)?;
+                Ok(projection)
+            }
+            AccountObservationOperation::ConfigCommitted
+                if request.source_state == AccountTransitionState::Prepared
+                    && transition.state == AccountTransitionState::Prepared
+                    && pair == ObservedConfigPair::After =>
+            {
+                let account = load_registered_account(&transaction, transition.account_id)?
+                    .ok_or_else(recovery_error)?;
+                insert_transition_versions(
+                    &transaction,
+                    &transition,
+                    &account,
+                    effective_time,
+                    &self.test_hooks,
+                )?;
+                let changed = transaction
+                    .execute(
+                        "UPDATE account_transitions SET state='config_committed',
+                         config_committed_at=?1 WHERE transition_id=?2 AND state='prepared'",
+                        params![effective_time, transition.transition_id.as_bytes()],
+                    )
+                    .map_err(|_| store_write_error())?;
+                if changed != 1 {
+                    return Err(recovery_error());
+                }
+                self.test_hooks
+                    .fault(TestFaultPoint::AccountTransitionCommitted)?;
+                let changed = transaction
+                    .execute(
+                        "UPDATE registered_stores SET config_generation=?1,config_sha256=?2,
+                         updated_at=?3 WHERE store_id=?4 AND state='blocked'
+                         AND config_generation=?5 AND config_sha256=?6",
+                        params![
+                            i64::try_from(transition.next_generation.get())
+                                .map_err(|_| recovery_error())?,
+                            transition.after_config_sha256.as_bytes(),
+                            effective_time,
+                            transition.store_id.as_bytes(),
+                            i64::try_from(transition.expected_generation.get())
+                                .map_err(|_| recovery_error())?,
+                            transition.before_config_sha256.as_bytes(),
+                        ],
+                    )
+                    .map_err(|_| store_write_error())?;
+                if changed != 1 {
+                    return Err(recovery_error());
+                }
+                self.test_hooks
+                    .fault(TestFaultPoint::AccountStoreCommitted)?;
+                insert_transition_phase_event(
+                    &transaction,
+                    &transition,
+                    11,
+                    4,
+                    AccountTransitionState::Prepared,
+                    AccountTransitionState::ConfigCommitted,
+                    transition.transition_sha256,
+                    effective_time,
+                )?;
+                self.test_hooks
+                    .fault(TestFaultPoint::AccountConfigCommittedEvent)?;
+                observe_clock_pair(&transaction, effective_time)?;
+                self.test_hooks
+                    .fault(TestFaultPoint::AccountConfigClockUpdated)?;
+                self.test_hooks
+                    .fault(TestFaultPoint::AccountConfigBeforeCommit)?;
+                transaction.commit().map_err(|_| store_write_error())?;
+                secure_authority_files(&self.home.database)?;
+                self.test_hooks
+                    .fault(TestFaultPoint::AccountConfigAfterCommit)?;
+                Ok(projection_for_state(
+                    &transition,
+                    AccountTransitionState::ConfigCommitted,
+                    RegisteredAccountState::Proposed,
+                    RegisteredStoreTransitionState::Blocked,
+                    transition.next_generation,
+                )?)
+            }
+            AccountObservationOperation::Finalize
+                if request.source_state == AccountTransitionState::ConfigCommitted
+                    && transition.state == AccountTransitionState::ConfigCommitted
+                    && pair == ObservedConfigPair::After =>
+            {
+                update_finalize_rows(&transaction, &transition, effective_time, &self.test_hooks)?;
+                let receipt_id = transition_receipt_id(&transaction, &transition)?;
+                insert_transition_phase_event(
+                    &transaction,
+                    &transition,
+                    12,
+                    4,
+                    AccountTransitionState::ConfigCommitted,
+                    AccountTransitionState::Finalized,
+                    transition.transition_sha256,
+                    effective_time,
+                )?;
+                self.test_hooks
+                    .fault(TestFaultPoint::AccountFinalizeTransitionEvent)?;
+                insert_account_transition_event(
+                    &transaction,
+                    transition.store_id.as_bytes(),
+                    4,
+                    9,
+                    4,
+                    6,
+                    transition.transition_id.as_bytes(),
+                    0x0402,
+                    0x0401,
+                    transition.transition_sha256,
+                    receipt_id,
+                    effective_time,
+                )?;
+                self.test_hooks
+                    .fault(TestFaultPoint::AccountFinalizeStoreEvent)?;
+                observe_clock_pair(&transaction, effective_time)?;
+                self.test_hooks
+                    .fault(TestFaultPoint::AccountFinalizeClockUpdated)?;
+                self.test_hooks
+                    .fault(TestFaultPoint::AccountFinalizeBeforeCommit)?;
+                transaction.commit().map_err(|_| store_write_error())?;
+                secure_authority_files(&self.home.database)?;
+                self.test_hooks
+                    .fault(TestFaultPoint::AccountFinalizeAfterCommit)?;
+                Ok(projection_for_state(
+                    &transition,
+                    AccountTransitionState::Finalized,
+                    RegisteredAccountState::Active,
+                    RegisteredStoreTransitionState::Active,
+                    transition.next_generation,
+                )?)
+            }
+            AccountObservationOperation::Abort
+                if request.source_state == AccountTransitionState::Prepared
+                    && transition.state == AccountTransitionState::Prepared
+                    && pair == ObservedConfigPair::Before =>
+            {
+                update_abort_rows(&transaction, &transition, effective_time, &self.test_hooks)?;
+                let receipt_id = transition_receipt_id(&transaction, &transition)?;
+                insert_transition_phase_event(
+                    &transaction,
+                    &transition,
+                    13,
+                    6,
+                    AccountTransitionState::Prepared,
+                    AccountTransitionState::Aborted,
+                    transition.transition_sha256,
+                    effective_time,
+                )?;
+                self.test_hooks
+                    .fault(TestFaultPoint::AccountAbortTransitionEvent)?;
+                insert_account_transition_event(
+                    &transaction,
+                    transition.store_id.as_bytes(),
+                    4,
+                    9,
+                    6,
+                    6,
+                    transition.transition_id.as_bytes(),
+                    0x0402,
+                    0x0401,
+                    transition.transition_sha256,
+                    receipt_id,
+                    effective_time,
+                )?;
+                self.test_hooks
+                    .fault(TestFaultPoint::AccountAbortStoreEvent)?;
+                observe_clock_pair(&transaction, effective_time)?;
+                self.test_hooks
+                    .fault(TestFaultPoint::AccountAbortClockUpdated)?;
+                self.test_hooks
+                    .fault(TestFaultPoint::AccountAbortBeforeCommit)?;
+                transaction.commit().map_err(|_| store_write_error())?;
+                secure_authority_files(&self.home.database)?;
+                self.test_hooks
+                    .fault(TestFaultPoint::AccountAbortAfterCommit)?;
+                Ok(projection_for_state(
+                    &transition,
+                    AccountTransitionState::Aborted,
+                    RegisteredAccountState::Removed,
+                    RegisteredStoreTransitionState::Active,
+                    transition.expected_generation,
+                )?)
+            }
+            AccountObservationOperation::Recovery
+                if matches!(
+                    request.source_state,
+                    AccountTransitionState::Prepared | AccountTransitionState::ConfigCommitted
+                ) =>
+            {
+                Err(account_update_conflict_error())
+            }
+            _ => Err(account_update_conflict_error()),
+        }
+    }
+
     fn validate_ready_transaction(
         &self,
         transaction: &Transaction<'_>,
@@ -1753,6 +2759,736 @@ struct StoredRegisteredStoreVersion {
     created_at: i64,
 }
 
+struct StoredAccountTransition {
+    transition_id: TransitionId,
+    grant_id: AuthorizationGrantId,
+    store_id: StoreId,
+    account_id: AccountId,
+    kind: AccountTransitionKind,
+    before_config_sha256: Sha256Digest,
+    after_config_sha256: Sha256Digest,
+    expected_generation: NonZeroU64,
+    next_generation: NonZeroU64,
+    transition_sha256: Sha256Digest,
+    state: AccountTransitionState,
+    prepared_at: i64,
+    config_committed_at: Option<i64>,
+    finalized_at: Option<i64>,
+    resolved_at: Option<i64>,
+}
+
+struct StoredRegisteredAccount {
+    account_id: AccountId,
+    store_id: StoreId,
+    display_id_sha256: Sha256Digest,
+    account_generation: NonZeroU64,
+    credential_id: CredentialId,
+    binding_sha256: Sha256Digest,
+    state: RegisteredAccountState,
+    authorized_receipt_id: AuthorizationReceiptId,
+    active_transition_id: Option<TransitionId>,
+    created_at: i64,
+    updated_at: i64,
+    removed_at: Option<i64>,
+}
+
+fn transition_kind_from_name(value: &str) -> Result<AccountTransitionKind, MailError> {
+    match value {
+        "account_create" => Ok(AccountTransitionKind::AccountCreate),
+        "account_update" => Ok(AccountTransitionKind::AccountUpdate),
+        "account_remove" => Ok(AccountTransitionKind::AccountRemove),
+        "credential_set" => Ok(AccountTransitionKind::CredentialSet),
+        "credential_delete" => Ok(AccountTransitionKind::CredentialDelete),
+        _ => Err(recovery_error()),
+    }
+}
+
+fn transition_state_from_name(value: &str) -> Result<AccountTransitionState, MailError> {
+    match value {
+        "prepared" => Ok(AccountTransitionState::Prepared),
+        "config_committed" => Ok(AccountTransitionState::ConfigCommitted),
+        "finalized" => Ok(AccountTransitionState::Finalized),
+        "aborted" => Ok(AccountTransitionState::Aborted),
+        "recovery_required" => Ok(AccountTransitionState::RecoveryRequired),
+        _ => Err(recovery_error()),
+    }
+}
+
+fn transition_state_name(value: AccountTransitionState) -> &'static str {
+    match value {
+        AccountTransitionState::Prepared => "prepared",
+        AccountTransitionState::ConfigCommitted => "config_committed",
+        AccountTransitionState::Finalized => "finalized",
+        AccountTransitionState::Aborted => "aborted",
+        AccountTransitionState::RecoveryRequired => "recovery_required",
+    }
+}
+
+fn account_state_from_name(value: &str) -> Result<RegisteredAccountState, MailError> {
+    match value {
+        "proposed" => Ok(RegisteredAccountState::Proposed),
+        "active" => Ok(RegisteredAccountState::Active),
+        "blocked" => Ok(RegisteredAccountState::Blocked),
+        "removed" => Ok(RegisteredAccountState::Removed),
+        _ => Err(recovery_error()),
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum AccountObservationOperation {
+    ConfigCommitted,
+    Finalize,
+    Abort,
+    Recovery,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum ObservedConfigPair {
+    Before,
+    After,
+    Third,
+}
+
+fn classify_observed_pair(
+    transition: &StoredAccountTransition,
+    request: &AccountTransitionObservationRequest,
+) -> ObservedConfigPair {
+    if request.actual_config_generation == transition.expected_generation
+        && request.actual_config_sha256 == transition.before_config_sha256
+    {
+        ObservedConfigPair::Before
+    } else if request.actual_config_generation == transition.next_generation
+        && request.actual_config_sha256 == transition.after_config_sha256
+    {
+        ObservedConfigPair::After
+    } else {
+        ObservedConfigPair::Third
+    }
+}
+
+fn validate_account_prepare_identity(
+    request: &PrepareAccountTransitionRequest,
+    challenge: &StoredChallenge,
+    receipt: &StoredReceipt,
+) -> Result<(), MailError> {
+    let manifest = ActionManifest::parse(&challenge.manifest)
+        .map_err(|_| authorization_context_stale_error())?;
+    let ManifestPayload::AccountCreate(value) = manifest.payload() else {
+        return Err(authorization_context_stale_error());
+    };
+    let after = value
+        .after
+        .as_ref()
+        .ok_or_else(authorization_context_stale_error)?;
+    if request.grant_use.grant_id != challenge.grant_id
+        || request.grant_use.receipt_id != receipt.receipt_id
+        || receipt.challenge_id != challenge.challenge_id
+        || receipt.grant_id != challenge.grant_id
+        || request.grant_use.action != SensitiveAction::AccountCreate
+        || request.grant_use.action != challenge.action
+        || request.grant_use.target_kind != TargetKind::Account
+        || request.grant_use.target_kind.code() != challenge.target_kind_code
+        || request.grant_use.target_bytes != challenge.target_id
+        || request.grant_use.manifest_sha256 != challenge.manifest_sha256
+        || request.transition_id != value.transition_id
+        || request.store_id != value.config_cas.store_id
+        || request.account_id != after.account_id
+        || request.account_id.as_bytes().as_slice() != challenge.target_id
+        || request.kind != AccountTransitionKind::AccountCreate
+        || request.before_config_sha256 != value.config_cas.exact_content_sha256
+        || request.after_config_sha256 != value.after_config_sha256
+        || request.expected_generation != value.config_cas.generation
+        || request.next_generation != value.next_config_generation
+        || request.display_id_sha256 != display_id_digest(&after.display_id)
+        || request.account_generation != after.generation
+        || request.credential_id != after.credential_id
+        || request.binding_sha256 != after.binding_sha256
+    {
+        return Err(authorization_context_stale_error());
+    }
+    Ok(())
+}
+
+fn account_manifest_location_sha256(
+    challenge: &StoredChallenge,
+) -> Result<Sha256Digest, MailError> {
+    let manifest = ActionManifest::parse(&challenge.manifest)
+        .map_err(|_| authorization_context_stale_error())?;
+    let ManifestPayload::AccountCreate(value) = manifest.payload() else {
+        return Err(authorization_context_stale_error());
+    };
+    Ok(value.config_cas.location_sha256)
+}
+
+fn validate_prepare_occupancy(
+    connection: &Connection,
+    request: &PrepareAccountTransitionRequest,
+) -> Result<(), MailError> {
+    let store = load_registered_store_by_id(connection, request.store_id)?
+        .ok_or_else(authorization_context_stale_error)?;
+    match store.state.as_str() {
+        "recovery_required" => return Err(recovery_error()),
+        "active" => {}
+        _ => return Err(account_update_conflict_error()),
+    }
+    if store.config_generation != request.expected_generation
+        || store.config_sha256 != request.before_config_sha256
+    {
+        return Err(authorization_context_stale_error());
+    }
+    let active_transition: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM account_transitions
+             WHERE store_id=?1 AND state IN ('prepared','config_committed')",
+            [request.store_id.as_bytes()],
+            |row| row.get(0),
+        )
+        .map_err(|_| store_read_error())?;
+    if active_transition != 0 {
+        return Err(account_update_conflict_error());
+    }
+    let identities: i64 = connection
+        .query_row(
+            "SELECT
+                (SELECT COUNT(*) FROM registered_accounts WHERE account_id=?1) +
+                (SELECT COUNT(*) FROM registered_credentials WHERE credential_id=?2) +
+                (SELECT COUNT(*) FROM account_transitions WHERE transition_id=?3)",
+            params![
+                request.account_id.as_bytes(),
+                request.credential_id.as_bytes(),
+                request.transition_id.as_bytes(),
+            ],
+            |row| row.get(0),
+        )
+        .map_err(|_| store_read_error())?;
+    if identities != 0 {
+        return Err(account_identity_conflict_error());
+    }
+    let display: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM registered_accounts
+             WHERE store_id=?1 AND display_id_sha256=?2
+               AND state IN ('proposed','active','blocked')",
+            params![
+                request.store_id.as_bytes(),
+                request.display_id_sha256.as_bytes()
+            ],
+            |row| row.get(0),
+        )
+        .map_err(|_| store_read_error())?;
+    if display != 0 {
+        return Err(account_already_exists_error());
+    }
+    Ok(())
+}
+
+fn validate_prepare_retry_identity(
+    connection: &Connection,
+    request: &PrepareAccountTransitionRequest,
+    transition: &StoredAccountTransition,
+) -> Result<(), MailError> {
+    let account =
+        load_registered_account(connection, transition.account_id)?.ok_or_else(recovery_error)?;
+    if transition.transition_id != request.transition_id
+        || transition.grant_id != request.grant_use.grant_id
+        || transition.store_id != request.store_id
+        || transition.account_id != request.account_id
+        || transition.kind != request.kind
+        || transition.before_config_sha256 != request.before_config_sha256
+        || transition.after_config_sha256 != request.after_config_sha256
+        || transition.expected_generation != request.expected_generation
+        || transition.next_generation != request.next_generation
+        || account.display_id_sha256 != request.display_id_sha256
+        || account.account_generation != request.account_generation
+        || account.credential_id != request.credential_id
+        || account.binding_sha256 != request.binding_sha256
+        || account.authorized_receipt_id != request.grant_use.receipt_id
+        || transition.transition_sha256
+            != account_transition_digest(request, transition.prepared_at)
+    {
+        return Err(grant_already_used_error());
+    }
+    Ok(())
+}
+
+fn insert_grant_use(
+    transaction: &Transaction<'_>,
+    request: &GrantUseRequest,
+    receipt: &[u8],
+    receipt_sha256: Sha256Digest,
+    used_at: i64,
+) -> Result<(), MailError> {
+    let inserted = transaction
+        .execute(
+            "INSERT INTO grant_uses
+             (grant_id,receipt_id,action,target_kind,target_id,manifest_sha256,
+              use_receipt,use_sha256,used_at)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+            params![
+                request.grant_id.as_bytes(),
+                request.receipt_id.as_bytes(),
+                i64::from(request.action.code()),
+                i64::from(request.target_kind.code()),
+                &request.target_bytes,
+                request.manifest_sha256.as_bytes(),
+                receipt,
+                receipt_sha256.as_bytes(),
+                used_at,
+            ],
+        )
+        .map_err(|_| store_write_error())?;
+    if inserted != 1 {
+        return Err(store_write_error());
+    }
+    Ok(())
+}
+
+fn foreign_key_violation_count(connection: &Connection) -> Result<i64, MailError> {
+    let mut statement = connection
+        .prepare("PRAGMA foreign_key_check")
+        .map_err(|_| store_read_error())?;
+    let mut rows = statement.query([]).map_err(|_| store_read_error())?;
+    let mut count = 0_i64;
+    while rows.next().map_err(|_| store_read_error())?.is_some() {
+        count = count.checked_add(1).ok_or_else(recovery_error)?;
+    }
+    Ok(count)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_account_transition_event(
+    transaction: &Transaction<'_>,
+    entity_id: &[u8],
+    entity_kind: u16,
+    event_code: u16,
+    source: u8,
+    related_kind: u16,
+    related_id: &[u8],
+    prior_state: u16,
+    next_state: u16,
+    context: Sha256Digest,
+    receipt_id: AuthorizationReceiptId,
+    occurred_at: i64,
+) -> Result<(), MailError> {
+    insert_typed_event(
+        transaction,
+        entity_kind,
+        entity_id,
+        event_code,
+        source,
+        related_kind,
+        related_id,
+        prior_state,
+        next_state,
+        context,
+        Some(receipt_id),
+        occurred_at,
+    )
+}
+
+fn transition_receipt_id(
+    connection: &Connection,
+    transition: &StoredAccountTransition,
+) -> Result<AuthorizationReceiptId, MailError> {
+    let grant = load_grant_use(connection, transition.grant_id)?.ok_or_else(recovery_error)?;
+    Ok(grant.receipt_id)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_transition_phase_event(
+    transaction: &Transaction<'_>,
+    transition: &StoredAccountTransition,
+    event_code: u16,
+    source: u8,
+    prior: AccountTransitionState,
+    next: AccountTransitionState,
+    context: Sha256Digest,
+    occurred_at: i64,
+) -> Result<(), MailError> {
+    let receipt_id = transition_receipt_id(transaction, transition)?;
+    insert_account_transition_event(
+        transaction,
+        transition.transition_id.as_bytes(),
+        6,
+        event_code,
+        source,
+        5,
+        transition.account_id.as_bytes(),
+        prior.event_state(),
+        next.event_state(),
+        context,
+        receipt_id,
+        occurred_at,
+    )
+}
+
+fn projection_for_state(
+    transition: &StoredAccountTransition,
+    transition_state: AccountTransitionState,
+    account_state: RegisteredAccountState,
+    store_state: RegisteredStoreTransitionState,
+    config_generation: NonZeroU64,
+) -> Result<AccountTransitionProjection, MailError> {
+    Ok(AccountTransitionProjection {
+        transition_id: transition.transition_id,
+        account_id: transition.account_id,
+        transition_state,
+        account_state,
+        store_state,
+        config_generation,
+        account_generation: NonZeroU64::new(1).expect("one is nonzero"),
+        prepared_at: utc_millis(transition.prepared_at)?,
+    })
+}
+
+fn transition_projection(
+    connection: &Connection,
+    transition: &StoredAccountTransition,
+) -> Result<AccountTransitionProjection, MailError> {
+    let account =
+        load_registered_account(connection, transition.account_id)?.ok_or_else(recovery_error)?;
+    if account.account_id != transition.account_id
+        || account.store_id != transition.store_id
+        || account.account_generation.get() != 1
+    {
+        return Err(recovery_error());
+    }
+    match transition.state {
+        AccountTransitionState::Prepared => {
+            let store = load_registered_store_by_id(connection, transition.store_id)?
+                .ok_or_else(recovery_error)?;
+            if account.state != RegisteredAccountState::Proposed
+                || account.active_transition_id != Some(transition.transition_id)
+                || store.state != "blocked"
+                || store.config_generation != transition.expected_generation
+                || store.config_sha256 != transition.before_config_sha256
+            {
+                return Err(recovery_error());
+            }
+            projection_for_state(
+                transition,
+                transition.state,
+                RegisteredAccountState::Proposed,
+                RegisteredStoreTransitionState::Blocked,
+                transition.expected_generation,
+            )
+        }
+        AccountTransitionState::ConfigCommitted => {
+            let store = load_registered_store_by_id(connection, transition.store_id)?
+                .ok_or_else(recovery_error)?;
+            if account.state != RegisteredAccountState::Proposed
+                || account.active_transition_id != Some(transition.transition_id)
+                || store.state != "blocked"
+                || store.config_generation != transition.next_generation
+                || store.config_sha256 != transition.after_config_sha256
+            {
+                return Err(recovery_error());
+            }
+            projection_for_state(
+                transition,
+                transition.state,
+                RegisteredAccountState::Proposed,
+                RegisteredStoreTransitionState::Blocked,
+                transition.next_generation,
+            )
+        }
+        AccountTransitionState::Finalized => projection_for_state(
+            transition,
+            transition.state,
+            RegisteredAccountState::Active,
+            RegisteredStoreTransitionState::Active,
+            transition.next_generation,
+        ),
+        AccountTransitionState::Aborted => projection_for_state(
+            transition,
+            transition.state,
+            RegisteredAccountState::Removed,
+            RegisteredStoreTransitionState::Active,
+            transition.expected_generation,
+        ),
+        AccountTransitionState::RecoveryRequired => {
+            let store = load_registered_store_by_id(connection, transition.store_id)?
+                .ok_or_else(recovery_error)?;
+            if account.state != RegisteredAccountState::Blocked
+                || account.active_transition_id != Some(transition.transition_id)
+                || store.state != "recovery_required"
+            {
+                return Err(recovery_error());
+            }
+            projection_for_state(
+                transition,
+                transition.state,
+                RegisteredAccountState::Blocked,
+                RegisteredStoreTransitionState::RecoveryRequired,
+                store.config_generation,
+            )
+        }
+    }
+}
+
+fn insert_transition_versions(
+    transaction: &Transaction<'_>,
+    transition: &StoredAccountTransition,
+    account: &StoredRegisteredAccount,
+    created_at: i64,
+    test_hooks: &AuthorityTestHooks,
+) -> Result<(), MailError> {
+    let store = load_registered_store_by_id(transaction, transition.store_id)?
+        .ok_or_else(recovery_error)?;
+    let inserted = transaction
+        .execute(
+            "INSERT INTO registered_store_versions
+             (store_id,location_sha256,config_generation,config_sha256,
+              enrolled_receipt_id,committed_transition_id,created_at)
+             VALUES(?1,?2,?3,?4,NULL,?5,?6)",
+            params![
+                transition.store_id.as_bytes(),
+                store.location_sha256.as_bytes(),
+                i64::try_from(transition.next_generation.get()).map_err(|_| recovery_error())?,
+                transition.after_config_sha256.as_bytes(),
+                transition.transition_id.as_bytes(),
+                created_at,
+            ],
+        )
+        .map_err(|_| store_write_error())?;
+    if inserted != 1 {
+        return Err(store_write_error());
+    }
+    test_hooks.fault(TestFaultPoint::AccountStoreVersionInserted)?;
+    let inserted = transaction
+        .execute(
+            "INSERT INTO registered_account_versions
+             (account_id,store_id,account_generation,credential_id,binding_sha256,
+              committed_transition_id,created_at)
+             VALUES(?1,?2,?3,?4,?5,?6,?7)",
+            params![
+                account.account_id.as_bytes(),
+                account.store_id.as_bytes(),
+                i64::try_from(account.account_generation.get()).map_err(|_| recovery_error())?,
+                account.credential_id.as_bytes(),
+                account.binding_sha256.as_bytes(),
+                transition.transition_id.as_bytes(),
+                created_at,
+            ],
+        )
+        .map_err(|_| store_write_error())?;
+    if inserted != 1 {
+        return Err(store_write_error());
+    }
+    test_hooks.fault(TestFaultPoint::AccountVersionInserted)?;
+    Ok(())
+}
+
+fn update_finalize_rows(
+    transaction: &Transaction<'_>,
+    transition: &StoredAccountTransition,
+    at: i64,
+    test_hooks: &AuthorityTestHooks,
+) -> Result<(), MailError> {
+    let account = transaction
+        .execute(
+            "UPDATE registered_accounts SET state='active',active_transition_id=NULL,
+             updated_at=?1 WHERE account_id=?2 AND state='proposed'
+             AND active_transition_id=?3",
+            params![
+                at,
+                transition.account_id.as_bytes(),
+                transition.transition_id.as_bytes()
+            ],
+        )
+        .map_err(|_| store_write_error())?;
+    if account != 1 {
+        return Err(recovery_error());
+    }
+    test_hooks.fault(TestFaultPoint::AccountFinalizeAccountUpdated)?;
+    let transition_changed = transaction
+        .execute(
+            "UPDATE account_transitions SET state='finalized',finalized_at=?1
+             WHERE transition_id=?2 AND state='config_committed'",
+            params![at, transition.transition_id.as_bytes()],
+        )
+        .map_err(|_| store_write_error())?;
+    if transition_changed != 1 {
+        return Err(recovery_error());
+    }
+    test_hooks.fault(TestFaultPoint::AccountFinalizeTransitionUpdated)?;
+    let store = transaction
+        .execute(
+            "UPDATE registered_stores SET state='active',updated_at=?1
+             WHERE store_id=?2 AND state='blocked' AND config_generation=?3
+             AND config_sha256=?4",
+            params![
+                at,
+                transition.store_id.as_bytes(),
+                i64::try_from(transition.next_generation.get()).map_err(|_| recovery_error())?,
+                transition.after_config_sha256.as_bytes(),
+            ],
+        )
+        .map_err(|_| store_write_error())?;
+    if store != 1 {
+        return Err(recovery_error());
+    }
+    test_hooks.fault(TestFaultPoint::AccountFinalizeStoreUpdated)?;
+    Ok(())
+}
+
+fn update_abort_rows(
+    transaction: &Transaction<'_>,
+    transition: &StoredAccountTransition,
+    at: i64,
+    test_hooks: &AuthorityTestHooks,
+) -> Result<(), MailError> {
+    let account = transaction
+        .execute(
+            "UPDATE registered_accounts SET state='removed',active_transition_id=NULL,
+             updated_at=?1,removed_at=?1 WHERE account_id=?2 AND state='proposed'
+             AND active_transition_id=?3",
+            params![
+                at,
+                transition.account_id.as_bytes(),
+                transition.transition_id.as_bytes()
+            ],
+        )
+        .map_err(|_| store_write_error())?;
+    if account != 1 {
+        return Err(recovery_error());
+    }
+    test_hooks.fault(TestFaultPoint::AccountAbortAccountUpdated)?;
+    let transition_changed = transaction
+        .execute(
+            "UPDATE account_transitions SET state='aborted',resolved_at=?1
+             WHERE transition_id=?2 AND state='prepared'",
+            params![at, transition.transition_id.as_bytes()],
+        )
+        .map_err(|_| store_write_error())?;
+    if transition_changed != 1 {
+        return Err(recovery_error());
+    }
+    test_hooks.fault(TestFaultPoint::AccountAbortTransitionUpdated)?;
+    let store = transaction
+        .execute(
+            "UPDATE registered_stores SET state='active',updated_at=?1
+             WHERE store_id=?2 AND state='blocked' AND config_generation=?3
+             AND config_sha256=?4",
+            params![
+                at,
+                transition.store_id.as_bytes(),
+                i64::try_from(transition.expected_generation.get()).map_err(|_| recovery_error())?,
+                transition.before_config_sha256.as_bytes(),
+            ],
+        )
+        .map_err(|_| store_write_error())?;
+    if store != 1 {
+        return Err(recovery_error());
+    }
+    test_hooks.fault(TestFaultPoint::AccountAbortStoreUpdated)?;
+    Ok(())
+}
+
+fn commit_account_recovery(
+    transaction: &Transaction<'_>,
+    transition: &StoredAccountTransition,
+    request: &AccountTransitionObservationRequest,
+    at: i64,
+    test_hooks: &AuthorityTestHooks,
+) -> Result<AccountTransitionProjection, MailError> {
+    if !matches!(
+        transition.state,
+        AccountTransitionState::Prepared | AccountTransitionState::ConfigCommitted
+    ) {
+        return Err(account_update_conflict_error());
+    }
+    let recovery = account_recovery_digest(
+        transition,
+        transition.state,
+        request.actual_config_generation,
+        request.actual_config_sha256,
+    );
+    let account = transaction
+        .execute(
+            "UPDATE registered_accounts SET state='blocked',updated_at=?1
+             WHERE account_id=?2 AND active_transition_id=?3 AND state='proposed'",
+            params![
+                at,
+                transition.account_id.as_bytes(),
+                transition.transition_id.as_bytes()
+            ],
+        )
+        .map_err(|_| store_write_error())?;
+    if account != 1 {
+        return Err(recovery_error());
+    }
+    test_hooks.fault(TestFaultPoint::AccountRecoveryAccountUpdated)?;
+    let changed = transaction
+        .execute(
+            "UPDATE account_transitions SET state='recovery_required',resolved_at=?1
+             WHERE transition_id=?2 AND state=?3",
+            params![
+                at,
+                transition.transition_id.as_bytes(),
+                transition_state_name(transition.state),
+            ],
+        )
+        .map_err(|_| store_write_error())?;
+    if changed != 1 {
+        return Err(recovery_error());
+    }
+    test_hooks.fault(TestFaultPoint::AccountRecoveryTransitionUpdated)?;
+    let store = transaction
+        .execute(
+            "UPDATE registered_stores SET state='recovery_required',config_generation=?1,
+             config_sha256=?2,updated_at=?3 WHERE store_id=?4 AND state='blocked'",
+            params![
+                i64::try_from(request.actual_config_generation.get())
+                    .map_err(|_| recovery_error())?,
+                request.actual_config_sha256.as_bytes(),
+                at,
+                transition.store_id.as_bytes(),
+            ],
+        )
+        .map_err(|_| store_write_error())?;
+    if store != 1 {
+        return Err(recovery_error());
+    }
+    test_hooks.fault(TestFaultPoint::AccountRecoveryStoreUpdated)?;
+    let receipt_id = transition_receipt_id(transaction, transition)?;
+    insert_account_transition_event(
+        transaction,
+        transition.store_id.as_bytes(),
+        4,
+        9,
+        5,
+        6,
+        transition.transition_id.as_bytes(),
+        0x0402,
+        0x0404,
+        recovery,
+        receipt_id,
+        at,
+    )?;
+    test_hooks.fault(TestFaultPoint::AccountRecoveryStoreEvent)?;
+    insert_transition_phase_event(
+        transaction,
+        transition,
+        14,
+        5,
+        transition.state,
+        AccountTransitionState::RecoveryRequired,
+        recovery,
+        at,
+    )?;
+    test_hooks.fault(TestFaultPoint::AccountRecoveryTransitionEvent)?;
+    observe_clock_pair(transaction, at)?;
+    test_hooks.fault(TestFaultPoint::AccountRecoveryClockUpdated)?;
+    projection_for_state(
+        transition,
+        AccountTransitionState::RecoveryRequired,
+        RegisteredAccountState::Blocked,
+        RegisteredStoreTransitionState::RecoveryRequired,
+        request.actual_config_generation,
+    )
+}
+
 impl StoredRegisteredStore {
     fn matches_request(
         &self,
@@ -1762,13 +3498,9 @@ impl StoredRegisteredStore {
         self.store_id == request.store_id
             && self.location_material == request.location_bytes
             && self.location_sha256 == request.location_sha256
-            && self.config_generation == request.config_generation
-            && self.config_sha256 == request.config_sha256
             && self.enrolled_receipt_id == request.grant_use.receipt_id
             && self.store_id == enrollment.store_id
             && self.location_sha256 == enrollment.location_sha256
-            && self.config_generation == enrollment.config_generation
-            && self.config_sha256 == enrollment.config_sha256
     }
 }
 
@@ -1874,6 +3606,7 @@ fn validate_proof_request(request: &VerifyProofRequest) -> Result<(), MailError>
 fn ensure_t202b_action(action: SensitiveAction) -> Result<(), MailError> {
     match action {
         SensitiveAction::StoreEnroll
+        | SensitiveAction::AccountCreate
         | SensitiveAction::OwnerRotate
         | SensitiveAction::RecoveryRotate
         | SensitiveAction::OwnerRecover => Ok(()),
@@ -1889,21 +3622,95 @@ fn validate_fresh_manifest_context(
     connection: &Connection,
     manifest: &ActionManifest,
 ) -> Result<(), MailError> {
-    if let ManifestPayload::StoreEnroll(value) = manifest.payload() {
-        let count: i64 = connection
-            .query_row(
-                "SELECT COUNT(*) FROM registered_stores
-                 WHERE store_id=?1 OR location_sha256=?2",
-                params![
-                    value.config_cas.store_id.as_bytes(),
-                    value.config_cas.location_sha256.as_bytes()
-                ],
-                |row| row.get(0),
-            )
-            .map_err(|_| store_read_error())?;
-        if count != 0 {
-            return Err(config_store_identity_conflict_error());
+    match manifest.payload() {
+        ManifestPayload::StoreEnroll(value) => {
+            let count: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM registered_stores
+                     WHERE store_id=?1 OR location_sha256=?2",
+                    params![
+                        value.config_cas.store_id.as_bytes(),
+                        value.config_cas.location_sha256.as_bytes()
+                    ],
+                    |row| row.get(0),
+                )
+                .map_err(|_| store_read_error())?;
+            if count != 0 {
+                return Err(config_store_identity_conflict_error());
+            }
         }
+        ManifestPayload::AccountCreate(value) => {
+            validate_fresh_account_create_context(connection, value)?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn validate_fresh_account_create_context(
+    connection: &Connection,
+    value: &kirje_core::AccountMutationManifest,
+) -> Result<(), MailError> {
+    let after = value
+        .after
+        .as_ref()
+        .ok_or_else(authorization_context_stale_error)?;
+    let store = load_registered_store_by_id(connection, value.config_cas.store_id)?
+        .ok_or_else(authorization_context_stale_error)?;
+    if store.location_sha256 != value.config_cas.location_sha256 {
+        return Err(config_store_identity_conflict_error());
+    }
+    match store.state.as_str() {
+        "recovery_required" => return Err(recovery_error()),
+        "blocked" => return Err(account_update_conflict_error()),
+        "active" => {}
+        _ => return Err(authorization_context_stale_error()),
+    }
+    if store.config_generation != value.config_cas.generation
+        || store.config_sha256 != value.config_cas.exact_content_sha256
+    {
+        return Err(authorization_context_stale_error());
+    }
+    let active: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM account_transitions
+             WHERE store_id=?1 AND state IN ('prepared','config_committed')",
+            [value.config_cas.store_id.as_bytes()],
+            |row| row.get(0),
+        )
+        .map_err(|_| store_read_error())?;
+    if active != 0 {
+        return Err(account_update_conflict_error());
+    }
+    let identities: i64 = connection
+        .query_row(
+            "SELECT
+                (SELECT COUNT(*) FROM registered_accounts WHERE account_id=?1) +
+                (SELECT COUNT(*) FROM registered_credentials WHERE credential_id=?2) +
+                (SELECT COUNT(*) FROM account_transitions WHERE transition_id=?3)",
+            params![
+                after.account_id.as_bytes(),
+                after.credential_id.as_bytes(),
+                value.transition_id.as_bytes(),
+            ],
+            |row| row.get(0),
+        )
+        .map_err(|_| store_read_error())?;
+    if identities != 0 {
+        return Err(account_identity_conflict_error());
+    }
+    let display = display_id_digest(&after.display_id);
+    let occupied: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM registered_accounts
+             WHERE store_id=?1 AND display_id_sha256=?2
+               AND state IN ('proposed','active','blocked')",
+            params![value.config_cas.store_id.as_bytes(), display.as_bytes()],
+            |row| row.get(0),
+        )
+        .map_err(|_| store_read_error())?;
+    if occupied != 0 {
+        return Err(account_already_exists_error());
     }
     Ok(())
 }
@@ -1915,6 +3722,27 @@ fn validate_intrinsic_manifest(
     match manifest.payload() {
         ManifestPayload::StoreEnroll(value) => {
             if value.expected_store_state != StoreEnrollmentState::Unregistered {
+                return Err(authorization_context_stale_error());
+            }
+        }
+        ManifestPayload::AccountCreate(value) => {
+            let Some(after) = &value.after else {
+                return Err(authorization_context_stale_error());
+            };
+            if value.before.is_some()
+                || !value.cleanup.is_empty()
+                || !after.cleanup_ids.is_empty()
+                || after.state_reason
+                    != Some(kirje_core::AccountStateReason::CredentialReentryRequired)
+                || value.config_cas.exact_content_sha256 == value.after_config_sha256
+                || value.next_config_generation.get()
+                    != value
+                        .config_cas
+                        .generation
+                        .get()
+                        .checked_add(1)
+                        .ok_or_else(authorization_context_stale_error)?
+            {
                 return Err(authorization_context_stale_error());
             }
         }
@@ -2071,6 +3899,13 @@ fn authorization_context_digest(
     ))
 }
 
+fn display_id_digest(display_id: &str) -> Sha256Digest {
+    Sha256Digest::digest(&encode_transcript(
+        ACCOUNT_DISPLAY_ID_DOMAIN,
+        &[display_id.as_bytes()],
+    ))
+}
+
 fn observe_clock_pair(transaction: &Transaction<'_>, effective: i64) -> Result<(), MailError> {
     let changed = transaction
         .execute(
@@ -2176,6 +4011,119 @@ fn enrollment_intent_from_rows(
             enrollment.location_sha256.as_bytes(),
             &generation,
             enrollment.config_sha256.as_bytes(),
+        ],
+    ))
+}
+
+fn account_transition_digest(
+    request: &PrepareAccountTransitionRequest,
+    prepared_at: i64,
+) -> Sha256Digest {
+    let kind = [request.kind.code()];
+    let expected = request.expected_generation.get().to_be_bytes();
+    let next = request.next_generation.get().to_be_bytes();
+    let prepared = prepared_at.to_be_bytes();
+    Sha256Digest::digest(&encode_transcript(
+        ACCOUNT_TRANSITION_DOMAIN,
+        &[
+            request.transition_id.as_bytes(),
+            request.grant_use.grant_id.as_bytes(),
+            request.store_id.as_bytes(),
+            request.account_id.as_bytes(),
+            &kind,
+            request.before_config_sha256.as_bytes(),
+            request.after_config_sha256.as_bytes(),
+            &expected,
+            &next,
+            &prepared,
+        ],
+    ))
+}
+
+fn account_prepare_intent(request: &PrepareAccountTransitionRequest) -> Sha256Digest {
+    let action = request.grant_use.action.code().to_be_bytes();
+    let target_kind = request.grant_use.target_kind.code().to_be_bytes();
+    let kind = [request.kind.code()];
+    let expected = request.expected_generation.get().to_be_bytes();
+    let next = request.next_generation.get().to_be_bytes();
+    let account_generation = request.account_generation.get().to_be_bytes();
+    Sha256Digest::digest(&encode_transcript(
+        ACCOUNT_TRANSITION_INTENT_DOMAIN,
+        &[
+            request.grant_use.grant_id.as_bytes(),
+            request.grant_use.receipt_id.as_bytes(),
+            &action,
+            &target_kind,
+            &request.grant_use.target_bytes,
+            request.grant_use.manifest_sha256.as_bytes(),
+            request.transition_id.as_bytes(),
+            request.store_id.as_bytes(),
+            request.account_id.as_bytes(),
+            &kind,
+            request.before_config_sha256.as_bytes(),
+            request.after_config_sha256.as_bytes(),
+            &expected,
+            &next,
+            request.display_id_sha256.as_bytes(),
+            &account_generation,
+            request.credential_id.as_bytes(),
+            request.binding_sha256.as_bytes(),
+        ],
+    ))
+}
+
+fn account_prepare_intent_from_rows(
+    challenge: &StoredChallenge,
+    receipt: &StoredReceipt,
+    value: &kirje_core::AccountMutationManifest,
+) -> Result<Sha256Digest, MailError> {
+    let after = value.after.as_ref().ok_or_else(recovery_error)?;
+    let action = challenge.action.code().to_be_bytes();
+    let target_kind = challenge.target_kind_code.to_be_bytes();
+    let kind = [AccountTransitionKind::AccountCreate.code()];
+    let expected = value.config_cas.generation.get().to_be_bytes();
+    let next = value.next_config_generation.get().to_be_bytes();
+    let account_generation = after.generation.get().to_be_bytes();
+    Ok(Sha256Digest::digest(&encode_transcript(
+        ACCOUNT_TRANSITION_INTENT_DOMAIN,
+        &[
+            challenge.grant_id.as_bytes(),
+            receipt.receipt_id.as_bytes(),
+            &action,
+            &target_kind,
+            &challenge.target_id,
+            challenge.manifest_sha256.as_bytes(),
+            value.transition_id.as_bytes(),
+            value.config_cas.store_id.as_bytes(),
+            after.account_id.as_bytes(),
+            &kind,
+            value.config_cas.exact_content_sha256.as_bytes(),
+            value.after_config_sha256.as_bytes(),
+            &expected,
+            &next,
+            display_id_digest(&after.display_id).as_bytes(),
+            &account_generation,
+            after.credential_id.as_bytes(),
+            after.binding_sha256.as_bytes(),
+        ],
+    )))
+}
+
+fn account_recovery_digest(
+    transition: &StoredAccountTransition,
+    prior_state: AccountTransitionState,
+    actual_generation: NonZeroU64,
+    actual_config_sha256: Sha256Digest,
+) -> Sha256Digest {
+    let state = prior_state.event_state().to_be_bytes();
+    let generation = actual_generation.get().to_be_bytes();
+    Sha256Digest::digest(&encode_transcript(
+        ACCOUNT_TRANSITION_RECOVERY_DOMAIN,
+        &[
+            transition.transition_sha256.as_bytes(),
+            &state,
+            &generation,
+            actual_config_sha256.as_bytes(),
         ],
     ))
 }
@@ -2287,9 +4235,43 @@ fn store_preflight(connection: &Connection) -> Result<(), MailError> {
 }
 
 fn registry_parent_preflight(connection: &Connection) -> Result<(), MailError> {
+    record_validation_query(ValidationQueryKind::RegistryParentPreflight);
     let malformed: i64 = connection
         .query_row(
             "SELECT
+                (SELECT COUNT(*) FROM registered_accounts WHERE
+                    typeof(account_id)<>'blob' OR length(account_id)<>16 OR
+                    typeof(store_id)<>'blob' OR length(store_id)<>16 OR
+                    typeof(display_id_sha256)<>'blob' OR length(display_id_sha256)<>32 OR
+                    typeof(account_generation)<>'integer' OR account_generation<=0 OR
+                    typeof(credential_id)<>'blob' OR length(credential_id)<>16 OR
+                    typeof(binding_sha256)<>'blob' OR length(binding_sha256)<>32 OR
+                    typeof(state)<>'text' OR state NOT IN ('proposed','active','blocked','removed') OR
+                    typeof(authorized_receipt_id)<>'blob' OR length(authorized_receipt_id)<>16 OR
+                    (active_transition_id IS NOT NULL AND
+                     (typeof(active_transition_id)<>'blob' OR length(active_transition_id)<>16)) OR
+                    typeof(created_at)<>'integer' OR created_at<0 OR
+                    typeof(updated_at)<>'integer' OR updated_at<created_at OR
+                    (removed_at IS NOT NULL AND
+                     (typeof(removed_at)<>'integer' OR removed_at<created_at))) +
+                (SELECT COUNT(*) FROM account_transitions WHERE
+                    typeof(transition_id)<>'blob' OR length(transition_id)<>16 OR
+                    typeof(grant_id)<>'blob' OR length(grant_id)<>16 OR
+                    typeof(store_id)<>'blob' OR length(store_id)<>16 OR
+                    typeof(account_id)<>'blob' OR length(account_id)<>16 OR
+                    typeof(kind)<>'text' OR kind NOT IN
+                      ('account_create','account_update','account_remove','credential_set','credential_delete') OR
+                    typeof(before_config_sha256)<>'blob' OR length(before_config_sha256)<>32 OR
+                    typeof(after_config_sha256)<>'blob' OR length(after_config_sha256)<>32 OR
+                    typeof(expected_generation)<>'integer' OR expected_generation<=0 OR
+                    typeof(next_generation)<>'integer' OR next_generation<=0 OR
+                    typeof(transition_sha256)<>'blob' OR length(transition_sha256)<>32 OR
+                    typeof(state)<>'text' OR state NOT IN
+                      ('prepared','config_committed','finalized','aborted','recovery_required') OR
+                    typeof(prepared_at)<>'integer' OR prepared_at<0 OR
+                    (config_committed_at IS NOT NULL AND typeof(config_committed_at)<>'integer') OR
+                    (finalized_at IS NOT NULL AND typeof(finalized_at)<>'integer') OR
+                    (resolved_at IS NOT NULL AND typeof(resolved_at)<>'integer')) +
                 (SELECT COUNT(*) FROM registered_credentials WHERE
                     typeof(credential_id)<>'blob' OR length(credential_id)<>16 OR
                     typeof(account_id)<>'blob' OR length(account_id)<>16 OR
@@ -2440,6 +4422,116 @@ fn load_store_version_by_receipt(
         )
         .optional()
         .map_err(|_| store_read_error())
+}
+
+fn load_account_transition(
+    connection: &Connection,
+    transition_id: TransitionId,
+) -> Result<Option<StoredAccountTransition>, MailError> {
+    record_validation_query(ValidationQueryKind::BoundedKeyed);
+    connection
+        .query_row(
+            "SELECT transition_id,grant_id,store_id,account_id,kind,
+                    before_config_sha256,after_config_sha256,expected_generation,
+                    next_generation,transition_sha256,state,prepared_at,
+                    config_committed_at,finalized_at,resolved_at
+             FROM account_transitions WHERE transition_id=?1",
+            [transition_id.as_bytes()],
+            stored_account_transition_from_row,
+        )
+        .optional()
+        .map_err(|_| store_read_error())
+}
+
+fn load_account_transition_by_grant(
+    connection: &Connection,
+    grant_id: AuthorizationGrantId,
+) -> Result<Option<StoredAccountTransition>, MailError> {
+    record_validation_query(ValidationQueryKind::BoundedKeyed);
+    connection
+        .query_row(
+            "SELECT transition_id,grant_id,store_id,account_id,kind,
+                    before_config_sha256,after_config_sha256,expected_generation,
+                    next_generation,transition_sha256,state,prepared_at,
+                    config_committed_at,finalized_at,resolved_at
+             FROM account_transitions WHERE grant_id=?1",
+            [grant_id.as_bytes()],
+            stored_account_transition_from_row,
+        )
+        .optional()
+        .map_err(|_| store_read_error())
+}
+
+fn stored_account_transition_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<StoredAccountTransition> {
+    let expected_generation = positive_generation_sql(row.get(7)?)?;
+    let next_generation = positive_generation_sql(row.get(8)?)?;
+    let kind_name: String = row.get(4)?;
+    let state_name: String = row.get(10)?;
+    Ok(StoredAccountTransition {
+        transition_id: uuid_from_blob_sql(row.get(0)?)?,
+        grant_id: uuid_from_blob_sql(row.get(1)?)?,
+        store_id: uuid_from_blob_sql(row.get(2)?)?,
+        account_id: uuid_from_blob_sql(row.get(3)?)?,
+        kind: transition_kind_from_name(&kind_name).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        before_config_sha256: digest_from_blob_sql(row.get(5)?)?,
+        after_config_sha256: digest_from_blob_sql(row.get(6)?)?,
+        expected_generation,
+        next_generation,
+        transition_sha256: digest_from_blob_sql(row.get(9)?)?,
+        state: transition_state_from_name(&state_name)
+            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+        prepared_at: row.get(11)?,
+        config_committed_at: row.get(12)?,
+        finalized_at: row.get(13)?,
+        resolved_at: row.get(14)?,
+    })
+}
+
+fn load_registered_account(
+    connection: &Connection,
+    account_id: AccountId,
+) -> Result<Option<StoredRegisteredAccount>, MailError> {
+    record_validation_query(ValidationQueryKind::BoundedKeyed);
+    connection
+        .query_row(
+            "SELECT account_id,store_id,display_id_sha256,account_generation,
+                    credential_id,binding_sha256,state,authorized_receipt_id,
+                    active_transition_id,created_at,updated_at,removed_at
+             FROM registered_accounts WHERE account_id=?1",
+            [account_id.as_bytes()],
+            |row| {
+                let state: String = row.get(6)?;
+                Ok(StoredRegisteredAccount {
+                    account_id: uuid_from_blob_sql(row.get(0)?)?,
+                    store_id: uuid_from_blob_sql(row.get(1)?)?,
+                    display_id_sha256: digest_from_blob_sql(row.get(2)?)?,
+                    account_generation: positive_generation_sql(row.get(3)?)?,
+                    credential_id: uuid_from_blob_sql(row.get(4)?)?,
+                    binding_sha256: digest_from_blob_sql(row.get(5)?)?,
+                    state: account_state_from_name(&state)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    authorized_receipt_id: uuid_from_blob_sql(row.get(7)?)?,
+                    active_transition_id: row
+                        .get::<_, Option<Vec<u8>>>(8)?
+                        .map(uuid_from_blob_sql)
+                        .transpose()?,
+                    created_at: row.get(9)?,
+                    updated_at: row.get(10)?,
+                    removed_at: row.get(11)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|_| store_read_error())
+}
+
+fn positive_generation_sql(value: i64) -> rusqlite::Result<NonZeroU64> {
+    u64::try_from(value)
+        .ok()
+        .and_then(NonZeroU64::new)
+        .ok_or(rusqlite::Error::InvalidQuery)
 }
 
 fn stored_registered_store_from_row(
@@ -3358,11 +5450,7 @@ fn validate_t202a_initial_row_counts(connection: &Connection) -> Result<(), Mail
     let forbidden_rows: i64 = connection
         .query_row(
             "SELECT
-                (SELECT COUNT(*) FROM registered_accounts) +
-                (SELECT COUNT(*) FROM registered_credentials) +
-                (SELECT COUNT(*) FROM registered_account_versions) +
                 (SELECT COUNT(*) FROM challenge_effects) +
-                (SELECT COUNT(*) FROM account_transitions) +
                 (SELECT COUNT(*) FROM credential_cleanup) +
                 (SELECT COUNT(*) FROM remote_effects) +
                 (SELECT COUNT(*) FROM effect_claims) +
@@ -3591,33 +5679,51 @@ fn validate_stored_receipt(
         .map_err(|_| recovery_error())
 }
 
+#[allow(clippy::too_many_lines)]
 fn validate_registry_history(connection: &Connection) -> Result<(), MailError> {
     record_validation_query(ValidationQueryKind::RegistryStream);
-    let (grant_count, store_count, version_count, credential_count, account_version_count) =
-        connection
-            .query_row(
-                "SELECT
+    let (
+        grant_count,
+        store_count,
+        version_count,
+        credential_count,
+        account_version_count,
+        account_count,
+        transition_count,
+        committed_count,
+    ) = connection
+        .query_row(
+            "SELECT
                 (SELECT COUNT(*) FROM grant_uses),
                 (SELECT COUNT(*) FROM registered_stores),
                 (SELECT COUNT(*) FROM registered_store_versions),
                 (SELECT COUNT(*) FROM registered_credentials),
-                (SELECT COUNT(*) FROM registered_account_versions)",
-                [],
-                |row| {
-                    Ok((
-                        row.get::<_, i64>(0)?,
-                        row.get::<_, i64>(1)?,
-                        row.get::<_, i64>(2)?,
-                        row.get::<_, i64>(3)?,
-                        row.get::<_, i64>(4)?,
-                    ))
-                },
-            )
-            .map_err(|_| store_read_error())?;
-    if grant_count != store_count
-        || store_count != version_count
-        || credential_count != 0
-        || account_version_count != 0
+                (SELECT COUNT(*) FROM registered_account_versions),
+                (SELECT COUNT(*) FROM registered_accounts),
+                (SELECT COUNT(*) FROM account_transitions),
+                (SELECT COUNT(*) FROM account_transitions
+                 WHERE state IN ('config_committed','finalized')
+                    OR (state='recovery_required' AND config_committed_at IS NOT NULL))",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(7)?,
+                ))
+            },
+        )
+        .map_err(|_| store_read_error())?;
+    if grant_count != store_count + transition_count
+        || credential_count != transition_count
+        || account_count != transition_count
+        || version_count != store_count + committed_count
+        || account_version_count != committed_count
     {
         return Err(recovery_error());
     }
@@ -3678,14 +5784,37 @@ fn validate_registry_history(connection: &Connection) -> Result<(), MailError> {
     if seen != version_count {
         return Err(recovery_error());
     }
+
+    record_validation_query(ValidationQueryKind::RegistryStream);
+    let mut statement = connection
+        .prepare(
+            "SELECT transition_id,grant_id,store_id,account_id,kind,
+                    before_config_sha256,after_config_sha256,expected_generation,
+                    next_generation,transition_sha256,state,prepared_at,
+                    config_committed_at,finalized_at,resolved_at
+             FROM account_transitions ORDER BY transition_id",
+        )
+        .map_err(|_| store_read_error())?;
+    let mut rows = statement.query([]).map_err(|_| store_read_error())?;
+    let mut seen = 0_i64;
+    while let Some(row) = rows.next().map_err(|_| store_read_error())? {
+        let transition = stored_account_transition_from_row(row).map_err(|_| recovery_error())?;
+        validate_stored_account_transition(connection, &transition)?;
+        seen = seen.checked_add(1).ok_or_else(recovery_error)?;
+    }
+    if seen != transition_count {
+        return Err(recovery_error());
+    }
     Ok(())
 }
 
 fn validate_stored_grant(connection: &Connection, grant: &StoredGrantUse) -> Result<(), MailError> {
     utc_millis(grant.used_at)?;
-    if grant.action != SensitiveAction::StoreEnroll
-        || grant.target_kind != TargetKind::Store
-        || !valid_target_shape(grant.target_kind, &grant.target_id)
+    if !matches!(
+        (grant.action, grant.target_kind),
+        (SensitiveAction::StoreEnroll, TargetKind::Store)
+            | (SensitiveAction::AccountCreate, TargetKind::Account)
+    ) || !valid_target_shape(grant.target_kind, &grant.target_id)
         || grant.use_receipt != grant_use_transcript_from_row(grant)
         || grant.use_sha256 != Sha256Digest::digest(&grant.use_receipt)
     {
@@ -3693,12 +5822,6 @@ fn validate_stored_grant(connection: &Connection, grant: &StoredGrantUse) -> Res
     }
     let receipt = load_receipt_by_id(connection, grant.receipt_id)?.ok_or_else(recovery_error)?;
     let challenge = load_challenge(connection, receipt.challenge_id)?;
-    let manifest = ActionManifest::parse(&challenge.manifest).map_err(|_| recovery_error())?;
-    let enrollment = store_enrollment_context(&manifest).map_err(|_| recovery_error())?;
-    let store = load_registered_store_by_receipt(connection, receipt.receipt_id)?
-        .ok_or_else(recovery_error)?;
-    let version = load_store_version_by_receipt(connection, receipt.receipt_id)?
-        .ok_or_else(recovery_error)?;
     if challenge.state != "authorized"
         || grant.grant_id != challenge.grant_id
         || grant.receipt_id != receipt.receipt_id
@@ -3708,13 +5831,24 @@ fn validate_stored_grant(connection: &Connection, grant: &StoredGrantUse) -> Res
         || grant.manifest_sha256 != challenge.manifest_sha256
         || receipt.verified_at > grant.used_at
         || grant.used_at > receipt.expires_at
-        || store.store_id != enrollment.store_id
+    {
+        return Err(recovery_error());
+    }
+    if grant.action == SensitiveAction::AccountCreate {
+        let transition = load_account_transition_by_grant(connection, grant.grant_id)?
+            .ok_or_else(recovery_error)?;
+        return validate_stored_account_transition(connection, &transition);
+    }
+    let manifest = ActionManifest::parse(&challenge.manifest).map_err(|_| recovery_error())?;
+    let enrollment = store_enrollment_context(&manifest).map_err(|_| recovery_error())?;
+    let store = load_registered_store_by_receipt(connection, receipt.receipt_id)?
+        .ok_or_else(recovery_error)?;
+    let version = load_store_version_by_receipt(connection, receipt.receipt_id)?
+        .ok_or_else(recovery_error)?;
+    if store.store_id != enrollment.store_id
         || store.location_sha256 != enrollment.location_sha256
-        || store.config_generation != enrollment.config_generation
-        || store.config_sha256 != enrollment.config_sha256
         || store.enrolled_receipt_id != receipt.receipt_id
         || store.created_at != grant.used_at
-        || store.updated_at != grant.used_at
     {
         return Err(recovery_error());
     }
@@ -3728,9 +5862,11 @@ fn validate_stored_store(
 ) -> Result<(), MailError> {
     utc_millis(store.created_at)?;
     utc_millis(store.updated_at)?;
-    if store.state != "active"
-        || store.removed_at.is_some()
-        || store.created_at != store.updated_at
+    if !matches!(
+        store.state.as_str(),
+        "active" | "blocked" | "recovery_required"
+    ) || store.removed_at.is_some()
+        || store.updated_at < store.created_at
         || Sha256Digest::digest(&store.location_material) != store.location_sha256
     {
         return Err(recovery_error());
@@ -3758,17 +5894,47 @@ fn validate_stored_store(
     let manifest = ActionManifest::parse(&challenge.manifest).map_err(|_| recovery_error())?;
     let enrollment = store_enrollment_context(&manifest).map_err(|_| recovery_error())?;
     validate_initial_store_version(&version, store, &enrollment, &receipt)?;
-    Ok(())
+    record_validation_query(ValidationQueryKind::BoundedKeyed);
+    let transitions: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM account_transitions WHERE store_id=?1",
+            [store.store_id.as_bytes()],
+            |row| row.get(0),
+        )
+        .map_err(|_| store_read_error())?;
+    if transitions == 0
+        && (store.state != "active"
+            || store.config_generation != enrollment.config_generation
+            || store.config_sha256 != enrollment.config_sha256
+            || store.updated_at != store.created_at)
+    {
+        return Err(recovery_error());
+    }
+    account_store_event_is_exact(connection, store, &version)
 }
 
 fn validate_stored_store_version(
     connection: &Connection,
     version: &StoredRegisteredStoreVersion,
 ) -> Result<(), MailError> {
-    let receipt_id = version.enrolled_receipt_id.ok_or_else(recovery_error)?;
-    if version.committed_transition_id.is_some() {
-        return Err(recovery_error());
+    if let Some(transition_bytes) = &version.committed_transition_id {
+        if version.enrolled_receipt_id.is_some() {
+            return Err(recovery_error());
+        }
+        let transition_id: TransitionId =
+            uuid_from_blob_sql(transition_bytes.clone()).map_err(|_| recovery_error())?;
+        let transition =
+            load_account_transition(connection, transition_id)?.ok_or_else(recovery_error)?;
+        if version.store_id != transition.store_id
+            || version.config_generation != transition.next_generation
+            || version.config_sha256 != transition.after_config_sha256
+            || version.created_at != transition.config_committed_at.ok_or_else(recovery_error)?
+        {
+            return Err(recovery_error());
+        }
+        return Ok(());
     }
+    let receipt_id = version.enrolled_receipt_id.ok_or_else(recovery_error)?;
     let receipt = load_receipt_by_id(connection, receipt_id)?.ok_or_else(recovery_error)?;
     let challenge = load_challenge(connection, receipt.challenge_id)?;
     let manifest = ActionManifest::parse(&challenge.manifest).map_err(|_| recovery_error())?;
@@ -3807,6 +5973,488 @@ fn grant_use_transcript_from_row(grant: &StoredGrantUse) -> Vec<u8> {
             &used_at,
         ],
     )
+}
+
+fn transition_digest_from_row(transition: &StoredAccountTransition) -> Sha256Digest {
+    let kind = [transition.kind.code()];
+    let expected = transition.expected_generation.get().to_be_bytes();
+    let next = transition.next_generation.get().to_be_bytes();
+    let prepared = transition.prepared_at.to_be_bytes();
+    Sha256Digest::digest(&encode_transcript(
+        ACCOUNT_TRANSITION_DOMAIN,
+        &[
+            transition.transition_id.as_bytes(),
+            transition.grant_id.as_bytes(),
+            transition.store_id.as_bytes(),
+            transition.account_id.as_bytes(),
+            &kind,
+            transition.before_config_sha256.as_bytes(),
+            transition.after_config_sha256.as_bytes(),
+            &expected,
+            &next,
+            &prepared,
+        ],
+    ))
+}
+
+#[allow(clippy::too_many_lines, clippy::type_complexity)]
+fn validate_stored_account_transition(
+    connection: &Connection,
+    transition: &StoredAccountTransition,
+) -> Result<(), MailError> {
+    utc_millis(transition.prepared_at)?;
+    if transition.kind != AccountTransitionKind::AccountCreate
+        || transition.expected_generation.get().checked_add(1)
+            != Some(transition.next_generation.get())
+        || transition.before_config_sha256 == transition.after_config_sha256
+        || transition.transition_sha256 != transition_digest_from_row(transition)
+    {
+        return Err(recovery_error());
+    }
+    let timestamp_shape = match transition.state {
+        AccountTransitionState::Prepared => {
+            transition.config_committed_at.is_none()
+                && transition.finalized_at.is_none()
+                && transition.resolved_at.is_none()
+        }
+        AccountTransitionState::ConfigCommitted => {
+            transition.config_committed_at.is_some()
+                && transition.finalized_at.is_none()
+                && transition.resolved_at.is_none()
+        }
+        AccountTransitionState::Finalized => {
+            transition.config_committed_at.is_some()
+                && transition.finalized_at.is_some()
+                && transition.resolved_at.is_none()
+        }
+        AccountTransitionState::Aborted => {
+            transition.config_committed_at.is_none()
+                && transition.finalized_at.is_none()
+                && transition.resolved_at.is_some()
+        }
+        AccountTransitionState::RecoveryRequired => {
+            transition.finalized_at.is_none() && transition.resolved_at.is_some()
+        }
+    };
+    if !timestamp_shape {
+        return Err(recovery_error());
+    }
+    let grant = load_grant_use(connection, transition.grant_id)?.ok_or_else(recovery_error)?;
+    let receipt = load_receipt_by_id(connection, grant.receipt_id)?.ok_or_else(recovery_error)?;
+    let challenge = load_challenge(connection, receipt.challenge_id)?;
+    let manifest = ActionManifest::parse(&challenge.manifest).map_err(|_| recovery_error())?;
+    let ManifestPayload::AccountCreate(value) = manifest.payload() else {
+        return Err(recovery_error());
+    };
+    let after = value.after.as_ref().ok_or_else(recovery_error)?;
+    let account =
+        load_registered_account(connection, transition.account_id)?.ok_or_else(recovery_error)?;
+    if grant.action != SensitiveAction::AccountCreate
+        || grant.target_kind != TargetKind::Account
+        || grant.target_id.as_slice() != transition.account_id.as_bytes()
+        || value.transition_id != transition.transition_id
+        || value.config_cas.store_id != transition.store_id
+        || after.account_id != transition.account_id
+        || after.credential_id != account.credential_id
+        || display_id_digest(&after.display_id) != account.display_id_sha256
+        || after.binding_sha256 != account.binding_sha256
+        || account.authorized_receipt_id != receipt.receipt_id
+        || account.created_at != transition.prepared_at
+        || value.config_cas.generation != transition.expected_generation
+        || value.config_cas.exact_content_sha256 != transition.before_config_sha256
+        || value.next_config_generation != transition.next_generation
+        || value.after_config_sha256 != transition.after_config_sha256
+    {
+        return Err(recovery_error());
+    }
+    let account_timestamps = match transition.state {
+        AccountTransitionState::Prepared | AccountTransitionState::ConfigCommitted => {
+            account.state == RegisteredAccountState::Proposed
+                && account.active_transition_id == Some(transition.transition_id)
+                && account.updated_at == account.created_at
+                && account.removed_at.is_none()
+        }
+        AccountTransitionState::Finalized => {
+            account.state == RegisteredAccountState::Active
+                && account.active_transition_id.is_none()
+                && account.updated_at == transition.finalized_at.ok_or_else(recovery_error)?
+                && account.removed_at.is_none()
+        }
+        AccountTransitionState::Aborted => {
+            let resolved = transition.resolved_at.ok_or_else(recovery_error)?;
+            account.state == RegisteredAccountState::Removed
+                && account.active_transition_id.is_none()
+                && account.updated_at == resolved
+                && account.removed_at == Some(resolved)
+        }
+        AccountTransitionState::RecoveryRequired => {
+            account.state == RegisteredAccountState::Blocked
+                && account.active_transition_id == Some(transition.transition_id)
+                && account.updated_at == transition.resolved_at.ok_or_else(recovery_error)?
+                && account.removed_at.is_none()
+        }
+    };
+    if !account_timestamps {
+        return Err(recovery_error());
+    }
+    record_validation_query(ValidationQueryKind::BoundedKeyed);
+    let credential: Option<(Vec<u8>, Vec<u8>, Vec<u8>, i64)> = connection
+        .query_row(
+            "SELECT account_id,store_id,created_transition_id,created_at
+             FROM registered_credentials WHERE credential_id=?1",
+            [account.credential_id.as_bytes()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()
+        .map_err(|_| store_read_error())?;
+    let (credential_account, credential_store, credential_transition, credential_created) =
+        credential.ok_or_else(recovery_error)?;
+    if credential_account.as_slice() != transition.account_id.as_bytes()
+        || credential_store.as_slice() != transition.store_id.as_bytes()
+        || credential_transition.as_slice() != transition.transition_id.as_bytes()
+        || credential_created != transition.prepared_at
+    {
+        return Err(recovery_error());
+    }
+    let committed = transition.config_committed_at.is_some();
+    record_validation_query(ValidationQueryKind::BoundedKeyed);
+    let store_versions: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM registered_store_versions
+             WHERE committed_transition_id=?1",
+            [transition.transition_id.as_bytes()],
+            |row| row.get(0),
+        )
+        .map_err(|_| store_read_error())?;
+    record_validation_query(ValidationQueryKind::BoundedKeyed);
+    let account_versions: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM registered_account_versions
+             WHERE committed_transition_id=?1",
+            [transition.transition_id.as_bytes()],
+            |row| row.get(0),
+        )
+        .map_err(|_| store_read_error())?;
+    if store_versions != i64::from(committed) || account_versions != i64::from(committed) {
+        return Err(recovery_error());
+    }
+    if let Some(committed_at) = transition.config_committed_at {
+        record_validation_query(ValidationQueryKind::BoundedKeyed);
+        let version: Option<(Vec<u8>, Vec<u8>, i64, Vec<u8>, Vec<u8>, i64)> = connection
+            .query_row(
+                "SELECT account_id,store_id,account_generation,credential_id,
+                        binding_sha256,created_at FROM registered_account_versions
+                 WHERE committed_transition_id=?1",
+                [transition.transition_id.as_bytes()],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|_| store_read_error())?;
+        let (version_account, version_store, generation, version_credential, binding, created_at) =
+            version.ok_or_else(recovery_error)?;
+        if version_account.as_slice() != account.account_id.as_bytes()
+            || version_store.as_slice() != account.store_id.as_bytes()
+            || generation
+                != i64::try_from(account.account_generation.get()).map_err(|_| recovery_error())?
+            || version_credential.as_slice() != account.credential_id.as_bytes()
+            || binding.as_slice() != account.binding_sha256.as_bytes()
+            || created_at != committed_at
+        {
+            return Err(recovery_error());
+        }
+    }
+    transition_projection(connection, transition)?;
+    validate_transition_events(connection, transition, receipt.receipt_id)
+}
+
+#[allow(clippy::too_many_lines)]
+fn validate_transition_events(
+    connection: &Connection,
+    transition: &StoredAccountTransition,
+    receipt_id: AuthorizationReceiptId,
+) -> Result<(), MailError> {
+    let grant = load_grant_use(connection, transition.grant_id)?.ok_or_else(recovery_error)?;
+    let grant_event = load_single_entity_event(connection, 10, transition.grant_id.as_bytes(), 7)?;
+    let prepare_store_detail = authority_event_detail(
+        9,
+        4,
+        transition.store_id.as_bytes(),
+        4,
+        6,
+        transition.transition_id.as_bytes(),
+        0x0401,
+        0x0402,
+        transition.transition_sha256,
+        Some(receipt_id),
+        transition.prepared_at,
+    );
+    let prepared =
+        load_single_entity_event(connection, 6, transition.transition_id.as_bytes(), 10)?;
+    let prepare_store_event = load_event_by_sequence(
+        connection,
+        prepared
+            .sequence
+            .checked_sub(1)
+            .ok_or_else(recovery_error)?,
+    )?;
+    let prepared_detail = authority_event_detail(
+        10,
+        6,
+        transition.transition_id.as_bytes(),
+        4,
+        5,
+        transition.account_id.as_bytes(),
+        0,
+        AccountTransitionState::Prepared.event_state(),
+        transition.transition_sha256,
+        Some(receipt_id),
+        transition.prepared_at,
+    );
+    if grant_event.sequence.checked_add(1) != Some(prepare_store_event.sequence)
+        || prepare_store_event.sequence.checked_add(1) != Some(prepared.sequence)
+        || grant.used_at != transition.prepared_at
+        || prepare_store_event.entity_kind != 4
+        || prepare_store_event.entity_id.as_slice() != transition.store_id.as_bytes()
+        || prepare_store_event.event_code != 9
+        || prepare_store_event.source != 4
+        || prepare_store_event.occurred_at != transition.prepared_at
+        || prepare_store_event.detail != prepare_store_detail
+        || prepare_store_event.detail_sha256.as_slice()
+            != Sha256::digest(&prepare_store_detail).as_slice()
+        || prepared.detail != prepared_detail
+        || prepared.detail_sha256.as_slice() != Sha256::digest(&prepared_detail).as_slice()
+    {
+        return Err(recovery_error());
+    }
+
+    let mut previous = prepared.sequence;
+    if let Some(at) = transition.config_committed_at {
+        let event =
+            load_single_entity_event(connection, 6, transition.transition_id.as_bytes(), 11)?;
+        let detail = authority_event_detail(
+            11,
+            6,
+            transition.transition_id.as_bytes(),
+            4,
+            5,
+            transition.account_id.as_bytes(),
+            AccountTransitionState::Prepared.event_state(),
+            AccountTransitionState::ConfigCommitted.event_state(),
+            transition.transition_sha256,
+            Some(receipt_id),
+            at,
+        );
+        if event.detail != detail
+            || event.detail_sha256.as_slice() != Sha256::digest(&detail).as_slice()
+            || event.sequence <= previous
+        {
+            return Err(recovery_error());
+        }
+        previous = event.sequence;
+    }
+    match transition.state {
+        AccountTransitionState::Prepared | AccountTransitionState::ConfigCommitted => {}
+        AccountTransitionState::Finalized => {
+            let at = transition.finalized_at.ok_or_else(recovery_error)?;
+            let event =
+                load_single_entity_event(connection, 6, transition.transition_id.as_bytes(), 12)?;
+            let detail = authority_event_detail(
+                12,
+                6,
+                transition.transition_id.as_bytes(),
+                4,
+                5,
+                transition.account_id.as_bytes(),
+                AccountTransitionState::ConfigCommitted.event_state(),
+                AccountTransitionState::Finalized.event_state(),
+                transition.transition_sha256,
+                Some(receipt_id),
+                at,
+            );
+            let store_detail = authority_event_detail(
+                9,
+                4,
+                transition.store_id.as_bytes(),
+                4,
+                6,
+                transition.transition_id.as_bytes(),
+                0x0402,
+                0x0401,
+                transition.transition_sha256,
+                Some(receipt_id),
+                at,
+            );
+            let store_event = load_event_by_sequence(
+                connection,
+                event.sequence.checked_add(1).ok_or_else(recovery_error)?,
+            )?;
+            if event.sequence <= previous
+                || event.sequence.checked_add(1) != Some(store_event.sequence)
+                || event.detail != detail
+                || store_event.entity_kind != 4
+                || store_event.entity_id.as_slice() != transition.store_id.as_bytes()
+                || store_event.event_code != 9
+                || store_event.source != 4
+                || store_event.occurred_at != at
+                || store_event.detail != store_detail
+                || store_event.detail_sha256.as_slice() != Sha256::digest(&store_detail).as_slice()
+            {
+                return Err(recovery_error());
+            }
+        }
+        AccountTransitionState::Aborted => {
+            let at = transition.resolved_at.ok_or_else(recovery_error)?;
+            validate_terminal_transition_pair(
+                connection,
+                transition,
+                receipt_id,
+                previous,
+                13,
+                6,
+                AccountTransitionState::Prepared,
+                AccountTransitionState::Aborted,
+                0x0401,
+                transition.transition_sha256,
+                at,
+            )?;
+        }
+        AccountTransitionState::RecoveryRequired => {
+            let at = transition.resolved_at.ok_or_else(recovery_error)?;
+            let store = load_registered_store_by_id(connection, transition.store_id)?
+                .ok_or_else(recovery_error)?;
+            let prior = if transition.config_committed_at.is_some() {
+                AccountTransitionState::ConfigCommitted
+            } else {
+                AccountTransitionState::Prepared
+            };
+            let recovery = account_recovery_digest(
+                transition,
+                prior,
+                store.config_generation,
+                store.config_sha256,
+            );
+            validate_terminal_transition_pair(
+                connection,
+                transition,
+                receipt_id,
+                previous,
+                14,
+                5,
+                prior,
+                AccountTransitionState::RecoveryRequired,
+                0x0404,
+                recovery,
+                at,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_terminal_transition_pair(
+    connection: &Connection,
+    transition: &StoredAccountTransition,
+    receipt_id: AuthorizationReceiptId,
+    previous: i64,
+    event_code: u16,
+    source: u8,
+    prior: AccountTransitionState,
+    next: AccountTransitionState,
+    store_next: u16,
+    context: Sha256Digest,
+    at: i64,
+) -> Result<(), MailError> {
+    let event = load_single_entity_event(
+        connection,
+        6,
+        transition.transition_id.as_bytes(),
+        i64::from(event_code),
+    )?;
+    let detail = authority_event_detail(
+        event_code,
+        6,
+        transition.transition_id.as_bytes(),
+        source,
+        5,
+        transition.account_id.as_bytes(),
+        prior.event_state(),
+        next.event_state(),
+        context,
+        Some(receipt_id),
+        at,
+    );
+    let store_detail = authority_event_detail(
+        9,
+        4,
+        transition.store_id.as_bytes(),
+        source,
+        6,
+        transition.transition_id.as_bytes(),
+        0x0402,
+        store_next,
+        context,
+        Some(receipt_id),
+        at,
+    );
+    let store_sequence = if event_code == 14 {
+        event.sequence.checked_sub(1).ok_or_else(recovery_error)?
+    } else {
+        event.sequence.checked_add(1).ok_or_else(recovery_error)?
+    };
+    let store_event = load_event_by_sequence(connection, store_sequence)?;
+    let ordered = if event_code == 13 {
+        event.sequence == previous.checked_add(1).ok_or_else(recovery_error)?
+            && store_event.sequence == event.sequence.checked_add(1).ok_or_else(recovery_error)?
+    } else {
+        store_event.sequence > previous
+            && event.sequence
+                == store_event
+                    .sequence
+                    .checked_add(1)
+                    .ok_or_else(recovery_error)?
+    };
+    if !ordered
+        || event.detail != detail
+        || event.detail_sha256.as_slice() != Sha256::digest(&detail).as_slice()
+        || store_event.entity_kind != 4
+        || store_event.entity_id.as_slice() != transition.store_id.as_bytes()
+        || store_event.event_code != 9
+        || store_event.source != i64::from(source)
+        || store_event.occurred_at != at
+        || store_event.detail != store_detail
+        || store_event.detail_sha256.as_slice() != Sha256::digest(&store_detail).as_slice()
+    {
+        return Err(recovery_error());
+    }
+    Ok(())
+}
+
+fn load_event_by_sequence(
+    connection: &Connection,
+    sequence: i64,
+) -> Result<StoredAuthorityEvent, MailError> {
+    record_validation_query(ValidationQueryKind::BoundedKeyed);
+    connection
+        .query_row(
+            "SELECT sequence,entity_kind,entity_id,event_code,source,occurred_at,
+                    detail,detail_sha256 FROM authority_events
+             WHERE sequence=?1",
+            [sequence],
+            stored_authority_event_from_row,
+        )
+        .optional()
+        .map_err(|_| store_read_error())?
+        .ok_or_else(recovery_error)
 }
 
 fn validate_registry_events(
@@ -3992,7 +6640,7 @@ fn validate_events(
             )?,
             sequence if sequence > expected_prefix => match row.entity_kind {
                 8 => validate_challenge_event(connection, &row, last_observed_at)?,
-                4 | 10 => validate_registry_event_row(connection, &row)?,
+                4 | 6 | 10 => validate_registry_event_row(connection, &row)?,
                 _ => return Err(recovery_error()),
             },
             _ => return Err(recovery_error()),
@@ -4058,6 +6706,7 @@ fn stored_authority_event_from_row(
     })
 }
 
+#[allow(clippy::too_many_lines)]
 fn validate_challenge_event(
     connection: &Connection,
     row: &StoredAuthorityEvent,
@@ -4110,14 +6759,23 @@ fn validate_challenge_event(
             if let Some(receipt) = &receipt {
                 let manifest =
                     ActionManifest::parse(&challenge.manifest).map_err(|_| recovery_error())?;
-                let enrollment =
-                    store_enrollment_context(&manifest).map_err(|_| recovery_error())?;
+                let intent = match manifest.payload() {
+                    ManifestPayload::StoreEnroll(_) => {
+                        let enrollment =
+                            store_enrollment_context(&manifest).map_err(|_| recovery_error())?;
+                        enrollment_intent_from_rows(&challenge, receipt, enrollment)
+                    }
+                    ManifestPayload::AccountCreate(value) => {
+                        account_prepare_intent_from_rows(&challenge, receipt, value)?
+                    }
+                    _ => return Err(recovery_error()),
+                };
                 (
                     9,
                     receipt.receipt_id.as_bytes().as_slice(),
                     0x0802,
                     0x0803,
-                    enrollment_intent_from_rows(&challenge, receipt, enrollment),
+                    intent,
                     Some(receipt.receipt_id),
                 )
             } else {
@@ -4157,11 +6815,46 @@ fn validate_challenge_event(
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 fn validate_registry_event_row(
     connection: &Connection,
     row: &StoredAuthorityEvent,
 ) -> Result<(), MailError> {
     match (row.entity_kind, row.event_code, row.entity_id.len()) {
+        (6, 10..=14, 16) => {
+            let transition_id: TransitionId =
+                uuid_from_blob_sql(row.entity_id.clone()).map_err(|_| recovery_error())?;
+            let transition =
+                load_account_transition(connection, transition_id)?.ok_or_else(recovery_error)?;
+            let receipt_id = transition_receipt_id(connection, &transition)?;
+            validate_transition_events(connection, &transition, receipt_id)?;
+            let event_is_reachable = match transition.state {
+                AccountTransitionState::Prepared => row.event_code == 10,
+                AccountTransitionState::ConfigCommitted => matches!(row.event_code, 10 | 11),
+                AccountTransitionState::Finalized => matches!(row.event_code, 10..=12),
+                AccountTransitionState::Aborted => matches!(row.event_code, 10 | 13),
+                AccountTransitionState::RecoveryRequired => {
+                    row.event_code == 10
+                        || row.event_code == 14
+                        || (transition.config_committed_at.is_some() && row.event_code == 11)
+                }
+            };
+            if !event_is_reachable
+                || row.detail_sha256.as_slice() != Sha256::digest(&row.detail).as_slice()
+            {
+                return Err(recovery_error());
+            }
+        }
+        (4, 9, 16) => {
+            let store_id: StoreId =
+                uuid_from_blob_sql(row.entity_id.clone()).map_err(|_| recovery_error())?;
+            if load_registered_store_by_id(connection, store_id)?.is_none()
+                || parse_account_store_event_detail(row, store_id).is_err()
+                || row.detail_sha256.as_slice() != Sha256::digest(&row.detail).as_slice()
+            {
+                return Err(recovery_error());
+            }
+        }
         (10, 7, 16) => {
             let grant_id: AuthorizationGrantId =
                 uuid_from_blob_sql(row.entity_id.clone()).map_err(|_| recovery_error())?;
@@ -4229,6 +6922,301 @@ fn validate_registry_event_row(
         _ => return Err(recovery_error()),
     }
     Ok(())
+}
+
+fn account_store_event_is_exact(
+    connection: &Connection,
+    store: &StoredRegisteredStore,
+    initial_version: &StoredRegisteredStoreVersion,
+) -> Result<(), MailError> {
+    let store_id = store.store_id;
+    record_validation_query(ValidationQueryKind::RegistryStream);
+    let mut statement = connection
+        .prepare(
+            "SELECT sequence,entity_kind,entity_id,event_code,source,occurred_at,
+                    detail,detail_sha256
+             FROM authority_events INDEXED BY authority_events_entity_sequence
+             WHERE entity_kind=4 AND entity_id=?1 ORDER BY sequence",
+        )
+        .map_err(|_| store_read_error())?;
+    let mut rows = statement
+        .query([store_id.as_bytes()])
+        .map_err(|_| store_read_error())?;
+    let mut saw_enrollment = false;
+    let mut derived_state = "active";
+    let mut derived_generation = initial_version.config_generation;
+    let mut derived_config_sha256 = initial_version.config_sha256;
+    let mut derived_updated_at = store.created_at;
+    let mut active_transition = None;
+    while let Some(row) = rows.next().map_err(|_| store_read_error())? {
+        let event = stored_authority_event_from_row(row).map_err(|_| recovery_error())?;
+        match event.event_code {
+            8 if !saw_enrollment && active_transition.is_none() => {
+                saw_enrollment = true;
+            }
+            9 if saw_enrollment => {
+                let (detail, transition) =
+                    validate_account_store_event_row(connection, store_id, &event)?;
+                match (detail.prior_state, detail.next_state) {
+                    (0x0401, 0x0402) => {
+                        if derived_state != "active"
+                            || active_transition.is_some()
+                            || transition.expected_generation != derived_generation
+                            || transition.before_config_sha256 != derived_config_sha256
+                        {
+                            return Err(recovery_error());
+                        }
+                        derived_state = "blocked";
+                        active_transition = Some(transition.transition_id);
+                        derived_updated_at = transition.prepared_at;
+                        if transition.config_committed_at.is_some() {
+                            derived_generation = transition.next_generation;
+                            derived_config_sha256 = transition.after_config_sha256;
+                            derived_updated_at =
+                                transition.config_committed_at.ok_or_else(recovery_error)?;
+                        }
+                    }
+                    (0x0402, 0x0401) => {
+                        if derived_state != "blocked"
+                            || active_transition != Some(transition.transition_id)
+                            || !matches!(
+                                transition.state,
+                                AccountTransitionState::Finalized | AccountTransitionState::Aborted
+                            )
+                        {
+                            return Err(recovery_error());
+                        }
+                        derived_state = "active";
+                        active_transition = None;
+                        derived_updated_at = match transition.state {
+                            AccountTransitionState::Finalized => {
+                                transition.finalized_at.ok_or_else(recovery_error)?
+                            }
+                            AccountTransitionState::Aborted => {
+                                transition.resolved_at.ok_or_else(recovery_error)?
+                            }
+                            _ => return Err(recovery_error()),
+                        };
+                    }
+                    (0x0402, 0x0404) => {
+                        if derived_state != "blocked"
+                            || active_transition != Some(transition.transition_id)
+                            || transition.state != AccountTransitionState::RecoveryRequired
+                        {
+                            return Err(recovery_error());
+                        }
+                        derived_state = "recovery_required";
+                        derived_generation = store.config_generation;
+                        derived_config_sha256 = store.config_sha256;
+                        derived_updated_at = transition.resolved_at.ok_or_else(recovery_error)?;
+                    }
+                    _ => return Err(recovery_error()),
+                }
+            }
+            _ => return Err(recovery_error()),
+        }
+    }
+    if !saw_enrollment
+        || derived_state != store.state
+        || derived_generation != store.config_generation
+        || derived_config_sha256 != store.config_sha256
+        || derived_updated_at != store.updated_at
+    {
+        return Err(recovery_error());
+    }
+    Ok(())
+}
+
+struct AccountStoreEventDetail {
+    source: u8,
+    transition_id: TransitionId,
+    prior_state: u16,
+    next_state: u16,
+    context_sha256: Sha256Digest,
+    receipt_id: AuthorizationReceiptId,
+    occurred_at: i64,
+}
+
+fn parse_account_store_event_detail(
+    row: &StoredAuthorityEvent,
+    store_id: StoreId,
+) -> Result<AccountStoreEventDetail, MailError> {
+    if row.entity_kind != 4
+        || row.event_code != 9
+        || row.entity_id.as_slice() != store_id.as_bytes()
+        || !row.detail.starts_with(EVENT_DETAIL_DOMAIN)
+    {
+        return Err(recovery_error());
+    }
+    let mut cursor = EVENT_DETAIL_DOMAIN.len();
+    if read_u16(&row.detail, &mut cursor)? != 11 {
+        return Err(recovery_error());
+    }
+    let event_code = transcript_field(&row.detail, &mut cursor, 1)?;
+    let entity_kind = transcript_field(&row.detail, &mut cursor, 2)?;
+    let entity_id = transcript_field(&row.detail, &mut cursor, 3)?;
+    let source = transcript_field(&row.detail, &mut cursor, 4)?;
+    let related_kind = transcript_field(&row.detail, &mut cursor, 5)?;
+    let related_id = transcript_field(&row.detail, &mut cursor, 6)?;
+    let prior_state = transcript_field(&row.detail, &mut cursor, 7)?;
+    let next_state = transcript_field(&row.detail, &mut cursor, 8)?;
+    let context_sha256 = transcript_field(&row.detail, &mut cursor, 9)?;
+    let receipt_id = transcript_field(&row.detail, &mut cursor, 10)?;
+    let occurred_at = transcript_field(&row.detail, &mut cursor, 11)?;
+    if cursor != row.detail.len()
+        || u16::from_be_bytes(exact(event_code)?) != 9
+        || u16::from_be_bytes(exact(entity_kind)?) != 4
+        || entity_id != store_id.as_bytes()
+        || u16::from_be_bytes(exact(related_kind)?) != 6
+        || source.len() != 1
+    {
+        return Err(recovery_error());
+    }
+    Ok(AccountStoreEventDetail {
+        source: source[0],
+        transition_id: uuid_from_blob_sql(related_id.to_vec()).map_err(|_| recovery_error())?,
+        prior_state: u16::from_be_bytes(exact(prior_state)?),
+        next_state: u16::from_be_bytes(exact(next_state)?),
+        context_sha256: digest_from_blob(context_sha256)?,
+        receipt_id: uuid_from_blob_sql(receipt_id.to_vec()).map_err(|_| recovery_error())?,
+        occurred_at: i64::from_be_bytes(exact(occurred_at)?),
+    })
+}
+
+fn read_u16(bytes: &[u8], cursor: &mut usize) -> Result<u16, MailError> {
+    let end = cursor.checked_add(2).ok_or_else(recovery_error)?;
+    let value = bytes.get(*cursor..end).ok_or_else(recovery_error)?;
+    *cursor = end;
+    Ok(u16::from_be_bytes(exact(value)?))
+}
+
+fn read_u32(bytes: &[u8], cursor: &mut usize) -> Result<u32, MailError> {
+    let end = cursor.checked_add(4).ok_or_else(recovery_error)?;
+    let value = bytes.get(*cursor..end).ok_or_else(recovery_error)?;
+    *cursor = end;
+    Ok(u32::from_be_bytes(exact(value)?))
+}
+
+fn transcript_field<'a>(
+    bytes: &'a [u8],
+    cursor: &mut usize,
+    expected_tag: u16,
+) -> Result<&'a [u8], MailError> {
+    if read_u16(bytes, cursor)? != expected_tag {
+        return Err(recovery_error());
+    }
+    let length = usize::try_from(read_u32(bytes, cursor)?).map_err(|_| recovery_error())?;
+    let end = cursor.checked_add(length).ok_or_else(recovery_error)?;
+    let value = bytes.get(*cursor..end).ok_or_else(recovery_error)?;
+    *cursor = end;
+    Ok(value)
+}
+
+fn validate_account_store_event_row(
+    connection: &Connection,
+    store_id: StoreId,
+    row: &StoredAuthorityEvent,
+) -> Result<(AccountStoreEventDetail, StoredAccountTransition), MailError> {
+    let detail = parse_account_store_event_detail(row, store_id)?;
+    let transition =
+        load_account_transition(connection, detail.transition_id)?.ok_or_else(recovery_error)?;
+    let receipt_id = transition_receipt_id(connection, &transition)?;
+    if transition.store_id != store_id
+        || detail.receipt_id != receipt_id
+        || row.source != i64::from(detail.source)
+        || row.occurred_at != detail.occurred_at
+        || row.detail_sha256.as_slice() != Sha256::digest(&row.detail).as_slice()
+    {
+        return Err(recovery_error());
+    }
+    let (source, prior, next, context, occurred_at, transition_event, store_follows) =
+        match (detail.prior_state, detail.next_state) {
+            (0x0401, 0x0402) => (
+                4,
+                0x0401,
+                0x0402,
+                transition.transition_sha256,
+                transition.prepared_at,
+                load_single_entity_event(connection, 6, transition.transition_id.as_bytes(), 10)?,
+                false,
+            ),
+            (0x0402, 0x0401) if transition.state == AccountTransitionState::Finalized => (
+                4,
+                0x0402,
+                0x0401,
+                transition.transition_sha256,
+                transition.finalized_at.ok_or_else(recovery_error)?,
+                load_single_entity_event(connection, 6, transition.transition_id.as_bytes(), 12)?,
+                true,
+            ),
+            (0x0402, 0x0401) if transition.state == AccountTransitionState::Aborted => (
+                6,
+                0x0402,
+                0x0401,
+                transition.transition_sha256,
+                transition.resolved_at.ok_or_else(recovery_error)?,
+                load_single_entity_event(connection, 6, transition.transition_id.as_bytes(), 13)?,
+                true,
+            ),
+            (0x0402, 0x0404) if transition.state == AccountTransitionState::RecoveryRequired => {
+                let store = load_registered_store_by_id(connection, store_id)?
+                    .ok_or_else(recovery_error)?;
+                let prior = if transition.config_committed_at.is_some() {
+                    AccountTransitionState::ConfigCommitted
+                } else {
+                    AccountTransitionState::Prepared
+                };
+                (
+                    5,
+                    0x0402,
+                    0x0404,
+                    account_recovery_digest(
+                        &transition,
+                        prior,
+                        store.config_generation,
+                        store.config_sha256,
+                    ),
+                    transition.resolved_at.ok_or_else(recovery_error)?,
+                    load_single_entity_event(
+                        connection,
+                        6,
+                        transition.transition_id.as_bytes(),
+                        14,
+                    )?,
+                    false,
+                )
+            }
+            _ => return Err(recovery_error()),
+        };
+    let expected = authority_event_detail(
+        9,
+        4,
+        store_id.as_bytes(),
+        source,
+        6,
+        transition.transition_id.as_bytes(),
+        prior,
+        next,
+        context,
+        Some(receipt_id),
+        occurred_at,
+    );
+    let ordered = if transition_event.event_code == 10 {
+        row.sequence.checked_add(1) == Some(transition_event.sequence)
+    } else if store_follows {
+        transition_event.sequence.checked_add(1) == Some(row.sequence)
+    } else {
+        row.sequence.checked_add(1) == Some(transition_event.sequence)
+    };
+    if detail.source != source
+        || detail.context_sha256 != context
+        || detail.occurred_at != occurred_at
+        || row.detail != expected
+        || !ordered
+    {
+        return Err(recovery_error());
+    }
+    Ok((detail, transition))
 }
 
 struct PreviousChallengeLifecycle {
@@ -5168,5 +8156,26 @@ fn config_store_identity_conflict_error() -> MailError {
     MailError::stable(
         MailErrorCode::ConfigStoreIdentityConflict,
         "config store identity conflicts with an existing registration",
+    )
+}
+
+fn account_update_conflict_error() -> MailError {
+    MailError::stable(
+        MailErrorCode::AccountUpdateConflict,
+        "account transition conflicts with the current registry state",
+    )
+}
+
+fn account_identity_conflict_error() -> MailError {
+    MailError::stable(
+        MailErrorCode::AccountIdentityConflict,
+        "account transition identity is already reserved",
+    )
+}
+
+fn account_already_exists_error() -> MailError {
+    MailError::stable(
+        MailErrorCode::AccountAlreadyExists,
+        "account display identity is already active",
     )
 }
