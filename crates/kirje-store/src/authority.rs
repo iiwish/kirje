@@ -1983,7 +1983,7 @@ impl AuthorityStore {
         })
     }
 
-    /// Reserve one authorized account-create, account-update, or account-remove transition.
+    /// Reserve one supported authorized account or credential transition.
     ///
     /// # Errors
     ///
@@ -1998,6 +1998,7 @@ impl AuthorityStore {
             AccountTransitionKind::AccountCreate
                 | AccountTransitionKind::AccountUpdate
                 | AccountTransitionKind::AccountRemove
+                | AccountTransitionKind::CredentialSet
         ) {
             return Err(authorization_context_stale_error());
         }
@@ -2164,7 +2165,9 @@ impl AuthorityStore {
                     effective_time,
                 ],
             ),
-            AccountTransitionKind::AccountUpdate | AccountTransitionKind::AccountRemove => {
+            AccountTransitionKind::AccountUpdate
+            | AccountTransitionKind::AccountRemove
+            | AccountTransitionKind::CredentialSet => {
                 let mutation = account_mutation_manifest(&challenge, request.kind)?;
                 let before = mutation
                     .before
@@ -2195,7 +2198,7 @@ impl AuthorityStore {
                     ],
                 )
             }
-            _ => unreachable!(),
+            AccountTransitionKind::CredentialDelete => unreachable!(),
         }
         .map_err(|_| store_write_error())?;
         if account_changed != 1 {
@@ -2424,6 +2427,7 @@ impl AuthorityStore {
             AccountTransitionKind::AccountCreate
                 | AccountTransitionKind::AccountUpdate
                 | AccountTransitionKind::AccountRemove
+                | AccountTransitionKind::CredentialSet
         ) {
             return Err(account_update_conflict_error());
         }
@@ -3045,20 +3049,27 @@ fn validate_account_prepare_identity(
 ) -> Result<(), MailError> {
     let manifest = ActionManifest::parse(&challenge.manifest)
         .map_err(|_| authorization_context_stale_error())?;
-    let (value, action) = match (request.kind, manifest.payload()) {
+    let (value, action, target_kind) = match (request.kind, manifest.payload()) {
         (AccountTransitionKind::AccountCreate, ManifestPayload::AccountCreate(value)) => {
-            (value, SensitiveAction::AccountCreate)
+            (value, SensitiveAction::AccountCreate, TargetKind::Account)
         }
         (AccountTransitionKind::AccountUpdate, ManifestPayload::AccountUpdate(value)) => {
-            (value, SensitiveAction::AccountUpdate)
+            (value, SensitiveAction::AccountUpdate, TargetKind::Account)
         }
         (AccountTransitionKind::AccountRemove, ManifestPayload::AccountRemove(value)) => {
-            (value, SensitiveAction::AccountRemove)
+            (value, SensitiveAction::AccountRemove, TargetKind::Account)
         }
+        (AccountTransitionKind::CredentialSet, ManifestPayload::CredentialSet(value)) => (
+            &value.account,
+            SensitiveAction::CredentialSet,
+            TargetKind::Credential,
+        ),
         _ => return Err(authorization_context_stale_error()),
     };
     let account_snapshot = match request.kind {
-        AccountTransitionKind::AccountCreate | AccountTransitionKind::AccountUpdate => value
+        AccountTransitionKind::AccountCreate
+        | AccountTransitionKind::AccountUpdate
+        | AccountTransitionKind::CredentialSet => value
             .after
             .as_ref()
             .ok_or_else(authorization_context_stale_error)?,
@@ -3066,6 +3077,13 @@ fn validate_account_prepare_identity(
             .before
             .as_ref()
             .ok_or_else(authorization_context_stale_error)?,
+        AccountTransitionKind::CredentialDelete => {
+            return Err(authorization_context_stale_error());
+        }
+    };
+    let target_bytes: &[u8] = match target_kind {
+        TargetKind::Account => account_snapshot.account_id.as_bytes(),
+        TargetKind::Credential => account_snapshot.credential_id.as_bytes(),
         _ => return Err(authorization_context_stale_error()),
     };
     if request.grant_use.grant_id != challenge.grant_id
@@ -3074,14 +3092,14 @@ fn validate_account_prepare_identity(
         || receipt.grant_id != challenge.grant_id
         || request.grant_use.action != action
         || request.grant_use.action != challenge.action
-        || request.grant_use.target_kind != TargetKind::Account
+        || request.grant_use.target_kind != target_kind
         || request.grant_use.target_kind.code() != challenge.target_kind_code
-        || request.grant_use.target_bytes != challenge.target_id
+        || request.grant_use.target_bytes.as_slice() != target_bytes
+        || challenge.target_id.as_slice() != target_bytes
         || request.grant_use.manifest_sha256 != challenge.manifest_sha256
         || request.transition_id != value.transition_id
         || request.store_id != value.config_cas.store_id
         || request.account_id != account_snapshot.account_id
-        || request.account_id.as_bytes().as_slice() != challenge.target_id
         || request.before_config_sha256 != value.config_cas.exact_content_sha256
         || request.after_config_sha256 != value.after_config_sha256
         || request.expected_generation != value.config_cas.generation
@@ -3102,13 +3120,12 @@ fn account_manifest_location_sha256(
 ) -> Result<Sha256Digest, MailError> {
     let manifest = ActionManifest::parse(&challenge.manifest)
         .map_err(|_| authorization_context_stale_error())?;
-    let (
+    let value = match manifest.payload() {
         ManifestPayload::AccountCreate(value)
         | ManifestPayload::AccountUpdate(value)
-        | ManifestPayload::AccountRemove(value),
-    ) = (manifest.payload(),)
-    else {
-        return Err(authorization_context_stale_error());
+        | ManifestPayload::AccountRemove(value) => value,
+        ManifestPayload::CredentialSet(value) => &value.account,
+        _ => return Err(authorization_context_stale_error()),
     };
     Ok(value.config_cas.location_sha256)
 }
@@ -3147,6 +3164,9 @@ fn account_mutation_manifest(
         | (AccountTransitionKind::AccountUpdate, ManifestPayload::AccountUpdate(value))
         | (AccountTransitionKind::AccountRemove, ManifestPayload::AccountRemove(value)) => {
             Ok(value.clone())
+        }
+        (AccountTransitionKind::CredentialSet, ManifestPayload::CredentialSet(value)) => {
+            Ok(value.account.clone())
         }
         _ => Err(authorization_context_stale_error()),
     }
@@ -3216,7 +3236,9 @@ fn validate_prepare_occupancy(
                 return Err(account_already_exists_error());
             }
         }
-        AccountTransitionKind::AccountUpdate | AccountTransitionKind::AccountRemove => {
+        AccountTransitionKind::AccountUpdate
+        | AccountTransitionKind::AccountRemove
+        | AccountTransitionKind::CredentialSet => {
             let mutation = account_mutation_manifest(challenge, request.kind)?;
             let before = mutation
                 .before
@@ -3277,7 +3299,9 @@ fn validate_prepare_occupancy(
                 }
             }
         }
-        _ => return Err(authorization_context_stale_error()),
+        AccountTransitionKind::CredentialDelete => {
+            return Err(authorization_context_stale_error());
+        }
     }
     Ok(())
 }
@@ -3532,20 +3556,25 @@ fn transition_projection_account_generation(
     transition_state: AccountTransitionState,
 ) -> Result<NonZeroU64, MailError> {
     if transition.kind == AccountTransitionKind::AccountRemove
-        || (transition.kind == AccountTransitionKind::AccountUpdate
-            && transition_state == AccountTransitionState::Aborted)
+        || (matches!(
+            transition.kind,
+            AccountTransitionKind::AccountUpdate | AccountTransitionKind::CredentialSet
+        ) && transition_state == AccountTransitionState::Aborted)
     {
         let grant = load_grant_use(connection, transition.grant_id)?.ok_or_else(recovery_error)?;
         let receipt =
             load_receipt_by_id(connection, grant.receipt_id)?.ok_or_else(recovery_error)?;
         let challenge = load_challenge(connection, receipt.challenge_id)?;
         let manifest = ActionManifest::parse(&challenge.manifest).map_err(|_| recovery_error())?;
-        let (
+        let mutation = match (transition.kind, manifest.payload()) {
             (AccountTransitionKind::AccountUpdate, ManifestPayload::AccountUpdate(mutation))
-            | (AccountTransitionKind::AccountRemove, ManifestPayload::AccountRemove(mutation)),
-        ) = ((transition.kind, manifest.payload()),)
-        else {
-            return Err(recovery_error());
+            | (AccountTransitionKind::AccountRemove, ManifestPayload::AccountRemove(mutation)) => {
+                mutation
+            }
+            (AccountTransitionKind::CredentialSet, ManifestPayload::CredentialSet(mutation)) => {
+                &mutation.account
+            }
+            _ => return Err(recovery_error()),
         };
         return Ok(mutation
             .before
@@ -3564,12 +3593,15 @@ fn transition_account_generation(
     let receipt = load_receipt_by_id(connection, grant.receipt_id)?.ok_or_else(recovery_error)?;
     let challenge = load_challenge(connection, receipt.challenge_id)?;
     let manifest = ActionManifest::parse(&challenge.manifest).map_err(|_| recovery_error())?;
-    let (
+    let mutation = match (transition.kind, manifest.payload()) {
         (AccountTransitionKind::AccountCreate, ManifestPayload::AccountCreate(mutation))
-        | (AccountTransitionKind::AccountUpdate, ManifestPayload::AccountUpdate(mutation)),
-    ) = ((transition.kind, manifest.payload()),)
-    else {
-        return Err(recovery_error());
+        | (AccountTransitionKind::AccountUpdate, ManifestPayload::AccountUpdate(mutation)) => {
+            mutation
+        }
+        (AccountTransitionKind::CredentialSet, ManifestPayload::CredentialSet(mutation)) => {
+            &mutation.account
+        }
+        _ => return Err(recovery_error()),
     };
     Ok(mutation
         .after
@@ -3844,21 +3876,19 @@ fn update_abort_rows(
             ],
         )
     } else {
-        let generation = if transition.kind == AccountTransitionKind::AccountUpdate {
-            transition_account_generation(transaction, transition)?
-                .get()
-                .checked_sub(1)
-                .and_then(NonZeroU64::new)
-                .ok_or_else(recovery_error)?
-        } else if transition.kind == AccountTransitionKind::AccountRemove {
-            transition_projection_account_generation(
-                transaction,
-                transition,
-                AccountTransitionState::Aborted,
-            )?
-        } else {
+        if !matches!(
+            transition.kind,
+            AccountTransitionKind::AccountUpdate
+                | AccountTransitionKind::AccountRemove
+                | AccountTransitionKind::CredentialSet
+        ) {
             return Err(recovery_error());
-        };
+        }
+        let generation = transition_projection_account_generation(
+            transaction,
+            transition,
+            AccountTransitionState::Aborted,
+        )?;
         let previous: (Vec<u8>, Vec<u8>, Vec<u8>) = transaction
             .query_row(
                 "SELECT credential_id,binding_sha256,committed_transition_id
@@ -4800,9 +4830,9 @@ fn account_prepare_intent_from_rows(
     value: &kirje_core::AccountMutationManifest,
 ) -> Result<Sha256Digest, MailError> {
     let account = match challenge.action {
-        SensitiveAction::AccountCreate | SensitiveAction::AccountUpdate => {
-            value.after.as_ref().ok_or_else(recovery_error)?
-        }
+        SensitiveAction::AccountCreate
+        | SensitiveAction::AccountUpdate
+        | SensitiveAction::CredentialSet => value.after.as_ref().ok_or_else(recovery_error)?,
         SensitiveAction::AccountRemove => value.before.as_ref().ok_or_else(recovery_error)?,
         _ => return Err(recovery_error()),
     };
@@ -4812,6 +4842,7 @@ fn account_prepare_intent_from_rows(
         SensitiveAction::AccountCreate => AccountTransitionKind::AccountCreate.code(),
         SensitiveAction::AccountUpdate => AccountTransitionKind::AccountUpdate.code(),
         SensitiveAction::AccountRemove => AccountTransitionKind::AccountRemove.code(),
+        SensitiveAction::CredentialSet => AccountTransitionKind::CredentialSet.code(),
         _ => return Err(recovery_error()),
     }];
     let expected = value.config_cas.generation.get().to_be_bytes();
@@ -6584,6 +6615,7 @@ fn validate_stored_grant(connection: &Connection, grant: &StoredGrantUse) -> Res
                     | SensitiveAction::AccountRemove,
                 TargetKind::Account
             )
+            | (SensitiveAction::CredentialSet, TargetKind::Credential)
     ) || !valid_target_shape(grant.target_kind, &grant.target_id)
         || grant.use_receipt != grant_use_transcript_from_row(grant)
         || grant.use_sha256 != Sha256Digest::digest(&grant.use_receipt)
@@ -6609,6 +6641,7 @@ fn validate_stored_grant(connection: &Connection, grant: &StoredGrantUse) -> Res
         SensitiveAction::AccountCreate
             | SensitiveAction::AccountUpdate
             | SensitiveAction::AccountRemove
+            | SensitiveAction::CredentialSet
     ) {
         let transition = load_account_transition_by_grant(connection, grant.grant_id)?
             .ok_or_else(recovery_error)?;
@@ -6783,6 +6816,7 @@ fn validate_stored_account_transition(
         AccountTransitionKind::AccountCreate
             | AccountTransitionKind::AccountUpdate
             | AccountTransitionKind::AccountRemove
+            | AccountTransitionKind::CredentialSet
     ) || transition.expected_generation.get().checked_add(1)
         != Some(transition.next_generation.get())
         || transition.before_config_sha256 == transition.after_config_sha256
@@ -6822,30 +6856,43 @@ fn validate_stored_account_transition(
     let receipt = load_receipt_by_id(connection, grant.receipt_id)?.ok_or_else(recovery_error)?;
     let challenge = load_challenge(connection, receipt.challenge_id)?;
     let manifest = ActionManifest::parse(&challenge.manifest).map_err(|_| recovery_error())?;
-    let (value, expected_action) = match (transition.kind, manifest.payload()) {
+    let (value, expected_action, expected_target_kind) = match (transition.kind, manifest.payload())
+    {
         (AccountTransitionKind::AccountCreate, ManifestPayload::AccountCreate(value)) => {
-            (value, SensitiveAction::AccountCreate)
+            (value, SensitiveAction::AccountCreate, TargetKind::Account)
         }
         (AccountTransitionKind::AccountUpdate, ManifestPayload::AccountUpdate(value)) => {
-            (value, SensitiveAction::AccountUpdate)
+            (value, SensitiveAction::AccountUpdate, TargetKind::Account)
         }
         (AccountTransitionKind::AccountRemove, ManifestPayload::AccountRemove(value)) => {
-            (value, SensitiveAction::AccountRemove)
+            (value, SensitiveAction::AccountRemove, TargetKind::Account)
         }
+        (AccountTransitionKind::CredentialSet, ManifestPayload::CredentialSet(value)) => (
+            &value.account,
+            SensitiveAction::CredentialSet,
+            TargetKind::Credential,
+        ),
         _ => return Err(recovery_error()),
     };
     let account_snapshot = match transition.kind {
-        AccountTransitionKind::AccountCreate | AccountTransitionKind::AccountUpdate => {
+        AccountTransitionKind::AccountCreate
+        | AccountTransitionKind::AccountUpdate
+        | AccountTransitionKind::CredentialSet => {
             value.after.as_ref().ok_or_else(recovery_error)?
         }
         AccountTransitionKind::AccountRemove => value.before.as_ref().ok_or_else(recovery_error)?,
+        AccountTransitionKind::CredentialDelete => return Err(recovery_error()),
+    };
+    let expected_target_id: &[u8] = match expected_target_kind {
+        TargetKind::Account => transition.account_id.as_bytes(),
+        TargetKind::Credential => account_snapshot.credential_id.as_bytes(),
         _ => return Err(recovery_error()),
     };
     let account =
         load_registered_account(connection, transition.account_id)?.ok_or_else(recovery_error)?;
     if grant.action != expected_action
-        || grant.target_kind != TargetKind::Account
-        || grant.target_id.as_slice() != transition.account_id.as_bytes()
+        || grant.target_kind != expected_target_kind
+        || grant.target_id.as_slice() != expected_target_id
         || value.transition_id != transition.transition_id
         || value.config_cas.store_id != transition.store_id
         || account_snapshot.account_id != transition.account_id
@@ -6906,8 +6953,11 @@ fn validate_stored_account_transition(
             credential.ok_or_else(recovery_error)?;
         if credential_account.as_slice() != transition.account_id.as_bytes()
             || credential_store.as_slice() != transition.store_id.as_bytes()
-            || credential_transition.as_slice() != transition.transition_id.as_bytes()
-            || credential_created != transition.prepared_at
+            || (matches!(
+                transition.kind,
+                AccountTransitionKind::AccountCreate | AccountTransitionKind::AccountUpdate
+            ) && (credential_transition.as_slice() != transition.transition_id.as_bytes()
+                || credential_created != transition.prepared_at))
         {
             return Err(recovery_error());
         }
@@ -6974,7 +7024,9 @@ fn validate_stored_account_transition(
     }
     if matches!(
         transition.kind,
-        AccountTransitionKind::AccountUpdate | AccountTransitionKind::AccountRemove
+        AccountTransitionKind::AccountUpdate
+            | AccountTransitionKind::AccountRemove
+            | AccountTransitionKind::CredentialSet
     ) {
         validate_account_mutation_parent(connection, transition, value)?;
     }
@@ -6993,19 +7045,25 @@ fn validate_current_account_for_transition(
 ) -> Result<(), MailError> {
     let restored_predecessor = matches!(
         transition.kind,
-        AccountTransitionKind::AccountUpdate | AccountTransitionKind::AccountRemove
+        AccountTransitionKind::AccountUpdate
+            | AccountTransitionKind::AccountRemove
+            | AccountTransitionKind::CredentialSet
     ) && transition.state == AccountTransitionState::Aborted;
     let current = match transition.kind {
-        AccountTransitionKind::AccountUpdate if restored_predecessor => {
+        AccountTransitionKind::AccountUpdate | AccountTransitionKind::CredentialSet
+            if restored_predecessor =>
+        {
             mutation.before.as_ref().ok_or_else(recovery_error)?
         }
-        AccountTransitionKind::AccountCreate | AccountTransitionKind::AccountUpdate => {
+        AccountTransitionKind::AccountCreate
+        | AccountTransitionKind::AccountUpdate
+        | AccountTransitionKind::CredentialSet => {
             mutation.after.as_ref().ok_or_else(recovery_error)?
         }
         AccountTransitionKind::AccountRemove => {
             mutation.before.as_ref().ok_or_else(recovery_error)?
         }
-        _ => return Err(recovery_error()),
+        AccountTransitionKind::CredentialDelete => return Err(recovery_error()),
     };
     let expected_receipt = if restored_predecessor {
         let parent: Vec<u8> = connection
@@ -7043,7 +7101,9 @@ fn validate_current_account_for_transition(
                 && account.removed_at.is_none()
         }
         (
-            AccountTransitionKind::AccountUpdate | AccountTransitionKind::AccountRemove,
+            AccountTransitionKind::AccountUpdate
+            | AccountTransitionKind::AccountRemove
+            | AccountTransitionKind::CredentialSet,
             AccountTransitionState::Prepared | AccountTransitionState::ConfigCommitted,
         ) => {
             account.state == RegisteredAccountState::Blocked
@@ -7052,7 +7112,9 @@ fn validate_current_account_for_transition(
                 && account.removed_at.is_none()
         }
         (
-            AccountTransitionKind::AccountCreate | AccountTransitionKind::AccountUpdate,
+            AccountTransitionKind::AccountCreate
+            | AccountTransitionKind::AccountUpdate
+            | AccountTransitionKind::CredentialSet,
             AccountTransitionState::Finalized,
         ) => {
             account.state == RegisteredAccountState::Active
@@ -7075,7 +7137,9 @@ fn validate_current_account_for_transition(
                 && account.removed_at == Some(resolved)
         }
         (
-            AccountTransitionKind::AccountUpdate | AccountTransitionKind::AccountRemove,
+            AccountTransitionKind::AccountUpdate
+            | AccountTransitionKind::AccountRemove
+            | AccountTransitionKind::CredentialSet,
             AccountTransitionState::Aborted,
         ) => {
             account.state == RegisteredAccountState::Active
@@ -7830,6 +7894,9 @@ fn validate_challenge_event(
                     | ManifestPayload::AccountUpdate(value)
                     | ManifestPayload::AccountRemove(value) => {
                         account_prepare_intent_from_rows(&challenge, receipt, value)?
+                    }
+                    ManifestPayload::CredentialSet(value) => {
+                        account_prepare_intent_from_rows(&challenge, receipt, &value.account)?
                     }
                     _ => return Err(recovery_error()),
                 };
