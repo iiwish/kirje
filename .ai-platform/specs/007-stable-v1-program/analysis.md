@@ -176,12 +176,19 @@ authorized/bound after projection. Abort restores the predecessor receipt and
 tuple, while unsafe observation remains fail-closed recovery. Fault rollback,
 expiry, replay, restart, target mismatch, and kind corruption are covered. No
 unresolved Critical, High, or Medium finding remains. The user explicitly
-accepted A004 on 2026-08-30. `T202C3-A005` is Ready with no blocking packet
-finding. It owns only credential-delete authority prepare through terminal
-state, expiry, replay, restart, and immutable version validation. Historical
-credential identity remains reserved, `active_locator_sha256` remains sealed in
-the manifest, and authority adds no keyring or cleanup operation. Cleanup
-challenge/claim/delete remain excluded and no later attempt is Ready.
+accepted A004 on 2026-08-30.
+
+`T202C3-A005` completed test-first implementation and three-pass review at
+production commit `316dae0`. The credential-targeted grant binds the signed
+authorized/bound before projection, authorized/missing after projection, store
+CAS, and active-locator digest. Prepare and commit retain the original
+credential identity, create no cleanup row, and add only the immutable after
+account/store versions. Finalize activates the signed missing projection; abort
+restores the bound predecessor tuple and receipt; unsafe observation remains
+fail-closed recovery. Fault rollback, expiry, replay, create-set-delete restart,
+target mismatch, and kind corruption are covered. No unresolved Critical, High,
+or Medium finding remains. A005 awaits explicit user acceptance; cleanup remains
+excluded and no later attempt is Ready.
 
 ## Current Implementation Evidence Check
 

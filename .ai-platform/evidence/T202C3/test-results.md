@@ -220,3 +220,56 @@ immutable account/store versions, no cleanup row, and transition-kind tamper.
 - Privacy scan found no private key, seed, proof, nonce, credential bytes,
   locator material, real account data, address, endpoint, mailbox content, or
   provider data in the fixture or evidence.
+
+## A005 RED
+
+The valid focused command exited 101 at the intended unsupported transition
+gate:
+
+```text
+cargo test -p kirje-store --test authority_registry \
+  credential_delete_transition_lifecycle_is_exact \
+  --all-features --locked
+```
+
+The authorized credential-delete prepare returned
+`authorization_context_stale`. Its rejection fingerprint proved zero grant,
+transition, credential, cleanup, version, event, or clock changes.
+
+## A005 Final GREEN
+
+- Focused credential-delete lifecycle: 1 passed, 0 failed.
+- `cargo test -p kirje-store --all-features --locked`:
+  - crate unit tests: 8 passed;
+  - authority authorization: 33 passed;
+  - authority registry: 40 passed;
+  - authority schema: 31 passed;
+  - outbox: 11 passed;
+  - doc tests: passed.
+- `cargo test -p kirje-store --no-default-features --locked`: 19 passed across
+  the enabled unit and outbox targets; feature-gated authority suites compiled
+  and selected zero tests.
+- `cargo clippy -p kirje-store --all-targets --all-features --locked -- -D warnings`:
+  passed.
+- `cargo fmt --all --check`: passed.
+- `git diff --check`: passed.
+- Delivery artifact validator: passed.
+
+The lifecycle covers the exact create-set-delete predecessor chain, prepare,
+config commit, finalize, terminal replay, abort receipt restoration, unsafe
+recovery, expiry restart, credential target mismatch, prepare/commit/finalize
+fault rollback, permanent credential history, immutable account/store versions,
+no cleanup row, and transition-kind tamper.
+
+## A005 Integrity
+
+- Production commit: `316dae0`.
+- Authority SQLite v1 schema SHA-256 remains
+  `5d01739b89246a5f495a965e57e416eee9fd0b5016995add41c6edee7f3e970d`.
+- `Cargo.lock` SHA-256 remains
+  `596ddb0071ecb38b0b9429c5d91cdbb83abe6a25bc760cf9588b2764274ff850`.
+- Production scope contains only the packet-authorized authority source,
+  registry test, and synthetic public-signature fixture.
+- Privacy scan found no private key, seed, proof, nonce, credential bytes,
+  locator material, real account data, address, endpoint, mailbox content, or
+  provider data in the fixture or evidence.

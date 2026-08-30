@@ -9,6 +9,8 @@ production commit `2c00f32` by explicit user decision on 2026-08-30.
 commit `703b5a1` by explicit user decision on 2026-08-30.
 `T202C3-A004` credential-set transition execution is accepted at production
 commit `1c6d7cb` by explicit user decision on 2026-08-30.
+`T202C3-A005` credential-delete transition execution is reviewed at production
+commit `316dae0` and awaits explicit user acceptance.
 
 ## Delivered
 
@@ -39,25 +41,32 @@ commit `1c6d7cb` by explicit user decision on 2026-08-30.
   immutable generation-two account/store versions.
 - No credential identity, cleanup row, credential bytes, locator material, or
   keyring/config/runtime capability added by credential set.
+- Exact credential-delete prepare, config commit, finalize, abort, unsafe
+  recovery, retry, expiry, and restart behavior.
+- Signed authorized/bound-to-missing account transition with permanent
+  credential-history retention and immutable generation-three account/store
+  versions.
+- No credential row deletion, cleanup row, credential bytes, locator material,
+  or keyring/config/runtime capability added by credential delete.
 
-No credential-delete transition, cleanup claim/delete, remote effect, runtime,
-config, keyring, protocol, CLI, MCP, network, schema, dependency, or core
-transcript behavior is included.
+No cleanup challenge/claim/delete, remote effect, runtime, config, keyring,
+protocol, CLI, MCP, network, schema, dependency, or core transcript behavior is
+included.
 
 ## Review Result
 
-No unresolved Critical, High, or Medium finding. A004 review covers terminal
-abort/recovery replay, target mismatch, injected prepare/commit/finalize faults,
-expiry, restart, and transition-kind corruption. The implementation remains
-within the packet-authorized authority source, registry test, and synthetic
-public-signature fixture.
+No unresolved Critical, High, or Medium finding. A005 review covers the exact
+create-set-delete chain, terminal replay, target mismatch, injected
+prepare/commit/finalize faults, expiry, restart, and transition-kind corruption.
+The implementation remains within the packet-authorized authority source,
+registry test, and synthetic public-signature fixture.
 
 ## Final Content Hashes
 
 ```text
-d4c4441c5edd2471b935eb37dd27be1c4ee059145bbe8a8eef2aafe786d51927  crates/kirje-store/src/authority.rs
-5295983330486f8b48c5cf75bada42183c28e196620bab3a5501b3074e4dbd0a  crates/kirje-store/tests/authority_registry.rs
-dcd04d612653ee5dc03c64e504cbb243d6909ba772b5b92c3eed9bbf03105740  crates/kirje-store/tests/fixtures/authority/registry/account_credential_cleanup/signatures.txt
+60c185a6bac9e90d9e065e7f56075a6997b96ced432cf85d9d91d25afda7dbb5  crates/kirje-store/src/authority.rs
+6480c17d2540e574531c613b91ab140eb6b4916f877586e81f81077e43c86564  crates/kirje-store/tests/authority_registry.rs
+678899fee9cbed74625a56d159d1bf849874f2ae3cd6b4498b4ec048becd2efc  crates/kirje-store/tests/fixtures/authority/registry/account_credential_cleanup/signatures.txt
 5d01739b89246a5f495a965e57e416eee9fd0b5016995add41c6edee7f3e970d  crates/kirje-store/src/authority/schema_v1.sql
 596ddb0071ecb38b0b9429c5d91cdbb83abe6a25bc760cf9588b2764274ff850  Cargo.lock
 ```
@@ -68,11 +77,12 @@ dcd04d612653ee5dc03c64e504cbb243d6909ba772b5b92c3eed9bbf03105740  crates/kirje-s
 - Attempt: `.ai-platform/evidence/T202C3/attempts/T202C3-A002.md`
 - Attempt: `.ai-platform/evidence/T202C3/attempts/T202C3-A003.md`
 - Attempt: `.ai-platform/evidence/T202C3/attempts/T202C3-A004.md`
+- Attempt: `.ai-platform/evidence/T202C3/attempts/T202C3-A005.md`
 - Test results: `.ai-platform/evidence/T202C3/test-results.md`
-- Production commits: `daf22a0`, `2c00f32`, `703b5a1`, `1c6d7cb`
+- Production commits: `daf22a0`, `2c00f32`, `703b5a1`, `1c6d7cb`, `316dae0`
 
 ## Residual Scope
 
-Credential delete remains fail-closed unsupported. `T202C3-A005` is the active
-bounded attempt. Cleanup challenge, claim, and delete remain unimplemented.
-T202C3, T110, and the authority umbrella remain Running.
+Cleanup challenge, claim, and delete remain fail-closed unimplemented. A005
+awaits explicit acceptance before a cleanup packet can become Ready. T202C3,
+T110, and the authority umbrella remain Running.
