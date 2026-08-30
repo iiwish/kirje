@@ -7,7 +7,7 @@
 - Inputs: constitution, spec, plan, work graph, requirements checklist,
   `008-security-baseline` contracts/tasks, current Git state, and interrupted
   T202C2 execution evidence
-- Updated: 2026-08-30
+- Updated: 2026-08-31
 
 ## Executive Result
 
@@ -17,10 +17,13 @@ per-version governance stacks while retaining executor-sized tasks, TDD,
 content-addressed evidence, adversarial review, complete checkpoint gates, and
 human acceptance.
 
-The confirmed checkpoint plan remains internally consistent. The approved
-cleanup amendment closes the eight recorded A006-A008 High findings and the
-independently identified canonical-locator High finding. The A006 challenge
-packet is ready for independent review with production permission `none`; A007
+The confirmed checkpoint plan remains internally consistent. The first A006
+review failed on three High contradictions/implementability gaps. The revised
+amendment addresses those findings through historical-binding precedence,
+clock-only exact recovery, a lower shared credential capability crate,
+reservation/prepare canonicality, and complete issuance race/replacement
+matrices. The A006 challenge packet is ready for repeat independent review with
+production permission `none`; A007
 claim and A008 delete completion remain non-executable just-in-time outlines,
 not Ready packets or implementation permission. One separate Medium
 implementation finding is assigned: the unchanged branch dependency graph contains yanked
@@ -204,21 +207,29 @@ only after their required TDD, full validation, evidence, and three-pass review
 succeed. A delegated record never claims the user personally reviewed unseen
 work and never waives a failed gate.
 
-The confirmed cleanup contract defines the exact canonical private locator
+The revised cleanup contract defines the exact canonical private locator
 transcript and digest, the 14-field tombstone transcript, finalized transition's
 historical-before origin, active/removed account eligibility, blocked/recovery
 failure behavior, and transition-bound legacy locators. Canonical v1 rejects
 transition-less requests and treats a persisted NULL origin as corruption
 without changing schema or core transcript bytes.
 
-The same contract reserves serial ownership for later attempts. A007 owns one
-atomic grant-use/ready-to-claimed transaction, exact/changed retry, expiry,
-response loss, concurrency, the non-Clone/non-Debug/non-Serialize/no-export
-lock-owning cleanup permit, and event 16 adjacent after event 7. A008 owns the
-combined consuming fake-janitor boundary, deleted/no-entry indistinguishability,
-claimed recovery across backend and crash windows, terminal retry, and exactly
-one later event 17. T202C3 owns authority and store-private fake behavior; T204
-owns actual runtime/keyring wiring and end-to-end integration.
+The contract explicitly overrides the generic current-binding rule only for
+cleanup; removal and credential deletion retain current-before binding. Exact
+pending reuse and exact claimed recovery may advance only the paired authority
+clock. A006 also validates the canonical transcript at reservation and
+rederives it from realm plus signed origin-before context before row insertion.
+
+The same contract reserves serial ownership for later attempts. A007 owns the
+new lower `kirje-credential` workspace crate, its opaque locator, sealed janitor
+trait and deterministic test janitor, root/store dependency entries, the
+store-owned lock permit and consuming method, atomic grant-use/ready-to-claimed
+transaction, exact/changed retry, expiry, response loss, concurrency, and event
+16 adjacent after event 7. A008 owns test-janitor delete completion,
+deleted/no-entry indistinguishability, claimed recovery across backend and crash
+windows, terminal retry, and exactly one later event 17. T204 owns the concrete
+keyring janitor, migration from legacy runtime `SecretStore`, runtime wiring,
+and end-to-end integration.
 
 Restart validation rederives origin, locator, tombstone, grant count, event
 cardinality/order/source/context/receipt/time, and privacy invariants. The
@@ -227,9 +238,10 @@ changed grant recovery third, signed-context/clock/expiry next, then current
 eligibility and target lifecycle, while existing store/backend codes remain
 stable.
 
-Result: `T202C3_A006_CONTRACT_READY_FOR_PACKET_REVIEW`. A006 retains production
-permission `none` until independent packet review passes. A007 and A008 remain
-unpacketized, non-executable outlines and are not Ready.
+Result: `T202C3_A006_AMENDMENT_READY_FOR_PACKET_REVIEW`. The three new High
+findings are addressed but remain open until repeat independent review passes.
+A006 retains production permission `none`; A007 and A008 remain unpacketized,
+non-executable outlines and are not Ready.
 
 ## Current Implementation Evidence Check
 
@@ -268,7 +280,18 @@ None.
 
 ### High
 
-None.
+Three A006 review findings remain open pending repeat independent review:
+
+- H-A006-R1-001: current-binding text contradicted historical cleanup origin;
+  revised authorization/FR-013 text makes cleanup the sole exception.
+- H-A006-R1-002: exact pending and claimed recovery lacked a closed mutation
+  set; the revision permits paired-clock-only advancement and requires tests.
+- H-A006-R1-003: the janitor capability crossed store/runtime crates without an
+  implementable owner; the approved lower `kirje-credential` architecture gives
+  A007 and T204 explicit acyclic ownership.
+
+These are proposed fixes, not closed findings. A006 cannot execute until repeat
+review passes.
 
 ### Medium
 

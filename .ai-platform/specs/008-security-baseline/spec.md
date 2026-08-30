@@ -6,7 +6,7 @@
 - Status: Confirmed
 - Target checkpoint: `v1.0.0-alpha.1`
 - Product: Kirje
-- Updated: 2026-08-30
+- Updated: 2026-08-31
 - Source: `007-stable-v1-program`, the accepted v0.3 baseline, and the
   credential, approval, input-boundary, and capability-claim audits performed
   before Mailbox Alpha planning.
@@ -14,8 +14,9 @@
 - Review: The base contract was confirmed on 2026-08-27 after three independent
   security reviews. The user approved the T202C3 cleanup contract revision on
   2026-08-30 and delegated later evidence-based acceptance; this record does
-  not claim personal review of the resulting unseen artifact. The A006 packet
-  remains pending independent review before production permission.
+  not claim personal review of the resulting unseen artifact. The first A006
+  review failed with three High findings; the revised packet remains pending
+  repeat independent review before production permission.
 
 ## Goal
 
@@ -238,7 +239,11 @@ granting mailbox access.
   boundary performs the idempotent janitor call and terminal authority update,
   while delete and already-absent outcomes remain indistinguishable. Crashes or
   backend failure leave a safely retryable claimed tombstone, and an exact
-  deleted retry performs no second janitor call.
+  deleted retry performs no second janitor call. A lower shared credential
+  component owns the opaque locator and sealed janitor implementations; the
+  authority store owns the lock-holding permit and only consuming terminal
+  method, while runtime wires the approved concrete janitor without raw locator
+  access.
 - FR-009: Account status and doctor output expose orthogonal bounded
   `store_state`, `owner_state`, `binding_state`, and `credential_state` fields
   with deterministic combinations, including unregistered, not configured,
@@ -288,13 +293,17 @@ granting mailbox access.
 - FR-013: A persisted authorization challenge includes a versioned signing
   domain, owner realm, applicable account and store identities, action kind,
   immutable target identifier, digest of the complete immutable action manifest,
-  current account binding and policy digest when applicable, owner key identity
-  and epoch, a cryptographically random nonce of at least 128 bits, issuance
+  applicable account binding and policy digest, owner key identity and epoch, a
+  cryptographically random nonce of at least 128 bits, issuance
   time, authorization expiry no more than 15 minutes after issuance, a unique
   authorization-grant identity, and one or more unique remote-effect identities
   when the action can invoke a remote effect. The manifest covers every field
   that can affect the result. Human-readable review fields are derived from
-  that stored manifest and cannot substitute for the signing payload.
+  that stored manifest and cannot substitute for the signing payload. Account
+  removal and credential deletion use their current signed before binding.
+  Credential cleanup is the closed historical exception and uses its finalized
+  origin transition's immutable before binding; later account state cannot
+  rebind it.
 - FR-014: The CLI emits one unambiguous, bounded signing payload and a digest of
   that payload together with the exact bounded action manifest an owner signer
   must independently parse and review. The signed representation is specified

@@ -6,7 +6,7 @@
 - Status: Confirmed
 - Target checkpoint: `v1.0.0-alpha.1`
 - Source spec: `spec.md`
-- Updated: 2026-08-30
+- Updated: 2026-08-31
 - Review authority: delegated project owner
 
 ## Decision Summary
@@ -75,6 +75,25 @@ authority operations exist. Production paths come only from
 `ProjectDirs::from("", "", "kirje")`.
 Tests inject a complete isolated authority home and deterministic entropy only
 through the explicit non-default `test-support` feature.
+
+### Credential Capability Boundary
+
+`kirje-credential` is a lower-level workspace crate jointly consumed by
+`kirje-store` and `kirje-runtime`. It owns the opaque non-`Clone`, non-`Debug`,
+non-serializable `DeleteOnlyLocator`, the privately sealed delete-only janitor
+trait, and the only approved concrete janitors. A007 introduces the crate,
+locator/trait foundation, deterministic test janitor, root workspace/dependency
+entries, and the store dependency. T204 adds the concrete keyring janitor and
+migrates real credential-store ownership out of the legacy runtime
+`SecretStore` implementation.
+
+`kirje-store` owns `CleanupDeletePermit` and the fixed authority apply lock. Its
+only deletion surface consumes the permit and accepts the sealed janitor, so it
+performs janitor deletion plus terminal authority commit as one API. Runtime
+wires the credential crate's concrete janitor into this method without reading,
+constructing from raw fields, inspecting, or exporting locator material. This
+dependency direction is acyclic: credential is lower than store/runtime; store
+depends on credential; runtime depends on both.
 
 ### Runtime
 
@@ -309,8 +328,11 @@ tombstones are transition-bound, including legacy locators. Claim consumes one
 grant and returns an opaque apply-lock-owning delete permit. A combined service
 consumes the permit, calls only the delete-only janitor, and commits deletion;
 it exposes neither a standalone terminal marker nor a deleted-versus-absent
-result. T202C3 proves the authority lifecycle with a store-private fake janitor,
-while T204 wires the real runtime/keyring adapter and end-to-end crash recovery.
+result. A007 creates the lower-level credential crate, opaque locator, sealed
+janitor boundary, deterministic test janitor, store-owned permit, and combined
+store method. T204 adds the credential crate's real keyring janitor, migrates
+the legacy runtime `SecretStore`, and proves end-to-end crash recovery. No
+schema or core transcript changes are part of this architecture decision.
 
 ### D-009 Unified Same-Handle Bounded Input
 
@@ -604,4 +626,10 @@ review findings with RED/GREEN tests, produced validated commit `94f3495`, and
 received explicit user acceptance on 2026-08-30. The v1 program work graph owns remaining
 executable batches and maps all T202C3-T212 acceptance coverage into T110-T112.
 Execution still requires one self-contained packet per risky batch, verified
-RED evidence, review, and explicit user acceptance.
+RED evidence, and all required reviews. On 2026-08-31 the orchestrator exercised
+the user's standing delegated acceptance authority to approve the material
+`kirje-credential` workspace/dependency architecture needed to make the cleanup
+capability implementable. This is an architecture decision, not an
+implementation claim and not a claim that the user personally reviewed the
+resulting artifact. Production remains closed until the applicable packet and
+evidence gates pass.

@@ -3,8 +3,8 @@
 ## Metadata
 
 - Feature ID: `008-security-baseline`
-- Status: T202C3_A006_Contract_Ready_For_Review
-- Updated: 2026-08-30
+- Status: T202C3_A006_Amendment_Ready_For_Review
+- Updated: 2026-08-31
 - Inputs: `spec.md`, `checklists/requirements.md`, `plan.md`, `research.md`,
   `data-model.md`, `contracts/**`, `tasks.md`, project constitution and AGENTS
 - Review basis: local code/dependency inspection plus independent packet,
@@ -13,15 +13,16 @@
 ## Gate Result
 
 - Critical findings: 0 unresolved.
-- High findings: 0 unresolved in the cleanup security contract. The approved
-  amendment closes the eight recorded A006-A008 findings plus the independently
-  identified canonical-locator finding with exact locator/tombstone transcripts,
-  historical-before origin and transition-bound legacy ownership, active-store
-  eligibility, claim/retry/expiry/concurrency identity, an opaque lock-owning
-  permit, a combined fake-janitor delete boundary, exact events 16/17, restart/
-  cardinality/privacy invariants, and closed error precedence. A006 awaits
-  independent packet review with production permission `none`; A007/A008 remain
-  non-executable just-in-time outlines. The 3 A001 T202C1 findings are closed by A002
+- High findings: 3 open pending repeat independent review. The first A006
+  review rejected the current-binding contradiction, incomplete clock-only
+  recovery rule, and non-implementable cross-crate delete capability. The
+  revised amendment makes cleanup the explicit historical-before exception,
+  limits exact pending/claimed recovery to the paired clock, introduces the
+  lower shared `kirje-credential` crate and acyclic store/runtime ownership,
+  hardens reservation/prepare canonicality, and adds complete replacement/race
+  and synthetic-vector contracts. These fixes are proposed, not independently
+  closed. A006 remains `ready_for_review` with production permission `none`;
+  A007/A008 remain non-executable JIT outlines. The 3 A001 T202C1 findings are closed by A002
   and `T202C1_A002_PACKET_REVIEW_PASS`. Historical challenge validation is now
   intrinsic, lifecycle replacement and final-state terminals are distinct, and
   durable grant/event time is store-derived effective authority time with a
@@ -64,11 +65,12 @@ prohibited trait implementation. The T202C1S registry-parent preflight is
 currently called once but has no dedicated test-support query counter; T202C2
 must preserve that placement or add an explicit counter before loop expansion.
 - Execution decision: T201, T202A, T202B, T202C1, T202C1S, and T202C2 are
-  Accepted. T202C3 is contract-ready but non-executable after the user's
+  Accepted. T202C3 has a revised contract under review and remains non-executable after the user's
   acceptance of `T202C3-A005` at production commit `316dae0` and approval of the
-  cleanup security-contract amendment on 2026-08-30. The next attempt,
-  T202C3-A006, awaits independent packet review and has no production execution
-  permission.
+  cleanup security-contract amendment on 2026-08-30. The orchestrator approved
+  the material shared-credential-crate architecture under delegated authority on
+  2026-08-31. The next attempt, T202C3-A006, awaits repeat independent packet
+  review and has no production execution permission.
   T202C4, T202D-T202E, and T203-T212 remain dependency-gated Draft work. T204
   and every later task directly require the T202 umbrella to be Accepted.
 
@@ -143,6 +145,11 @@ The spec, plan, data model, and contracts all state the same guarantee:
 - Config location binds open parent identity and final native component.
 - Authority registry provides store/location and account/binding uniqueness.
 - Keyring locator binds realm/store/account/credential/binding.
+- The acyclic credential capability boundary is implementable: lower
+  `kirje-credential` owns opaque locator plus sealed janitors, `kirje-store`
+  owns the lock-holding permit and consuming combined method, and runtime wires
+  only the credential crate's concrete keyring janitor without raw locator
+  access. A007 owns the foundation/test janitor; T204 owns real integration.
 - Legacy entries are never read/tested/copied; cleanup has delete-only typing.
 - Config v1 migration is locked, bounded, idempotent, quarantined, and
   crash-recoverable on every supported platform without claiming Windows
@@ -497,9 +504,9 @@ T202C2 owns account-create issuance and transitions; T202C3 owns remaining accou
 credential, and delete-only cleanup lifecycles; T202C4 owns six remote challenge
 effects and aggregate T202C validation. These tasks are strict serial because
 they share the authority transaction, validator, event stream, and fixture
-surface. T202C2 is Accepted. The approved cleanup amendment makes the A006
-challenge packet ready for independent review while production permission
-remains closed; A007/A008 remain non-executable outlines. T202C4 plus
+surface. T202C2 is Accepted. The first A006 review failed with three High
+findings; this amendment is ready for repeat review while production permission
+remains closed. A007/A008 remain non-executable outlines. T202C4 plus
 T202D-T202E remain dependency-gated Draft tasks, and T202 remains a Draft
 acceptance umbrella.
 

@@ -25,11 +25,15 @@ governance_inputs:
   approval_gates:
     T202C3_A005: accepted by user on 2026-08-30 at production commit 316dae0
     cleanup_contract: approved by user on 2026-08-30
+    material_architecture: >-
+      Approved by the orchestrator on 2026-08-31 under the user's standing
+      delegated authority; this approves the future kirje-credential workspace
+      boundary, not implementation and not personal user review of this packet.
     delegated_acceptance: >-
       The orchestrator may accept later artifacts only after required TDD,
       validation, evidence, and three reviews; no record may claim the user
       personally reviewed unseen work.
-    packet_review: pending independent review
+    packet_review: first review failed with three High findings; revised packet pending repeat independent review
 
 work_unit:
   title: Issue an exact effect-free credential-cleanup challenge
@@ -37,12 +41,13 @@ work_unit:
   parent: T110 Complete Authority Lifecycles
   security_task: T202C3 Account Credential And Cleanup Lifecycles
   goal: >-
-    Implement only exact effect-free credential_cleanup challenge issuance and
-    pending reuse from one transition-bound ready tombstone. Rederive the
-    canonical private locator and 14-field tombstone digests from immutable
-    authority history, bind the signed manifest to the origin-before account,
-    and add no grant use, claim, delete permit, janitor, keyring, runtime, or
-    external-effect capability.
+    Harden CredentialCleanupReservation construction and account-transition
+    prepare so only the canonical private locator transcript for the signed
+    realm and historical-before origin can be inserted, then implement exact
+    effect-free credential_cleanup challenge issuance, replacement, concurrency,
+    restart, and pending reuse from one transition-bound ready tombstone. Add no
+    transition state-machine change, grant use, claim, delete permit, janitor,
+    keyring, runtime, or external-effect capability.
   depends_on:
     - T202C3-A005 Accepted at production commit 316dae0
     - approved cleanup security contract in 008 canonical artifacts
@@ -56,7 +61,7 @@ work_unit:
 
 codebase_context:
   branch: codex/v1-roadmap-governance
-  baseline_head: 6337e74
+  baseline_head: 43d0d0e
   existing_surfaces:
     - sealed CredentialCleanupManifest and canonical authorization TLV helpers in kirje-core
     - transition-bound private cleanup reservations and cleanup-ready event 15 from accepted A002/A003
@@ -64,6 +69,11 @@ codebase_context:
   implementation_rule: >-
     Existing code supplies storage and parsing mechanics but cannot override the
     canonical security semantics in contract_snapshot.
+
+  review_failures_addressed:
+    - cleanup common binding is historical origin-before, while account remove and credential delete retain current signed-before binding
+    - exact pending reuse and claimed recovery may mutate only the paired authority clock high-water
+    - A007 uses an acyclic shared kirje-credential crate for the opaque locator and sealed janitor boundary
 
 contract_snapshot:
   locator:
@@ -108,25 +118,38 @@ contract_snapshot:
     - Blocked store/account returns account_update_conflict; recovery store returns owner_recovery_required.
     - Manifest expected state is ready and common binding is origin-before historical binding.
     - Later account update/remove/recreation does not rebind the origin.
+  reservation_prepare:
+    - CredentialCleanupReservation::new parses one complete bounded canonical locator transcript, checks caller kind, and derives its digest.
+    - Before row insertion, prepare rederives exact kind/service/username/digest from authority realm and signed historical-before origin.
+    - Malformed constructor input is invalid_input; canonical wrong-origin prepare is authorization_context_stale with zero mutation.
+    - No prepare, commit, finalize, abort, recovery, account, store, event, or clock state-machine rule changes.
   challenge:
     - Issuance and exact pending reuse create zero grant uses, cleanup mutations, effects, invocations, janitor calls, or external calls.
-    - Exact pending reuse consumes no entropy and returns the same bounded challenge after complete validation.
+    - Exact pending reuse consumes no entropy, returns the same challenge, appends no event, changes no lifecycle/event timestamp, and may advance only the paired authority clock.
+    - Valid expired-pending replacement records one predecessor event 5 before one successor event 3 and creates exactly one fresh grant UUID and nonce.
+    - Invalid-target replacement rolls back expiry, successor, events, clock, and entropy; concurrent exact issuance has one creator and clock-only losers.
     - Public projection, errors, logs, events, fixtures, and evidence omit locator material and private fields.
 
 later_attempt_outlines:
   T202C3_A007:
     status: non_executable
     owns:
+      - new crates/kirje-credential workspace member, root/store dependencies, opaque DeleteOnlyLocator, privately sealed CredentialJanitor, and deterministic test janitor
+      - store-owned CleanupDeletePermit and consuming combined method accepting the sealed janitor; runtime has no raw locator access
       - atomic grant use plus ready-to-claimed transition and exact/changed retry, expiry, response loss, and concurrency
       - opaque non-Clone, non-Debug, non-Serialize, no-export CleanupDeletePermit holding the apply lock
       - event 16 source runtime, related grant, use_sha256 context, same receipt/time, adjacent after event 7
+      - exact claimed recovery changes only the paired authority clock after lock reacquisition
   T202C3_A008:
     status: non_executable
     owns:
-      - combined consuming fake-janitor delete boundary with no caller mark_deleted
+      - combined consuming credential-crate test-janitor delete boundary with no caller mark_deleted
       - deleted/no-entry indistinguishability, backend-failure claimed state, crash recovery, and terminal no-recall retry
       - event 17 source runtime, same grant/use/receipt, exactly once after event 16
-  integration_owner: T204 owns real runtime/keyring wiring and end-to-end integration
+  integration_owner: >-
+    T204 owns the kirje-credential concrete keyring janitor, migration from the
+    legacy runtime SecretStore, runtime wiring without raw locator access, and
+    end-to-end integration.
 
 execution_constraints:
   production_permission: none_pending_independent_packet_review
@@ -135,27 +158,30 @@ execution_constraints:
     - crates/kirje-store/src/authority.rs
     - crates/kirje-store/tests/authority_registry.rs
     - crates/kirje-store/tests/fixtures/authority/registry/account_credential_cleanup/**
-    - .ai-platform/evidence/T202C3/**
-    - .ai-platform/specs/007-stable-v1-program/**
-    - .ai-platform/specs/008-security-baseline/tasks.md
   forbidden_changes:
     - authority schema, application ID, user version, Cargo graph, or core transcript bytes/types
     - cleanup claim/delete, permit, janitor, runtime, config, keyring, protocol, CLI, MCP, network, or remote-effect behavior
-    - transition, account, credential, or cleanup semantics outside challenge issuance
+    - transition state-machine behavior outside locator input hardening before cleanup insertion
   write_rules:
     - No production or test edit may begin until independent packet review changes both permissions.
     - After review, write a discriminating focused RED before production changes.
     - A worker edits only future_allowed_files and does not delegate.
-    - Synthetic public signatures may be committed; private keys, seeds, proofs, nonces, locator material, and real account data may not.
+    - A worker writes only production/test/fixture paths above; evidence, SSOT, packet, and status files remain orchestrator-owned.
+    - Deterministic synthetic non-real locator transcript bytes may appear only in authority_registry.rs for canonical byte goldens.
+    - Signature fixtures may contain deterministic synthetic public signatures only and never locator transcripts; evidence/output/logs contain only vector IDs, digests, counts, and pass/fail results.
+    - Real/private locator bytes remain prohibited in every committed file; private keys, seeds, real proofs/nonces, credentials, and real account data are also prohibited.
     - Do not mark A007, A008, T202C3, or T110 Ready or Accepted from this packet.
 
 tdd_plan:
   red:
     - Prove the first exact ready cleanup challenge reaches the unsupported action gate with zero rows/events/clock/entropy beyond the pre-existing origin graph.
     - Add canonical locator and tombstone byte/digest goldens and every one-field mutation negative.
+    - Reject malformed active-v2/legacy-v1 constructor transcripts and canonical wrong-origin prepare before cleanup insertion with zero durable mutation.
     - Add active/removal history, later update/remove/recreation, blocked/recovery, NULL-transition, wrong-origin, duplicate-descriptor, state, restart, corruption, and privacy negatives.
+    - Add exact pending-reuse clock-only, expired-pending replacement, concurrent exact issuance, restart, entropy/event cardinality, and invalid-target rollback matrices.
   green:
-    - Parse and rederive the private locator and tombstone from immutable origin history with bounded streaming validation.
+    - Parse the canonical locator at reservation and rederive/compare kind, service, username, and digest from realm plus signed historical-before origin before row insertion.
+    - Rederive the tombstone from immutable origin history with bounded streaming validation.
     - Admit only exact ready challenge issuance and pending reuse with zero authorization effect.
     - Extend restart validation for the A006 challenge graph without admitting claim/delete rows or events 16/17.
   refactor:
@@ -185,18 +211,20 @@ evidence_contract:
     - canonical locator/tombstone goldens and mutation matrix
     - origin/eligibility/state/restart/corruption/privacy matrices
     - zero grant-use/effect/claim/delete/external-call proof
+    - clock-only reuse, replacement/concurrency entropy/event, invalid-target rollback, and reservation/prepare matrices
     - schema and Cargo.lock unchanged hashes
     - spec, engineering, and QA reviews with residual risk
   prohibited:
-    - credentials, addresses, endpoints, private keys, seeds, proofs, nonces, locator material, mailbox content, or real provider data
+    - raw locator transcript bytes; evidence names synthetic vector IDs and digests only
+    - credentials, addresses, endpoints, private keys, seeds, real proofs/nonces, mailbox content, or real provider data
 
 review_contract:
   pass_1_spec_compliance:
-    - exact transcripts, historical-before origin, transition-bound legacy, ready eligibility, and no core/schema change
+    - exact transcripts, explicit cleanup-only historical-before binding exception, transition-bound legacy, ready eligibility, and no core/schema change
   pass_2_engineering:
-    - strict bounds, streaming restart derivation, error precedence, pending reuse, zero-effect transaction, and privacy/capability closure
+    - strict bounds, reservation/prepare canonicality, streaming restart derivation, error precedence, clock-only pending reuse, replacement/concurrency rollback, zero-effect transaction, and privacy/capability closure
   pass_3_qa:
-    - golden/mutation, active/removed/later-history, blocked/recovery, NULL transition, corruption, restart, response loss, and zero-external-call coverage
+    - golden/mutation, malformed reservation/prepare, active/removed/later-history, blocked/recovery, NULL transition, corruption, clock-only reuse, expired replacement, concurrent issuance/restart, response loss, and zero-external-call coverage
   packet_pass_condition:
     - no unresolved Critical, High, or Medium finding
     - independent reviewer explicitly authorizes production and test execution in a governance follow-up
@@ -205,7 +233,7 @@ review_contract:
     - orchestrator may then record delegated acceptance without claiming user personal review
 
 handoff:
-  current_state: contract approved; packet ready_for_review; production and test permission none
+  current_state: revised amendment ready_for_review after failed first review; production and test permission none
   after_packet_review: A006 Ready only if an independent review explicitly changes both permissions
   after_execution: A006 review_complete or delegated Accepted from evidence; A007 may then be packetized just in time
   commit_policy:
@@ -217,4 +245,5 @@ stop_conditions:
   - Production or test work is requested while permission remains none.
   - A required change touches schema, core transcripts/types, dependencies, runtime, keyring, protocol, CLI, MCP, network, or external calls.
   - Locator material or private origin values would enter output, events, logs, fixtures, evidence, Debug, serialization, cloning, or byte export.
+  - Synthetic locator transcript bytes would appear outside authority_registry.rs, or any real/private locator bytes would enter a committed file.
   - A second same-cause contract or validation failure occurs.

@@ -5,7 +5,7 @@
 - Feature ID: `008-security-baseline`
 - Status: Confirmed
 - Contract name: `kirje.authority-store.v1`
-- Updated: 2026-08-28
+- Updated: 2026-08-31
 - Normative schema: `../data-model.md#authority-sqlite-v1`
 
 ## Scope And Ownership
@@ -1204,6 +1204,20 @@ ID, historical binding digest, and historical display ID are never rebound to a
 later current snapshot. A later update, removal, or same-display recreation
 therefore cannot redirect the tombstone.
 
+The invariant begins before reservation. `CredentialCleanupReservation::new`
+parses one complete locator transcript, enforces its tag/UTF-8/NUL/length and
+closed kind/service/username shape, requires the caller's locator kind to equal
+the transcript kind, and computes `locator_sha256` from the complete canonical
+bytes. Malformed construction is `invalid_input`. Before transition prepare
+inserts a cleanup row or mutates grant/store/account/transition/event/clock
+state, the store loads realm plus the signed historical-before origin candidate,
+rederives the exact active-v2 or legacy-v1 service and username, and compares
+kind, canonical transcript, and digest with the sealed reservation and signed
+descriptor. A canonical but wrong-origin reservation is
+`authorization_context_stale` with zero durable mutation. This is transition
+input hardening only; A006 does not change prepare, commit, finalize, abort, or
+recovery state-machine behavior.
+
 The private locator row contains exactly the canonical
 `KIRJE-DELETE-ONLY-LOCATOR-V1\0` transcript from the account-config contract.
 `active_v2` rederives the exact V2 service and lowercase username from the
@@ -1261,10 +1275,28 @@ is `credential_cleanup_invalid`.
 
 Issuance is effect-free: it consumes no grant, changes no cleanup row, and
 creates no effect, invocation, or external-call capability. Exact pending reuse
-returns the same bounded challenge without entropy or mutation after the same
-history and eligibility checks. No public projection, event, log, fixture, or
-error contains the private locator transcript, service, username, or one of its
-raw fields.
+returns the same bounded challenge without entropy after the same history and
+eligibility checks. It may advance only the paired authority clock high-water;
+it never changes challenge, cleanup, lifecycle, or event timestamps and never
+appends an event. No public projection, event, log, fixture, or error contains
+the private locator transcript, service, username, or one of its raw fields.
+
+An expired matching pending cleanup challenge is replaced under the same
+global challenge transaction rule. One valid replacement atomically changes
+the predecessor pending challenge to expired, appends its one event 5, creates
+one successor with a fresh grant UUID and nonce, and appends one event 3 after
+the predecessor terminal event. Both events use the transaction's effective
+time; no cleanup, grant-use, effect, or external row is written. If historical
+origin, locator, tombstone, or current eligibility validation fails, the entire
+replacement attempt rolls back, including tentative expiry/event/clock work,
+and consumes no replacement entropy.
+
+Concurrent exact issuance has one creator. The winner commits one challenge,
+one grant identity, one nonce, and one event 3. Every loser reopens the winning
+pending row, returns its exact immutable projection, consumes no entropy,
+appends no event, and may advance only the paired clock high-water. Restart
+performs the same intrinsic validation and exact reuse without creating a
+second lifecycle interval.
 
 #### Claim And Permit
 
@@ -1296,9 +1328,10 @@ capability. A concurrent different grant loses with
 
 A post-commit response loss is recoverable only by the exact same grant-use and
 cleanup identity. Exact claimed recovery validates the complete durable graph,
-reacquires the same apply lock, and only then may issue a fresh opaque permit;
-it appends no event and changes no row or lifecycle timestamp. Changed reuse of
-the same grant is `grant_already_used`. Exact recovery after deletion returns
+reacquires the same apply lock, and only then may issue a fresh opaque permit.
+It may advance only the paired authority clock high-water, appends no event,
+and changes no cleanup, grant, challenge, lifecycle, or event timestamp. Changed
+reuse of the same grant is `grant_already_used`. Exact recovery after deletion returns
 the immutable terminal projection with no permit. First use after expiry
 durably applies the ordinary authorized-unclaimed expiry transaction and
 returns `authorization_expired`; exact committed claim or deletion remains
@@ -1307,13 +1340,13 @@ historical and is checked before expiry.
 #### Consuming Delete Boundary
 
 The only deletion API is one combined operation that consumes
-`CleanupDeletePermit`, invokes the crate-private delete-only janitor, and, after
-success, commits `claimed -> deleted`. There is no caller-accessible
+`CleanupDeletePermit`, invokes the lower credential crate's sealed delete-only
+janitor, and, after success, commits `claimed -> deleted`. There is no caller-accessible
 `mark_deleted` method. The janitor receives only `DeleteOnlyLocator`, performs
 one idempotent delete, and collapses `Deleted` and `NoEntry` into the same
-success with no presence signal. T202C3 proves this boundary with a store-
-private fake janitor; T204 owns real runtime/keyring adapter wiring and the
-end-to-end crash integration.
+success with no presence signal. A007 proves this boundary with the credential
+crate's deterministic test janitor; T204 owns its real keyring implementation,
+legacy runtime-store migration, and end-to-end crash integration.
 
 Backend failure returns its existing stable backend error, retains `claimed`,
 sets no `deleted_at`, and appends no event. Success sets `deleted_at` to the

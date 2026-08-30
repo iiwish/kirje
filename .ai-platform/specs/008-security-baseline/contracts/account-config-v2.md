@@ -5,7 +5,7 @@
 - Feature ID: `008-security-baseline`
 - Status: Confirmed
 - Contract name: `kirje.account-config.v2`
-- Updated: 2026-08-27
+- Updated: 2026-08-31
 
 ## Purpose
 
@@ -368,7 +368,10 @@ transition returns a stable conflict before any keyring call.
 
 ## Credential Ports
 
-Active and cleanup capabilities are separate:
+Active and cleanup capabilities are separate. `ActiveSecretStore` remains a
+runtime-facing port. The lower-level workspace crate `crates/kirje-credential`
+is jointly consumed by `kirje-store` and `kirje-runtime` and owns the cleanup
+capability types:
 
 ```rust
 trait ActiveSecretStore {
@@ -378,17 +381,35 @@ trait ActiveSecretStore {
     fn delete_active(&self, locator: &ActiveCredentialLocator) -> Result<(), MailError>;
 }
 
-trait CredentialJanitor {
+pub struct DeleteOnlyLocator { /* private canonical fields */ }
+
+pub trait CredentialJanitor: private::Sealed + Send + Sync {
     fn delete_only(&self, locator: DeleteOnlyLocator) -> Result<DeleteOutcome, MailError>;
 }
 ```
 
-`DeleteOnlyLocator` exposes no public bytes and no conversion to
-`ActiveCredentialLocator`. The janitor port is crate-private and is reachable
-only from the combined cleanup apply boundary described below; a caller cannot
-invoke it and then independently mark authority state deleted. `delete_only`
-treats a deleted entry and an entry that was already absent as one
-indistinguishable success result. It exposes no presence distinction.
+`DeleteOnlyLocator` is opaque, non-`Clone`, non-`Debug`, non-serializable, and
+has no raw field/byte export or conversion to `ActiveCredentialLocator`.
+`kirje-credential` exposes the checked constructor needed by store from the
+complete canonical locator transcript plus its expected kind/digest; successful
+construction retains the private parsed service/username for janitor use. The
+runtime contract prohibits calling that constructor, and dependency/source
+tests reject constructor or raw-locator imports from runtime.
+`CredentialJanitor` is public only so the store's consuming generic boundary can
+accept it, but its private supertrait permits implementations solely inside
+`kirje-credential`. A007 introduces the type, sealed trait, deterministic test
+janitor, workspace member, and store dependency. T204 adds the concrete keyring
+janitor and moves real credential-store ownership from the legacy runtime
+`SecretStore` implementation into this crate.
+
+`kirje-store` owns opaque `CleanupDeletePermit`, including the fixed apply-lock
+guard and one `DeleteOnlyLocator`. Its only terminal API consumes that permit
+and accepts `&impl CredentialJanitor`; it calls delete and records terminal
+authority state as one boundary. Runtime provides the concrete janitor without
+accessing, constructing, inspecting, or exporting the locator and cannot mark
+cleanup deleted independently; source/compile contract tests enforce those
+forbidden imports and calls. `delete_only` treats a deleted entry
+and an entry that was already absent as one indistinguishable success result.
 
 ## Credential Locator Transcripts
 
@@ -408,6 +429,13 @@ trailing bytes. Service is 1..128 bytes and characters, username is 1..1024
 bytes and characters, and the complete transcript is 1..4096 bytes.
 `locator_sha256` is SHA-256 of the complete domain-prefixed transcript, never a
 hash of an implementation struct, concatenated strings, or only the username.
+
+Canonical byte goldens may commit deterministic, clearly synthetic, non-real
+locator transcript bytes only inside Rust test source. Signature fixtures never
+contain locator transcripts. Evidence, output, events, errors, and logs record
+only synthetic vector IDs, expected digests, cardinalities, and pass/fail
+results. Real or private locator bytes are prohibited from every committed
+source, fixture, evidence, or generated artifact.
 
 The closed locator forms are:
 
@@ -709,7 +737,12 @@ presence in another account/store.
 - copied config/store/location conflicts with zero keyring calls
 - no legacy get/contains calls in migration, status, doctor, or authentication
 - credential set/delete/update crash windows and unreachable orphan behavior
-- delete-only type and idempotent absence behavior
+- canonical active-v2/legacy-v1 reservation constructor and origin-rederived
+  prepare rejection before row insertion
+- lower credential crate dependency direction, opaque locator trait negatives,
+  sealed external-implementation failure, test/keyring janitor ownership, and
+  runtime no-constructor/no-raw-locator source scan
+- delete-only combined permit method and idempotent absence behavior
 - remove/recreate same display ID with no old operation/index inheritance
 - account status golden output and secret/locator/digest scan
 - MCP exact allowlist and no account/secret mutation schema

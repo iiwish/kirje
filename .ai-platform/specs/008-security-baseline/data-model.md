@@ -5,7 +5,7 @@
 - Feature ID: `008-security-baseline`
 - Status: Confirmed
 - Schema targets: account config v2, authority SQLite v1, operation ledger v3
-- Updated: 2026-08-28
+- Updated: 2026-08-31
 
 ## Identity Types
 
@@ -1200,6 +1200,12 @@ with one effective time and `use_sha256`; one later event 17 proves deletion
 against the same grant, receipt, and context digest. Restart rejects any
 cardinality, ordering, timestamp, transcript, origin, or privacy mismatch as
 authority corruption.
+
+Exact pending challenge reuse and exact claimed recovery append no event and
+change no challenge, cleanup, grant, lifecycle, or event timestamp. They may
+advance only the paired `authority_meta` clock high-water. Expired-pending
+replacement records one predecessor event 5 before one successor event 3; an
+invalid-target replacement rolls the entire transaction back.
 
 ## Credential Locator V2
 

@@ -47,6 +47,9 @@ three review passes with no blocking finding.
 
 ## Residual Risk
 
-No unresolved contract-level Critical, High, or Medium finding is known before
-independent packet review. Implementation remains prohibited until that review
-explicitly changes the packet permissions.
+The first independent spec/engineering/QA review failed this amendment with
+three High findings: contradictory current-versus-historical cleanup binding,
+incomplete clock-only reuse/recovery semantics, and a cross-crate delete
+capability that could not be implemented under Rust visibility/dependency
+rules. The follow-up governance fix is recorded in
+`T202C3-A006-contract-A002.md`. Implementation remains prohibited.

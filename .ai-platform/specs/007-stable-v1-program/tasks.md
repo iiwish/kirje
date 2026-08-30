@@ -5,7 +5,7 @@
 - Feature ID: `007-stable-v1-program`
 - Status: Confirmed
 - Source: `spec.md`, `plan.md`
-- Updated: 2026-08-30
+- Updated: 2026-08-31
 - Target release: `v1.0.0`
 
 ## Scheduling Rules
@@ -138,11 +138,13 @@ T202C3-A002 account-update transition is accepted at commit `2c00f32`.
 `T202C3-A004` credential-set transition is accepted at commit `1c6d7cb`.
 `T202C3-A005` credential-delete transition is accepted at commit `316dae0` by
 explicit user decision on 2026-08-30. The user approved the T202C3 cleanup
-security-contract amendment. It closes the locator/tombstone, historical
-origin, legacy ownership, challenge eligibility, claim/permit, crash/terminal,
-event, restart/privacy, and error-precedence decisions. `T202C3-A006` now awaits
-independent packet review with production permission `none`; A007 claim and
-A008 delete completion remain non-executable just-in-time outlines.
+security-contract amendment. The first independent A006 review rejected the
+packet with three High findings. The revised contract makes cleanup the explicit
+historical-binding exception, limits exact reuse/recovery to paired-clock-only
+mutation, introduces the lower shared `kirje-credential` capability crate, and
+hardens locator reservation/prepare before row insertion. `T202C3-A006` remains
+`ready_for_review` with production permission `none`; A007 claim and A008 delete
+completion remain non-executable just-in-time outlines.
 Priority: P0
 Depends on: T109 Accepted
 Blocks: T111
@@ -158,11 +160,15 @@ remote challenges, effect claims, owner rotation/recovery, audit export, and
 their fail-closed restart contracts.
 
 Allowed files:
+- `Cargo.toml`
+- `Cargo.lock`
+- `crates/kirje-credential/**`
 - `crates/kirje-core/src/account.rs`
 - `crates/kirje-core/src/authorization.rs`
 - `crates/kirje-core/src/operation.rs`
 - `crates/kirje-core/tests/**`
 - `crates/kirje-store/src/authority.rs`
+- `crates/kirje-store/Cargo.toml`
 - `crates/kirje-store/src/authority/schema_v1.sql`
 - `crates/kirje-store/tests/authority_*.rs`
 - `crates/kirje-store/tests/fixtures/authority/**`
@@ -214,11 +220,13 @@ Evidence required:
    prepare through terminal state, permanent credential-history retention,
    immutable account/store versioning, and the no-cleanup/no-keyring boundary
    at commit `316dae0`; the user explicitly accepted A005 on 2026-08-30.
-   The approved cleanup security-contract amendment closes the nine recorded
-   challenge/claim/delete findings. `T202C3-A006` is ready for independent packet
-   review but retains production permission `none`. A007 claim and A008 delete
-   completion remain non-executable just-in-time outlines and become packetizable
-   only after their serial predecessor passes all gates.
+   The revised cleanup contract addresses the nine original findings plus the
+   three High findings from the first A006 review. `T202C3-A006` owns locator
+   reservation/prepare hardening and effect-free challenge issuance and is ready
+   for repeat independent packet review with production permission `none`.
+   A007 owns the shared credential capability crate, test janitor, store permit,
+   claim and event 16. A008 owns test-janitor delete completion and event 17.
+   Both remain non-executable JIT outlines until their serial predecessor passes.
 2. `T202C4`: remote challenge registry binding and planner-owned effect row.
 3. `T202D`: effect claim, invocation permit, observation, and ambiguity.
 4. `T202E`: owner rotation/recovery, audit, and aggregate authority acceptance.

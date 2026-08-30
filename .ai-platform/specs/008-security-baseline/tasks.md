@@ -6,7 +6,7 @@
 - Status: Confirmed
 - Target checkpoint: `v1.0.0-alpha.1`
 - Source: `spec.md`, `plan.md`, `research.md`, `data-model.md`, `contracts/**`
-- Updated: 2026-08-30
+- Updated: 2026-08-31
 - Review authority: delegated project owner
 
 ## Scheduling Rules
@@ -33,6 +33,11 @@
   unseen artifact. A failed or missing gate remains blocking. External
   publication, live-provider, mailbox, and credential operations remain
   forbidden while unattended.
+- On 2026-08-31 the orchestrator exercised that delegated authority to approve
+  the material `kirje-credential` workspace/dependency architecture after the
+  first A006 packet review proved the prior cross-crate capability impossible.
+  The decision is not implementation evidence; A006/A007 remain closed until
+  their independent packet and execution gates pass.
 - No task may expose credentials, owner private keys, signatures, mailbox
   content, account addresses, endpoints, UIDs, or raw provider responses in
   committed fixtures/evidence.
@@ -723,12 +728,15 @@ boundary. `T202C3-A005` is accepted at production commit `316dae0` and owns the
 exact credential-delete authority transition, retained credential history,
 immutable after versions, and the no-cleanup/no-keyring boundary. The user
 explicitly accepted A005 on 2026-08-30 and approved the cleanup security-
-contract amendment. The confirmed contracts define the canonical locator and
+contract amendment. The first independent A006 packet review found three High
+gaps: a current-binding contradiction, incomplete clock-only recovery rules,
+and a non-implementable cross-crate janitor capability. This amendment defines the canonical locator and
 tombstone transcripts, historical origin, transition-bound legacy ownership,
 challenge eligibility, claim identity/retry/expiry/concurrency, opaque permit,
 combined deletion boundary, crash recovery, events 16/17, restart/cardinality/
-privacy invariants, and closed error precedence. `T202C3-A006` is an execution
-packet awaiting independent packet review with production permission still
+privacy invariants, closed error precedence, lower credential crate, and
+reservation-time canonicality. `T202C3-A006` is a revised execution packet
+awaiting independent packet review with production permission still
 `none`. A007 claim and A008 delete-completion are non-executable just-in-time
 outlines; neither is Ready or packetized.
 Priority: P0
@@ -747,6 +755,10 @@ all removed identities and bind private locator tombstones to a closed delete-on
 cleanup lifecycle with no read/probe/copy/export/set capability.
 
 Allowed files:
+- `Cargo.toml`
+- `Cargo.lock`
+- `crates/kirje-credential/**`
+- `crates/kirje-store/Cargo.toml`
 - `crates/kirje-store/src/lib.rs`
 - `crates/kirje-store/src/authority.rs`
 - `crates/kirje-store/tests/authority_registry.rs`
@@ -768,12 +780,20 @@ Test targets:
 - Fake-janitor pre-call/post-call/pre-terminal crash windows, backend failure,
   deleted/no-entry indistinguishability, terminal no-recall, and exact event-17
   order/cardinality
+- Reservation constructor and pre-insert prepare rejection for malformed or
+  wrong-origin active-v2/legacy-v1 transcripts with zero durable mutation
+- Exact pending-reuse and claimed-recovery clock-only mutation; expired-pending
+  replacement and concurrent exact issuance entropy/event/restart matrices
+- A007 workspace/dependency-cycle check, opaque-type compile negatives, sealed
+  external-implementation failure, and deterministic credential-crate janitor
+  call log
 
 Validation commands:
 ```bash
 cargo test -p kirje-store --test authority_registry --all-features --locked
+cargo test -p kirje-credential -p kirje-store --all-features --locked
 cargo test -p kirje-store --all-features --locked
-cargo clippy -p kirje-store --all-targets --all-features --locked -- -D warnings
+cargo clippy -p kirje-credential -p kirje-store --all-targets --all-features --locked -- -D warnings
 ```
 
 Definition of Done:
@@ -787,12 +807,17 @@ Packet path:
 The 007 v1 work graph owns executable just-in-time attempt packets for T110;
 there is no separate `008-security-baseline/packets/T202C3.yaml`.
 
-Attempt ownership is serial: A006 owns effect-free cleanup challenge issuance;
-A007 owns atomic grant use, ready-to-claimed transition, opaque permit and event
-16; A008 owns the combined fake-janitor delete/terminal boundary and event 17.
+Attempt ownership is serial: A006 owns canonical locator validation at
+reservation/prepare plus effect-free cleanup challenge issuance, without
+changing transition state-machine behavior. A007 owns the new lower-level
+`kirje-credential` workspace crate, root/store dependency entries, opaque
+locator, sealed janitor trait and deterministic test janitor, store-owned permit
+and combined method, atomic grant use, ready-to-claimed transition, and event
+16. A008 owns the combined test-janitor delete/terminal behavior and event 17.
 Only a reviewed predecessor may unlock the next outline. T202C3 owns no real
-keyring adapter. T204 owns runtime/keyring wiring and end-to-end integration and
-must preserve every final 1.0 cleanup invariant.
+keyring janitor. T204 owns the credential crate's real keyring implementation,
+legacy runtime `SecretStore` migration, runtime wiring, and end-to-end
+integration and must preserve every final 1.0 cleanup invariant.
 
 Evidence required:
 - `.ai-platform/evidence/T202C3/summary.md`
@@ -1138,10 +1163,16 @@ Goal:
 Replace display-ID upsert and credential addressing with strict config v2,
 stable store/account/credential IDs, v1 quarantine migration, locked CAS writes,
 pinned store/account registry transitions, active/delete-only keyring ports, and
-stable account references in the local message index. It also constructs the
+stable account references in the local message index. Add the concrete keyring
+janitor inside `kirje-credential`, migrate real credential-store ownership from
+the legacy runtime `SecretStore`, and wire runtime to the store's consuming
+cleanup method without raw locator access. The task also constructs the
 immutable `LedgerV3MigrationContext` consumed by T205.
 
 Allowed files:
+- `Cargo.toml`
+- `Cargo.lock`
+- `crates/kirje-credential/**`
 - `crates/kirje-core/src/account.rs`
 - `crates/kirje-core/src/lib.rs`
 - `crates/kirje-core/src/mail.rs`
@@ -1161,6 +1192,8 @@ Forbidden changes:
 - Display-ID upsert or mutation
 - Credential bytes in config, manifest, arguments, output, logs, tests, or
   evidence
+- A second locator type, unsealed janitor implementation surface, caller-owned
+  terminal marker, or runtime raw-locator constructor/export
 
 Test targets:
 - Strict config v2 parsing/state/duplicates/unrecognized fields/size/newer version
@@ -1175,7 +1208,11 @@ Test targets:
 - Active locator digest and zero active use of legacy locator
 - Set/delete/binding-change crash order and delete-only cleanup capability
 - Runtime/keyring wiring for the reviewed cleanup claim/permit/combined-apply
-  contract, including exact retry after every janitor/terminal crash window
+  contract, including concrete `kirje-credential` keyring janitor, legacy
+  runtime-store migration, and exact retry after every janitor/terminal crash
+  window
+- Runtime dependency/source scan proving no locator constructor, canonical raw
+  transcript, direct janitor delete, or terminal marker access
 - Status orthogonal states/privacy
 - Message-index migration to stable account ID and same-display-ID recreation
   isolation
@@ -1186,8 +1223,9 @@ Deliverables:
 - Config v2 repository/migration, account service, bound secret ports, registry
   integration, and stable message-index migration
 - Config/account/status and fake-keyring contract fixtures
-- Real runtime/keyring adapter wiring for the T202C3 authority cleanup state
-  machine; no second claim, permit, janitor, or terminal-state API
+- Concrete keyring janitor implemented only inside `kirje-credential`, plus
+  runtime wiring for the T202C3 authority cleanup state machine; no second
+  claim, locator, permit, janitor trait, or terminal-state API
 
 Acceptance criteria:
 - Every legacy account is quarantined with zero legacy read/presence calls.
@@ -1203,8 +1241,8 @@ TDD plan:
 
 Validation commands:
 ```bash
-cargo test -p kirje-core -p kirje-runtime -p kirje-store --all-features --locked
-cargo clippy -p kirje-core -p kirje-runtime -p kirje-store --all-targets --all-features --locked -- -D warnings
+cargo test -p kirje-core -p kirje-credential -p kirje-runtime -p kirje-store --all-features --locked
+cargo clippy -p kirje-core -p kirje-credential -p kirje-runtime -p kirje-store --all-targets --all-features --locked -- -D warnings
 ```
 
 Definition of Done:

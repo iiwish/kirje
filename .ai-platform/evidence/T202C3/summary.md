@@ -2,8 +2,8 @@
 
 ## Status
 
-Cleanup contract approved; A006 packet awaits independent review with no
-production permission. `T202C3-A001` challenge issuance is reviewed at production commit
+Cleanup amendment revised after a failed first A006 packet review; repeat
+independent review is pending with no production permission. `T202C3-A001` challenge issuance is reviewed at production commit
 `daf22a0`. `T202C3-A002` account-update transition execution is accepted at
 production commit `2c00f32` by explicit user decision on 2026-08-30.
 `T202C3-A003` account-remove transition execution is accepted at production
@@ -80,16 +80,20 @@ registry test, and synthetic public-signature fixture.
 - Attempt: `.ai-platform/evidence/T202C3/attempts/T202C3-A004.md`
 - Attempt: `.ai-platform/evidence/T202C3/attempts/T202C3-A005.md`
 - Contract amendment: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract.md`
+- Contract fix: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract-A002.md`
 - Test results: `.ai-platform/evidence/T202C3/test-results.md`
 - Production commits: `daf22a0`, `2c00f32`, `703b5a1`, `1c6d7cb`, `316dae0`
 
 ## Residual Scope
 
 Cleanup challenge, claim, and delete remain fail-closed unimplemented. The
-approved contract defines the canonical locator and tombstone transcripts,
+revised contract defines the canonical locator and tombstone transcripts,
 historical origin and transition-bound legacy ownership, exact claim/permit and
 delete crash behavior, events 16/17, restart/privacy invariants, and closed
-error precedence. `T202C3-A006` is `ready_for_review`; production and test
+error precedence. It also defines clock-only exact recovery, reservation-time
+canonicality, expired replacement/concurrency rollback, synthetic-vector
+privacy, and the shared credential capability crate. `T202C3-A006` is
+`ready_for_review`; production and test
 permission remain `none` until independent packet review passes. A007 claim and
 A008 delete completion remain non-executable just-in-time outlines. T202C3 and
 T110 are not Accepted; the authority umbrella remains Draft.

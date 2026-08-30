@@ -5,7 +5,7 @@
 - Feature ID: `008-security-baseline`
 - Status: Confirmed
 - Contract name: `kirje.authorization.v1`
-- Updated: 2026-08-28
+- Updated: 2026-08-31
 
 ## Security Property
 
@@ -465,9 +465,12 @@ Common-context presence is also closed:
 
 Remote actions use the digest of the complete evaluated policy. In v0.3.1 the
 canonical no-additional-restrictions policy is the digest of the exact bytes
-`KIRJE-POLICY-DEFAULT-V1\0`; no absent/implicit default is permitted. For
-account update/create/credential set, common binding is the proposed binding;
-for removal/deletion/cleanup it is the current binding. Any other presence or
+`KIRJE-POLICY-DEFAULT-V1\0`; no absent/implicit default is permitted. Account
+create/update and credential set use the proposed binding. Account
+remove and credential delete use the current signed before binding. Credential
+cleanup is the sole historical-origin exception: its common binding is the
+finalized origin transition's immutable before binding even when the account
+has since advanced or been removed. Any other binding selection, presence, or
 effect count fails before challenge persistence.
 
 Core exposes a closed `ManifestSupport` value in each action policy. The six
