@@ -73,6 +73,6 @@ dcd04d612653ee5dc03c64e504cbb243d6909ba772b5b92c3eed9bbf03105740  crates/kirje-s
 
 ## Residual Scope
 
-Credential delete remains fail-closed unsupported. Cleanup challenge, claim,
-and delete remain unimplemented. Credential delete is the next bounded attempt
-pending packet review. T202C3, T110, and the authority umbrella remain Running.
+Credential delete remains fail-closed unsupported. `T202C3-A005` is the active
+bounded attempt. Cleanup challenge, claim, and delete remain unimplemented.
+T202C3, T110, and the authority umbrella remain Running.

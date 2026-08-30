@@ -711,9 +711,11 @@ account-remove transition, preserved removed history, store-only after
 versioning, and cleanup readiness. `T202C3-A004` is reviewed at production
 commit `1c6d7cb` and owns the exact credential-set transition, existing
 credential identity, immutable after versions, and no-cleanup/no-keyring
-boundary. A004 is explicitly accepted on 2026-08-30. Credential delete is the
-next bounded attempt pending packet review; cleanup claim/delete remain later
-serial attempts, and no later attempt is Ready.
+boundary. A004 is explicitly accepted on 2026-08-30. `T202C3-A005` is Ready and
+owns only credential-delete authority prepare through terminal state, retained
+credential history, immutable after versions, and the no-cleanup/no-keyring
+boundary. Cleanup challenge/claim/delete remain later serial attempts, and no
+later attempt is Ready.
 Priority: P0
 Story / Requirement: US-001, US-003; FR-003-FR-009, FR-016; NFR-001-NFR-003,
 NFR-006, NFR-007

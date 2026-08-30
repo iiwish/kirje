@@ -176,8 +176,12 @@ authorized/bound after projection. Abort restores the predecessor receipt and
 tuple, while unsafe observation remains fail-closed recovery. Fault rollback,
 expiry, replay, restart, target mismatch, and kind corruption are covered. No
 unresolved Critical, High, or Medium finding remains. The user explicitly
-accepted A004 on 2026-08-30. Credential delete is the next bounded attempt
-pending packet review; cleanup remains excluded and no later attempt is Ready.
+accepted A004 on 2026-08-30. `T202C3-A005` is Ready with no blocking packet
+finding. It owns only credential-delete authority prepare through terminal
+state, expiry, replay, restart, and immutable version validation. Historical
+credential identity remains reserved, `active_locator_sha256` remains sealed in
+the manifest, and authority adds no keyring or cleanup operation. Cleanup
+challenge/claim/delete remain excluded and no later attempt is Ready.
 
 ## Current Implementation Evidence Check
 
