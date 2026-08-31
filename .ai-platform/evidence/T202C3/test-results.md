@@ -399,5 +399,12 @@ F012 is governance-only and has no production RED/GREEN result. It preserves
 F006 and the trusted-local boundary while adding exact direct ancestry, per-edge
 and cumulative path/status/mode closure, and exact nested integration evidence.
 The future implementation still requires the same focused RED/GREEN and all ten
-ordered validation entries. All permissions remain closed pending three F012
-packet reviews and standalone A12 authorization/dispatch.
+ordered validation entries. Review returned spec BLOCK C0/H0/M1/L0,
+engineering/security BLOCK C0/H1/M1/L0, and QA BLOCK C0/H0/M1/L0. No dispatch or
+implementation exists.
+
+F013 is governance-only and has no production RED/GREEN result. It removes I13
+self-reference from integration evidence, makes ancestry tests executable, and
+moves all I13-dependent checks to standalone post-commit orchestrator acceptance.
+The integration status remains pending until that gate passes. All permissions
+remain closed pending three F013 packet reviews and standalone A13 dispatch.

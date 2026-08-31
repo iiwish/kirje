@@ -29,10 +29,13 @@
   orchestrator approved F011's trusted-local procedural clarification. F011
   review returned spec PASS C0/H0/M0/L0, engineering/security BLOCK
   C0/H1/M1/L0, and QA PASS C0/H0/M0/L0. The orchestrator approved F012's exact
-  phase-scope clarification. The substantive F006 public rows, workspace gates,
+  phase-scope clarification. F012 review returned spec BLOCK C0/H0/M1/L0,
+  engineering/security BLOCK C0/H1/M1/L0, and QA BLOCK C0/H0/M1/L0. The
+  orchestrator approved F013's non-self-referential integration clarification.
+  The substantive F006 public rows, workspace gates,
   phase-specific challenge precedence, and exact-scope manifest preflight remain
   unchanged. This records delegated contract approval, not user review of the
-  unseen F012 artifact.
+  unseen F013 artifact.
 
 ## Goal
 

@@ -281,8 +281,9 @@ engineering/security C0/H1/M2/L0, and QA C0/H1/M1/L0. Under delegated authority,
 F010 review returned spec PASS C0/H0/M0/L0, engineering/security BLOCK
 C0/H3/M3/L0, and QA BLOCK C0/H1/M2/L0. F011 review returned spec PASS
 C0/H0/M0/L0, engineering/security BLOCK C0/H1/M1/L0, and QA PASS C0/H0/M0/L0.
-The orchestrator approved F012's exact phase-scope clarification. The immutable
-F012 packet is ready for three
+F012 review returned spec BLOCK C0/H0/M1/L0, engineering/security BLOCK
+C0/H1/M1/L0, and QA BLOCK C0/H0/M1/L0. The orchestrator approved F013's
+non-self-referential integration clarification. The immutable F013 packet is ready for three
 independent reviews; no authorization record exists and every code permission
 is closed. The packet is the canonical execution detail. A007/A008 remain
 non-executable.

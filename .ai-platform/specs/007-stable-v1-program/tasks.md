@@ -29,8 +29,10 @@
   C0/H3/M3/L0, and QA BLOCK C0/H1/M2/L0. The orchestrator approved F011's
   trusted-local procedural clarification under delegated authority. F011 review
   returned spec PASS C0/H0/M0/L0, engineering/security BLOCK C0/H1/M1/L0, and
-  QA PASS C0/H0/M0/L0. F012 closes exact phase ancestry/path/mode scope; this is
-  not user review of the resulting packet. F012 awaits three
+  QA PASS C0/H0/M0/L0. F012 review returned spec BLOCK C0/H0/M1/L0,
+  engineering/security BLOCK C0/H1/M1/L0, and QA BLOCK C0/H0/M1/L0. F013 removes
+  I self-reference and adds post-commit acceptance; this is not user review of
+  the resulting packet. F013 awaits three
   independent packet reviews with every write permission closed; A007/A008
   remain non-executable.
 - For the user-authorized unattended delegation beginning 2026-08-30, the
@@ -181,10 +183,11 @@ engineering/security C0/H4/M1/L0, and QA C0/H4/M2/L0. The orchestrator approved
 engineering/security C0/H1/M2/L0, and QA C0/H1/M1/L0. F010 review returned spec
 PASS C0/H0/M0/L0, engineering/security BLOCK C0/H3/M3/L0, and QA BLOCK
 C0/H1/M2/L0. F011 review returned spec PASS C0/H0/M0/L0,
-engineering/security BLOCK C0/H1/M1/L0, and QA PASS C0/H0/M0/L0. F012 retains
-trusted-local traceability and makes P12/A12/C12/I12 direct ancestry and phase
-scope exact. The substantive F006 cleanup contract, workspace gates, and exact
-scope are unchanged. F012 is `ready_for_f012_packet_review`; all
+engineering/security BLOCK C0/H1/M1/L0, and QA PASS C0/H0/M0/L0. F012 review
+returned spec BLOCK C0/H0/M1/L0, engineering/security BLOCK C0/H1/M1/L0, and QA
+BLOCK C0/H0/M1/L0. F013 keeps integration free of I13 identity/results and moves
+them to post-commit acceptance. The substantive F006 cleanup contract, workspace
+gates, and exact scope are unchanged. F013 is `ready_for_f013_packet_review`; all
 production/test/fixture permissions remain none. A007 claim and A008 delete
 completion remain non-executable just-in-time outlines.
 Priority: P0
@@ -297,10 +300,10 @@ Evidence required:
    `authorization_malformed` before apply lock, file, database, or entropy work.
    unrelated blocked and unrelated recovery are independent exact rows, each
    crossed with all six private-invalid cells; workspace test/Clippy/build are
-   explicit while cargo-deny remains the T111 baseline blocker. F012 adds only
-   exact phase ancestry/path/mode evidence to the trusted-local trace. No core change is allowed.
+   explicit while cargo-deny remains the T111 baseline blocker. F013 adds only
+   non-self-referential integration and post-commit acceptance. No core change is allowed.
    Three independent packet reviews under the packet's severity/disposition rule
-   are required before standalone A12 may dispatch one exact-scope attempt.
+   are required before standalone A13 may dispatch one exact-scope attempt.
    A007 owns the unpublished credential crate/opaque locator, store-only direct
    dependency, store-private fake deletion hook, permit, claim, and event 16.
    A008 owns the real low-level keyring delete, exact private adapter method,

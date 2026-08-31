@@ -3,7 +3,7 @@
 ## Metadata
 
 - Feature ID: `008-security-baseline`
-- Status: T202C3_A006_F012_Ready_For_Packet_Review_No_Execution_Permission
+- Status: T202C3_A006_F013_Ready_For_Packet_Review_No_Execution_Permission
 - Updated: 2026-08-31
 - Inputs: `spec.md`, `checklists/requirements.md`, `plan.md`, `research.md`,
   `data-model.md`, `contracts/**`, `tasks.md`, project constitution and AGENTS
@@ -33,7 +33,10 @@
   C0/H3/M3/L0, and QA BLOCK C0/H1/M2/L0. The orchestrator approved F011's
   trusted-local procedural clarification. F011 review returned spec PASS
   C0/H0/M0/L0, engineering/security BLOCK C0/H1/M1/L0, and QA PASS C0/H0/M0/L0.
-  The orchestrator approved F012's exact phase-scope clarification. F012 leaves the substantive F006
+  The orchestrator approved F012's exact phase-scope clarification. F012 review
+  returned spec BLOCK C0/H0/M1/L0, engineering/security BLOCK C0/H1/M1/L0, and QA
+  BLOCK C0/H0/M1/L0. The orchestrator approved F013's non-self-referential
+  integration clarification. F013 leaves the substantive F006
   cleanup contract unchanged. Complete request-independent step-2
   validation remains intact and may stream all private graphs. After the request-
   independent global validation pass, source/call-order proof must show no
@@ -54,7 +57,7 @@
   no pending expiry is durable before eligibility. Claim/delete proof-expiry
   ordering remains unchanged. Same-origin proposed is corruption; only an
   unrelated matched proposed pair is a reachable public projection.
-  No implementation started; F012 awaits three reviews with permissions closed. The first A006 packet
+  No implementation started; F013 awaits three reviews with permissions closed. The first A006 packet
   review rejected the current-binding contradiction, incomplete clock-only
   recovery rule, and non-implementable cross-crate delete capability. The
   revised amendment makes cleanup the explicit historical-before exception,
@@ -71,7 +74,7 @@
   `T202C3_A006_PACKET_REVIEW_PASS`; that historical packet pass does not
   override the later failed production review. A007/A008 remain non-executable
   JIT outlines.
-  F012 keeps bespoke authority auditors retired and defines exact direct-child
+  F013 keeps bespoke authority auditors retired and defines exact direct-child
   phase scope inside a trusted-local procedural trace, not a product-security credential. Real scope,
   TDD, validation, and independent review evidence establish delivery. Cargo deny
   remains an explicit T111 baseline blocker rather than an A006 pass claim.
@@ -157,7 +160,7 @@ must preserve that placement or add an explicit counter before loop expansion.
   C0/H0/M0/L0, spec FAIL C0/H0/M1/L0, and engineering FAIL C0/H1/M2/L0 at
   `38ca4273`. Under the user's delegated existing-boundary clarification
   authority, F008 and F009 reviews failed, F010 review blocked, and the
-  orchestrator approved F012's exact phase-scope clarification. It is ready for three independent packet
+  orchestrator approved F013's non-self-referential integration clarification. It is ready for three independent packet
   reviews under the packet's severity/disposition rule; permissions remain none,
   and A007/A008 remain closed.
   T202C4, T202D-T202E, and T203-T212 remain dependency-gated Draft work. T204
@@ -650,7 +653,7 @@ permission to merge child evidence or relax the strict serial gates.
 
 ## Execution Gate
 
-`T202C3_A006_F012_READY_FOR_PACKET_REVIEW_NO_EXECUTION_PERMISSION`
+`T202C3_A006_F013_READY_FOR_PACKET_REVIEW_NO_EXECUTION_PERMISSION`
 
 T202A is accepted from four test-first attempts, independent security and QA
 review, its bootstrap-schema digest, and fresh packet/workspace gates. A003
@@ -706,7 +709,7 @@ same-origin proposed corruption from unrelated proposed public conflict,
 retaining active-pair fault rollback, and completing effect/gate/audit proof.
 F006 audit review then failed without reopening that substantive contract. F007
 and F008 reviews also failed/refused. F009 review failed and F010 review blocked.
-F012 keeps bespoke authority auditors retired and defines an exact-scope
-trusted-local procedural delivery trace. No implementation started. F012
-requires three independent packet reviews before A12 dispatch; the T202C and T202
+F013 keeps bespoke authority auditors retired and defines a non-self-referential
+trusted-local procedural delivery trace. No implementation started. F013
+requires three independent packet reviews before A13 dispatch; the T202C and T202
 umbrellas remain non-Accepted.

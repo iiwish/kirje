@@ -18,12 +18,13 @@ C0/H4/M2/L0. F009 then failed review with spec C0/H1/M0/L0,
 engineering/security C0/H1/M2/L0, and QA C0/H1/M1/L0. F010 review returned spec
 PASS C0/H0/M0/L0, engineering/security BLOCK C0/H3/M3/L0, and QA BLOCK
 C0/H1/M2/L0. F011 review returned spec PASS C0/H0/M0/L0,
-engineering/security BLOCK C0/H1/M1/L0, and QA PASS C0/H0/M0/L0. Under delegated
-authority, the orchestrator approved F012's exact phase-scope clarification.
-F012 leaves the substantive F006
+engineering/security BLOCK C0/H1/M1/L0, and QA PASS C0/H0/M0/L0. F012 review
+returned spec BLOCK C0/H0/M1/L0, engineering/security BLOCK C0/H1/M1/L0, and QA
+BLOCK C0/H0/M1/L0. Under delegated authority, the orchestrator approved F013's
+non-self-referential integration clarification. F013 leaves the substantive F006
 cleanup contract, exact phase/matrix/TDD scope, workspace gates, and future code
 paths unchanged. Governance is review/traceability evidence, not a security
-credential or malicious-local-admin defense. F012 awaits three independent
+credential or malicious-local-admin defense. F013 awaits three independent
 packet reviews with all permissions
 closed. A006, T202C3, and T110 remain unaccepted. `T202C3-A001` challenge issuance is reviewed
 at production commit
@@ -128,7 +129,8 @@ e5613c2fef5f0181dfe06ededec939b4e132fc4bbf1cd656dbdfbfe26f076608  crates/kirje-s
 - Failed F009 packet review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F009-packet-review.md`
 - Failed F010 packet review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F010-packet-review.md`
 - Failed F011 packet review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F011-packet-review.md`
-- F012 packet preparation: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F012-preparation.md`
+- Failed F012 packet review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F012-packet-review.md`
+- F013 packet preparation: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F013-preparation.md`
 - Contract amendment: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract.md`
 - Contract fix: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract-A002.md`
 - Contract fix: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract-A003.md`
@@ -172,9 +174,10 @@ review and F008 review also failed/refused with exact reviewer counts recorded i
 their evidence. F009's review also failed with the exact per-reviewer counts in
 its evidence. F010 review also blocked with exact outcomes/counts in its
 evidence. F011 review also blocked with exact outcomes/counts in its evidence.
-F012 retains the trusted-local trace and closes each P12/A12/C12/I12 ancestry,
-path, status, and mode edge without changing F006. No implementation started.
-Three independent F012 packet reviews must pass before A12 dispatch. A007 claim
+F012 review also blocked with exact outcomes/counts in its evidence. F013 keeps
+I13 self-reference out of integration YAML and moves terminal acceptance to an
+orchestrator post-commit gate without changing F006. No implementation started.
+Three independent F013 packet reviews must pass before A13 dispatch. A007 claim
 and A008 delete completion remain non-
 executable just-in-time outlines. T202C3 and T110 are not Accepted; the authority
 umbrella remains Draft.
