@@ -26,10 +26,13 @@
   F009 review failed with spec C0/H1/M0/L0, engineering/security C0/H1/M2/L0,
   and QA C0/H1/M1/L0. F010 review returned spec PASS C0/H0/M0/L0, engineering/security BLOCK
   C0/H3/M3/L0, and QA BLOCK C0/H1/M2/L0. Under delegated authority, the
-  orchestrator approved F011's trusted-local procedural clarification. The substantive F006 public rows, workspace gates,
+  orchestrator approved F011's trusted-local procedural clarification. F011
+  review returned spec PASS C0/H0/M0/L0, engineering/security BLOCK
+  C0/H1/M1/L0, and QA PASS C0/H0/M0/L0. The orchestrator approved F012's exact
+  phase-scope clarification. The substantive F006 public rows, workspace gates,
   phase-specific challenge precedence, and exact-scope manifest preflight remain
   unchanged. This records delegated contract approval, not user review of the
-  unseen F011 artifact.
+  unseen F012 artifact.
 
 ## Goal
 

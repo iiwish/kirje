@@ -392,14 +392,15 @@ winner/every-loser paths each prove zero delta in all six effect/external tables
 zero external calls, and unchanged cleanup; origin grant uses may preexist, so
 `grant_uses` is asserted by delta.
 
-The A006 F011 delivery lifecycle leaves the substantive F006 cleanup contract
+The A006 F012 delivery lifecycle leaves the substantive F006 cleanup contract
 unchanged and keeps bespoke authority auditors retired. Governance evidence is
 review and traceability material inside a trusted local execution boundary, not
 a security credential, lock service, or malicious-repository-administrator
-defense. The procedural trace is immutable reviewed P11, standalone A11
-authorization/dispatch, one exact-scope C11 worker candidate, three reviews of
-C11, and I11 review-complete evidence. Unexpected Git environment, rewritten
-history mechanisms, or dirty/conflicting state stops the operation. The F011
+defense. The procedural trace is immutable reviewed P12, evidence-only A12,
+one exact-scope C12 worker candidate, and evidence-only I12. Each direct-child
+edge has a closed path/status/mode contract and the cumulative path set is exact.
+Unexpected Git environment, rewritten
+history mechanisms, or dirty/conflicting state stops the operation. The F012
 packet is the canonical execution and evidence contract.
 
 ### D-009 Unified Same-Handle Bounded Input
@@ -714,7 +715,10 @@ spec C0/H1/M0/L0, engineering/security C0/H1/M2/L0, and QA C0/H1/M1/L0. The
 F010 review returned spec PASS C0/H0/M0/L0, engineering/security BLOCK
 C0/H3/M3/L0, and QA BLOCK C0/H1/M2/L0. The orchestrator approved F011's
 trusted-local procedural clarification; this does not claim user review of the
-resulting artifact. F011 leaves F006's substantive cleanup contract unchanged.
-Three independent packet reviews under F011's substantive review rule must pass
-before A11 may dispatch the exact
+resulting artifact. F011 review returned spec PASS C0/H0/M0/L0,
+engineering/security BLOCK C0/H1/M1/L0, and QA PASS C0/H0/M0/L0. F012 leaves
+F006's substantive cleanup contract unchanged and closes exact phase scope.
+The orchestrator approved F012 under delegated existing-boundary authority.
+Three independent packet reviews under F012's substantive review rule must pass
+before A12 may dispatch the exact
 production/test/fixture scope. Later A007/A008 attempts remain closed.

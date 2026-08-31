@@ -47,9 +47,11 @@
   spec C0/H1/M0/L0, engineering/security C0/H1/M2/L0, and QA C0/H1/M1/L0. The
   F010 review returned spec PASS C0/H0/M0/L0, engineering/security BLOCK
   C0/H3/M3/L0, and QA BLOCK C0/H1/M2/L0. The orchestrator approved F011's
-  trusted-local procedural clarification under delegated authority. F011 leaves
+  trusted-local procedural clarification under delegated authority. F011 review
+  returned spec PASS C0/H0/M0/L0, engineering/security BLOCK C0/H1/M1/L0, and QA
+  PASS C0/H0/M0/L0. F012 closes exact phase scope. F012 leaves
   the substantive F006 cleanup contract unchanged; this is not user review of
-  the unseen artifact. F011 awaits three independent
+  the unseen artifact. F012 awaits three independent
   packet reviews with permissions closed. A007/A008
   remain closed, and no execution is accepted before its TDD, validation,
   evidence, and implementation reviews.
@@ -777,10 +779,12 @@ F008 review failed/refused with spec C0/H2/M2/L0, engineering/security
 C0/H4/M1/L0, and QA C0/H4/M2/L0. F009 review failed with spec C0/H1/M0/L0,
 engineering/security C0/H1/M2/L0, and QA C0/H1/M1/L0. The orchestrator approved
 F010 under delegated authority. Its review returned spec PASS C0/H0/M0/L0,
-engineering/security BLOCK C0/H3/M3/L0, and QA BLOCK C0/H1/M2/L0. F011 uses a
-trusted-local procedural P11/A11/C11/I11 trace. The substantive F006 rows, phase order,
+engineering/security BLOCK C0/H3/M3/L0, and QA BLOCK C0/H1/M2/L0. F011 review
+returned spec PASS C0/H0/M0/L0, engineering/security BLOCK C0/H1/M1/L0, and QA
+PASS C0/H0/M0/L0. F012 uses an exact-scope trusted-local P12/A12/C12/I12 trace.
+The substantive F006 rows, phase order,
 fault/effect/privacy matrices, workspace gates, and exact scope remain unchanged.
-F011 is `ready_for_f011_packet_review`; every code/fixture permission remains none. A007
+F012 is `ready_for_f012_packet_review`; every code/fixture permission remains none. A007
 claim and A008 delete-completion are non-executable just-in-time outlines;
 neither is Ready or packetized.
 Priority: P0
@@ -885,7 +889,7 @@ Test targets:
   change is reviewed and the production Cargo tree remains unchanged
 - Opaque-type compile negatives and deterministic store-private fake deletion
   call log
-- A006 F011 governance is the trusted-local P11/reviews/A11/C11/reviews/I11
+- A006 F012 governance is the trusted-local P12/reviews/A12/C12/reviews/I12
   procedural trace declared by the immutable packet. It is delivery evidence,
   not a product-security credential or malicious-local-admin defense. The
   orchestrator runs real clean-worktree, exact-diff/mode, unchanged-file, TDD,
@@ -924,8 +928,8 @@ reservation/prepare plus effect-free cleanup challenge issuance, without
 changing transition state-machine behavior. Its candidate is Returned/Needs Fix
 and blocks all later outlines. Historical F001-F010 attempts remain evidence but
 are not active authority. Under delegated existing-boundary clarification
-authority, the orchestrator approved F011 without changing the substantive F006
-contract. F011 is `ready_for_f011_packet_review` and requires three independent
+authority, the orchestrator approved F012 without changing the substantive F006
+contract. F012 is `ready_for_f012_packet_review` and requires three independent
 packet reviews under its severity/disposition rule before standalone
 authorization A can open one exact production/test/fixture attempt.
 A007 owns the new unpublished

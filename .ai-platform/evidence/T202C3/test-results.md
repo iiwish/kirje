@@ -392,5 +392,12 @@ F010 validator/ref security framing and defines a trusted-local procedural trace
 F006, exact scope, TDD, complete workspace gates, and the T111 cargo-deny blocker
 remain unchanged. The future implementation must run the exact focused command
 once at real failing RED and again at passing GREEN, then record every packet
-validation. All permissions remain closed pending three F011 packet reviews and
-standalone A11 authorization/dispatch.
+validation. Review returned spec PASS C0/H0/M0/L0, engineering/security BLOCK
+C0/H1/M1/L0, and QA PASS C0/H0/M0/L0. No dispatch or implementation exists.
+
+F012 is governance-only and has no production RED/GREEN result. It preserves
+F006 and the trusted-local boundary while adding exact direct ancestry, per-edge
+and cumulative path/status/mode closure, and exact nested integration evidence.
+The future implementation still requires the same focused RED/GREEN and all ten
+ordered validation entries. All permissions remain closed pending three F012
+packet reviews and standalone A12 authorization/dispatch.

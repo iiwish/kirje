@@ -1,10 +1,10 @@
 schema_version: 1
-packet_id: 007-T110-T202C3-A006-F011
+packet_id: 007-T110-T202C3-A006-F012
 task_id: T110
 feature_id: 007-stable-v1-program
 mode: delegated_test_first_execution
 adapter: codex_worker
-status: ready_for_f011_packet_review
+status: ready_for_f012_packet_review
 
 governance_inputs:
   constitution: .ai-platform/memory/constitution.md
@@ -26,13 +26,14 @@ governance_inputs:
   failed_f008_review: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F008-packet-review.md
   failed_f009_review: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F009-packet-review.md
   failed_f010_review: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F010-packet-review.md
+  failed_f011_review: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F011-packet-review.md
 
 approval_gates:
   t202c3_a005: accepted by user on 2026-08-30 at production commit 316dae0
   cleanup_contract: approved by user on 2026-08-30
   explicit_resume: user resumed A006 repair on 2026-08-31
   delegated_clarification: >-
-    The Delivery Orchestrator approved F011 on 2026-08-31 under the user's
+    The Delivery Orchestrator approved F012 on 2026-08-31 under the user's
     standing authority for existing-boundary clarification. This is not user
     review of unseen work and does not authorize implementation.
   f008_review: >-
@@ -47,10 +48,14 @@ approval_gates:
     Spec compliance PASS C0/H0/M0/L0; engineering/security BLOCK
     C0/H3/M3/L0; QA acceptance BLOCK C0/H1/M2/L0. The original counts and mixed
     outcomes are retained exactly. No implementation authority exists.
+  f011_review: >-
+    Spec compliance PASS C0/H0/M0/L0; engineering/security BLOCK
+    C0/H1/M1/L0; QA acceptance PASS C0/H0/M0/L0. The original counts and mixed
+    outcomes are retained exactly. No implementation dispatch exists.
 
 work_unit:
   title: Issue an exact effect-free credential-cleanup challenge
-  attempt: T202C3-A006-F011
+  attempt: T202C3-A006-F012
   parent: T110 Complete Authority Lifecycles
   security_task: T202C3 Account Credential And Cleanup Lifecycles
   goal: >-
@@ -62,7 +67,7 @@ work_unit:
     - T202C3-A005 Accepted at production commit 316dae0
     - approved cleanup security contract in 008 canonical artifacts
     - explicit user resume on 2026-08-31
-    - immutable F011 packet preparation commit reviewed by three independent reviewers
+    - immutable F012 packet preparation commit reviewed by three independent reviewers
   blocks:
     - T202C3-A007 cleanup claim
     - T202C3 completion
@@ -72,7 +77,7 @@ work_unit:
 
 codebase_context:
   branch: codex/v1-roadmap-governance
-  baseline_head: 0e321de6bdd73d51528c105101e7f284dc76f5a9
+  baseline_head: 982ec1d18639ad52c8058deba1dc69df57b1161b
   returned_candidate: 2241a946c399ba9c61e67e808a85f777c0d2b402
   implementation_rule: >-
     Existing storage and parsing mechanics do not override the F006 security
@@ -145,9 +150,9 @@ contract_snapshot:
     - evidence contains only synthetic vector IDs, digests, counts, and results
 
 execution_constraints:
-  production_permission: none_pending_f011_authorization_dispatch
-  test_permission: none_pending_f011_authorization_dispatch
-  fixture_permission: none_pending_f011_authorization_dispatch
+  production_permission: none_pending_f012_authorization_dispatch
+  test_permission: none_pending_f012_authorization_dispatch
+  fixture_permission: none_pending_f012_authorization_dispatch
   future_allowed_files:
     - crates/kirje-store/src/authority.rs
     - crates/kirje-store/tests/authority_registry.rs
@@ -157,15 +162,15 @@ execution_constraints:
     - cleanup claim/delete, permit, deletion backend, runtime, config, keyring, protocol, CLI, MCP, network, or remote-effect behavior
     - transition state-machine behavior outside locator input hardening before cleanup insertion
   write_rules:
-    - No production, test, or fixture edit begins from P11.
-    - After three substantive packet-review passes, the orchestrator may create one A11 authorization/dispatch record under delegated authority without another user checkpoint.
-    - A11 dispatches one worker for attempt T202C3-A006-F011-IMPLEMENTATION and the worker edits only future_allowed_files.
-    - A failed candidate or blocking implementation review ends that dispatch; create a new named implementation-fix attempt and record rather than reusing A11.
+    - No production, test, or fixture edit begins from P12.
+    - After three substantive packet-review passes, the orchestrator may create one A12 authorization/dispatch record under delegated authority without another user checkpoint.
+    - A12 dispatches one worker for attempt T202C3-A006-F012-IMPLEMENTATION and the worker edits only future_allowed_files.
+    - A failed candidate or blocking implementation review ends that dispatch; create a new named implementation-fix attempt and record rather than reusing A12.
     - Evidence and authorization records remain orchestrator-owned; A007/A008, T202C3, and T110 remain closed.
 
 tdd_plan:
   ordering: >-
-    After A11 dispatch, add discriminating tests first. Run the exact focused
+    After A12 dispatch, add discriminating tests first. Run the exact focused
     command at RED and again at GREEN. RED must be nonzero because a newly added
     test exposes the defect; GREEN must be zero after the minimum production fix.
   focused_red_command: cargo test -p kirje-store --test authority_registry credential_cleanup_challenge_is_exact --all-features --locked
@@ -198,27 +203,65 @@ validation_loop:
     - cargo build --workspace --all-features --locked
   known_baseline_blocker:
     - cargo deny remains the T111-owned yanked chacha20/io-imap baseline blocker and is not reported as passing
-  candidate_scope_checks:
-    - git -c status.showUntrackedFiles=all status --porcelain=v2 --untracked-files=all
-    - git diff --name-status A11..C11 contains authority.rs and authority_registry.rs, optional cleanup fixtures, and no other path
-    - git diff --summary A11..C11 and git ls-tree prove every candidate blob is regular and non-executable
-    - Cargo.lock, authority schema, dependency manifests, and .ai-platform are unchanged from A11
-  evidence_rule: record every command, exit code, and bounded result summary; record cargo deny only as the known T111 blocker
+  phase_scope_checks:
+    oid_rule: Replace every symbolic P12, A12, C12, and I12 identifier with its actual 40-hex commit ID, and every symbolic path list with its declared exact paths, before execution and evidence recording.
+    clean:
+      - git -c status.showUntrackedFiles=all status --porcelain=v2 --untracked-files=all
+    ancestry:
+      - git rev-parse A12^ equals P12
+      - git rev-parse C12^ equals A12
+      - git rev-parse I12^ equals C12
+    packet_to_authorization:
+      commands:
+        - git diff --name-status --no-renames P12 A12
+        - git diff --raw --no-renames P12 A12
+        - git diff --quiet P12 A12 -- crates Cargo.toml Cargo.lock
+      expected: exactly four A paths from evidence_contract.packet_review_paths plus authorization_path; raw modes 000000 to 100644; no existing or product file changes
+    authorization_to_candidate:
+      commands:
+        - git diff --name-status --no-renames A12 C12
+        - git diff --raw --no-renames A12 C12
+        - git diff --check A12 C12
+        - git diff --quiet A12 C12 -- Cargo.toml Cargo.lock crates/kirje-store/Cargo.toml crates/kirje-store/src/authority/schema_v1.sql .ai-platform
+      expected: exactly M authority.rs and M authority_registry.rs with old/new 100644, plus optional cleanup fixtures that are M old/new 100644 or A 000000-to-100644; nonempty; no D, R, C, T, or other path
+    candidate_to_integration:
+      commands:
+        - git diff --name-status --no-renames C12 I12
+        - git diff --raw --no-renames C12 I12
+        - git diff --quiet C12 I12 -- crates Cargo.toml Cargo.lock
+      expected: exactly four A paths from evidence_contract.implementation_review_paths plus integration_path; raw modes 000000 to 100644; no existing or product file changes
+    cumulative:
+      commands:
+        - git diff --name-status --no-renames P12 I12
+        - git diff --raw --no-renames P12 I12
+      expected: exact union of the four A12 evidence paths, allowed A12-to-C12 product paths, and four I12 evidence paths; no other status, path, or mode
+    blob_modes:
+      - git ls-tree A12 -- A12_EVIDENCE_PATHS
+      - git ls-tree C12 -- C12_CHANGED_PATHS
+      - git ls-tree I12 -- I12_EVIDENCE_PATHS
+      - every listed object is exactly mode 100644 and type blob
+    artifact_validation:
+      - python3 /Users/iiwish/.codex/skills/ai-delivery-governor/scripts/validate_delivery_artifacts.py --root /Users/iiwish/self/kirje --feature-id 007-stable-v1-program
+      - python3 /Users/iiwish/.codex/skills/ai-delivery-governor/scripts/validate_delivery_artifacts.py --root /Users/iiwish/self/kirje --feature-id 008-security-baseline
+      - git diff --check
+    stop_rule: Any unexpected staged/path/status/mode/delete/rename/copy/typechange or failed command stops the phase before proceeding.
+  evidence_rule: record every command after real 40-hex substitution, exit code, result, and bounded sanitized summary; record cargo deny only as the known T111 blocker
 
 procedural_trace:
   model: trusted_local_linear_delivery_record
-  preparation_P11:
-    - P11 is this immutable reviewed packet commit with permissions closed.
-    - Three independent packet reviews bind the exact P11 commit and tree.
-  authorization_dispatch_A11:
-    - A11 is a later standalone record of delegated authorization and one-worker dispatch, not a security capability.
-    - A11 records only the exact schema below and does not expand P11 scope.
-  candidate_C11:
-    - C11 is the single dispatched worker candidate based on A11.
-    - The orchestrator runs the clean-worktree, exact-diff, mode, and unchanged-file commands above and records their bounded output.
-  integration_I11:
-    - Three independent implementation reviews bind the same C11 commit and tree.
-    - I11 records TDD, every validation, scope evidence, review paths, and review_complete.
+  preparation_P12:
+    - P12 is this immutable reviewed packet commit with permissions closed.
+    - Three independent packet reviews bind the exact P12 commit and tree.
+  authorization_dispatch_A12:
+    - A12 is P12's direct child and its diff adds exactly the three packet-review YAML files plus authorization YAML, all regular 100644; it changes nothing else.
+    - A12 is a standalone record of delegated authorization and one-worker dispatch, not a security capability, and does not expand P12 scope.
+  candidate_C12:
+    - C12 is A12's direct child and the single dispatched worker candidate.
+    - Its nonempty diff is exactly M authority.rs, M authority_registry.rs, and optional A or M cleanup fixture files, all regular 100644, with no governance, Cargo, dependency, or schema change.
+  integration_I12:
+    - I12 is C12's direct child and its diff adds exactly three implementation-review YAML files plus integration YAML, all regular 100644; it changes nothing else.
+    - Three independent implementation reviews bind the same C12 commit and tree; I12 records TDD, every validation, scope evidence, review paths, and review_complete.
+    - The cumulative P12-to-I12 path set is exactly A12 evidence, C12 allowed product paths, and I12 evidence.
   limitations:
     - Linear local history is an operating convention, not a cryptographic or malicious-admin replay defense.
     - Historical validators, tokens, refs, and self-tests are inert evidence and have no product-security meaning.
@@ -229,38 +272,68 @@ evidence_contract:
     safe_load with aliases disabled plus exact-key comparison. This is ordinary
     evidence validation, not a security auditor or authorization capability.
   packet_review_paths:
-    spec_compliance: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F011-spec-review.yaml
-    engineering_security: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F011-engineering-review.yaml
-    qa_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F011-qa-review.yaml
+    spec_compliance: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F012-spec-review.yaml
+    engineering_security: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F012-engineering-review.yaml
+    qa_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F012-qa-review.yaml
   packet_review_exact_keys: [schema_version, review_kind, status, packet_commit, packet_tree, findings, residual_risk]
   packet_review_required_status: PASS
   findings_exact_keys: [critical, high, medium, low]
   residual_risk_exact_keys: [status, items]
-  authorization_path: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F011-authorization-dispatch.yaml
-  authorization_exact_keys: [schema_version, status, authority_basis, attempt_id, packet_commit, allowed_files, review_paths]
+  authorization_path: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F012-authorization-dispatch.yaml
+  authorization_exact_keys: [schema_version, status, authority_basis, attempt_id, packet_commit, packet_tree, allowed_files, review_paths]
   authorization_values:
     status: AUTHORIZED_FOR_DISPATCH
     authority_basis: user_delegated_orchestrator_self_approval
-    attempt_id: T202C3-A006-F011-IMPLEMENTATION
+    attempt_id: T202C3-A006-F012-IMPLEMENTATION
   authorization_field_rules:
-    packet_commit: exact reviewed P11 commit
+    packet_commit: exact reviewed P12 40-hex commit
+    packet_tree: exact reviewed P12 40-hex tree
     allowed_files: exact future_allowed_files
     review_paths: exact packet_review_paths
   implementation_review_paths:
-    spec_compliance: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F011-implementation-spec-review.yaml
-    engineering_security: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F011-implementation-engineering-review.yaml
-    qa_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F011-implementation-qa-review.yaml
+    spec_compliance: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F012-implementation-spec-review.yaml
+    engineering_security: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F012-implementation-engineering-review.yaml
+    qa_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F012-implementation-qa-review.yaml
   implementation_review_exact_keys: [schema_version, review_kind, status, candidate_commit, candidate_tree, findings, residual_risk]
   implementation_review_required_status: PASS
-  integration_path: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F011-integration.yaml
-  integration_exact_keys: [schema_version, status, attempt_id, packet_commit, authorization_commit, candidate_commit, candidate_tree, candidate_changes, red_observed, green_passed, validations, cargo_deny, scope_checks, implementation_review_paths]
-  integration_required:
-    - status review_complete and exact P11/A11/C11 references
-    - real RED nonzero and GREEN zero for the exact focused command
-    - every focused and complete command with exit code and bounded result
-    - exact candidate scope/mode/unchanged-file command summaries
-    - cargo deny recorded only as known_t111_blocker
-    - three implementation review paths and sanitized evidence
+  integration_path: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F012-integration.yaml
+  integration_exact_keys: [schema_version, status, attempt_id, packet_commit, authorization_commit, candidate_commit, candidate_tree, candidate_changes, red_observed, green_passed, validations, integrity_checks, cargo_deny, implementation_review_paths]
+  integration_exact_values:
+    status: review_complete
+    attempt_id: T202C3-A006-F012-IMPLEMENTATION
+    commit_fields: packet_commit, authorization_commit, candidate_commit, and candidate_tree are exact lowercase 40-hex values for P12, A12, C12, and C12 tree
+  candidate_change_exact_keys: [status, path, old_mode, new_mode]
+  candidate_change_source: exact ordered A12-to-C12 raw/name-status diff; mandatory M authority.rs and M authority_registry.rs old/new 100644 plus optional M old/new 100644 or A 000000-to-100644 cleanup fixtures
+  red_observed:
+    exact_keys: [command, exit_code, failure_summary]
+    command: cargo test -p kirje-store --test authority_registry credential_cleanup_challenge_is_exact --all-features --locked
+    exit_code: integer and nonzero
+    failure_summary: nonempty sanitized string proving failure came from the newly added test
+  green_passed:
+    exact_keys: [command, exit_code, result, summary]
+    command: cargo test -p kirje-store --test authority_registry credential_cleanup_challenge_is_exact --all-features --locked
+    exit_code: 0
+    result: PASS
+    summary: nonempty sanitized string
+  validations:
+    ordered_count: 10
+    command_order: concatenate validation_loop.focused then validation_loop.complete exactly as written
+    item_exact_keys: [command, exit_code, result, summary]
+    item_values: exit_code 0, result PASS, nonempty sanitized summary
+    focused_reuse: the fresh GREEN execution may supply the focused validation entry, but the ordered entry may not be omitted
+  integrity_checks:
+    ordered_count: 22
+    command_order: exactly the executable commands in phase_scope_checks from clean through artifact_validation, top to bottom after 40-hex/path substitution
+    item_exact_keys: [command, exit_code, result, summary]
+    item_values: exact substituted phase_scope_checks commands in declared order, exit_code 0, result PASS, nonempty sanitized summary
+    required_coverage: clean status, all ancestry edges, per-edge and cumulative name-status/raw/modes, ls-tree blobs, diff-checks, unchanged Cargo/schema/governance checks, and both 007/008 artifact validators
+  cargo_deny:
+    exact_keys: [command, status, task, summary]
+    command: cargo deny check
+    status: KNOWN_T111_BASELINE_BLOCKER
+    task: T111
+    summary: nonempty sanitized string; never record PASS
+  implementation_review_paths_rule: exact evidence_contract.implementation_review_paths
 
 review_contract:
   blocking_dimensions: [product_security, F006_contract, exact_scope, definition_of_done, validation_sufficiency]
@@ -268,17 +341,17 @@ review_contract:
     - Critical or High findings in a blocking dimension block dispatch.
     - Medium findings in a blocking dimension block dispatch.
     - Local-admin tamper resistance, governance format preference, and other non-product governance hardening are out of scope and receive explicit nonblocking disposition.
-    - All three packet reviewers must pass before the orchestrator records A11 and dispatches one worker.
+    - All three packet reviewers must pass before the orchestrator records A12 and dispatches one worker.
   implementation_pass_rule:
-    - The same substantive blocking dimensions apply and all reviews bind the same C11.
+    - The same substantive blocking dimensions apply and all reviews bind the same C12.
   acceptance_rule:
     - review_complete requires real TDD, all complete gates, exact scope evidence, sanitized evidence, and three passing implementation reviews.
     - Delegated acceptance never claims user personal review of unseen work.
 
 handoff:
-  current_state: F011 packet preparation only; all production, test, and fixture permissions are closed
-  next_state: three independent reviews bind P11, then the orchestrator may create A11 and dispatch one worker under delegated authority
-  after_authorization: one exact-scope C11 candidate, three implementation reviews, then I11 review_complete or a new named fix attempt
+  current_state: F012 packet preparation only; all production, test, and fixture permissions are closed
+  next_state: three independent reviews bind P12, then the orchestrator may create exact-scope A12 and dispatch one worker under delegated authority
+  after_authorization: one exact-scope C12 candidate, three implementation reviews, then exact-scope I12 review_complete or a new named fix attempt
   later_tasks: A007/A008 remain non-executable and T202C3/T110 remain unaccepted
   commit_policy:
     - local commits only; ordinary branch history remains linear where practical
@@ -286,7 +359,8 @@ handoff:
 
 stop_conditions:
   - Any unresolved finding in a substantive blocking dimension.
-  - Production work requested before A11 is recorded after three packet-review passes.
+  - Production work requested before A12 is recorded after three packet-review passes.
+  - Any phase has an unexpected staged/path/status/mode/delete/rename/copy/typechange or violates direct ancestry.
   - Schema, dependency, core transcript/type, runtime, keyring, protocol, CLI, MCP, network, or external-effect change is required.
   - Unexpected Git environment/repository state, dirty/conflicting worktree, or repository identity mismatch.
   - Any locator material, secret, credential, private origin value, or real provider data would enter committed evidence.
