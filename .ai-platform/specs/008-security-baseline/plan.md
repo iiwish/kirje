@@ -392,15 +392,15 @@ winner/every-loser paths each prove zero delta in all six effect/external tables
 zero external calls, and unchanged cleanup; origin grant uses may preexist, so
 `grant_uses` is asserted by delta.
 
-The A006 F010 authority lifecycle leaves the substantive F006 cleanup contract
-unchanged and keeps the bespoke token auditor retired. Authority is an
-append-only, single-parent P10/A10/C10/I10 Git DAG. The dedicated local ref
-`refs/kirje/authority/T202C3-A006` is atomically created from absent to A10 and
-consumed from A10 to C10; it is never deleted, reset, rewound, recreated, or
-advanced to I10. Only C10 exactly named by that ref is authorized. A small
-validator checks immutable Git objects, exact diffs/modes, strict structured
-YAML, the ref, and its two-entry reflog. Historical prose has no authorization
-meaning. The F010 packet is the canonical schema and diff contract.
+The A006 F011 delivery lifecycle leaves the substantive F006 cleanup contract
+unchanged and keeps bespoke authority auditors retired. Governance evidence is
+review and traceability material inside a trusted local execution boundary, not
+a security credential, lock service, or malicious-repository-administrator
+defense. The procedural trace is immutable reviewed P11, standalone A11
+authorization/dispatch, one exact-scope C11 worker candidate, three reviews of
+C11, and I11 review-complete evidence. Unexpected Git environment, rewritten
+history mechanisms, or dirty/conflicting state stops the operation. The F011
+packet is the canonical execution and evidence contract.
 
 ### D-009 Unified Same-Handle Bounded Input
 
@@ -711,9 +711,10 @@ failed/refused with exact counts spec C0/H2/M2/L0, engineering/security
 C0/H4/M1/L0, and QA C0/H4/M2/L0. Under that authority, the orchestrator approved
 F009's append-only Git authority clarification, whose review then failed with
 spec C0/H1/M0/L0, engineering/security C0/H1/M2/L0, and QA C0/H1/M1/L0. The
-orchestrator approved F010's one-time local-ref clarification; this does not
-claim user review of the resulting artifact. F010 leaves F006's substantive
-cleanup contract unchanged. Three independent packet reviews under F010's
-severity/disposition rule must pass before A10 may be committed and the absent
-dedicated ref atomically created for the exact
+F010 review returned spec PASS C0/H0/M0/L0, engineering/security BLOCK
+C0/H3/M3/L0, and QA BLOCK C0/H1/M2/L0. The orchestrator approved F011's
+trusted-local procedural clarification; this does not claim user review of the
+resulting artifact. F011 leaves F006's substantive cleanup contract unchanged.
+Three independent packet reviews under F011's substantive review rule must pass
+before A11 may dispatch the exact
 production/test/fixture scope. Later A007/A008 attempts remain closed.

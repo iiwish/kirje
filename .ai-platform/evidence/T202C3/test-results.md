@@ -383,6 +383,14 @@ implementation exists.
 F010 is governance-only and has no production RED/GREEN result. It preserves
 the F006 contract, exact three-file future scope, TDD matrix, complete workspace
 gates, and cargo-deny T111 blocker. It adds a dedicated one-time local ref and a
-small immutable-object/strict-YAML DAG validator. Production, test, and fixture
-permissions remain none pending three F010 packet reviews, A10, and atomic ref
-creation.
+small immutable-object/strict-YAML DAG validator. Review returned spec PASS
+C0/H0/M0/L0, engineering/security BLOCK C0/H3/M3/L0, and QA BLOCK C0/H1/M2/L0.
+No authorization or implementation exists.
+
+F011 is governance-only and has no production RED/GREEN result. It removes the
+F010 validator/ref security framing and defines a trusted-local procedural trace.
+F006, exact scope, TDD, complete workspace gates, and the T111 cargo-deny blocker
+remain unchanged. The future implementation must run the exact focused command
+once at real failing RED and again at passing GREEN, then record every packet
+validation. All permissions remain closed pending three F011 packet reviews and
+standalone A11 authorization/dispatch.

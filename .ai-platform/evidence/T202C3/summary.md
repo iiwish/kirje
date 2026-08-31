@@ -15,13 +15,14 @@ FAIL C0/H1/M2/L0. No implementation started. Under the user's explicit delegated
 existing-boundary clarification authority, F008 review failed/refused with exact
 counts spec C0/H2/M2/L0, engineering/security C0/H4/M1/L0, and QA acceptance
 C0/H4/M2/L0. F009 then failed review with spec C0/H1/M0/L0,
-engineering/security C0/H1/M2/L0, and QA C0/H1/M1/L0. Under delegated authority,
-the orchestrator approved F010's one-time local-ref clarification. F010 leaves
-the substantive F006 cleanup contract, exact phase/matrix/TDD scope, workspace
-gates, and future code paths unchanged. It uses immutable P10/A10/C10/I10 Git
-commits plus atomically created and consumed
-`refs/kirje/authority/T202C3-A006`. This is not user review of the unseen F010
-packet. F010 awaits three independent packet reviews with all permissions
+engineering/security C0/H1/M2/L0, and QA C0/H1/M1/L0. F010 review returned spec
+PASS C0/H0/M0/L0, engineering/security BLOCK C0/H3/M3/L0, and QA BLOCK
+C0/H1/M2/L0. Under delegated authority, the orchestrator approved F011's
+trusted-local procedural clarification. F011 leaves the substantive F006
+cleanup contract, exact phase/matrix/TDD scope, workspace gates, and future code
+paths unchanged. Governance is review/traceability evidence, not a security
+credential or malicious-local-admin defense. F011 awaits three independent
+packet reviews with all permissions
 closed. A006, T202C3, and T110 remain unaccepted. `T202C3-A001` challenge issuance is reviewed
 at production commit
 `daf22a0`. `T202C3-A002` account-update transition execution is accepted at
@@ -123,7 +124,8 @@ e5613c2fef5f0181dfe06ededec939b4e132fc4bbf1cd656dbdfbfe26f076608  crates/kirje-s
 - Failed F007 packet review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F007-packet-review.md`
 - Failed F008 packet review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F008-packet-review.md`
 - Failed F009 packet review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F009-packet-review.md`
-- F010 packet preparation: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F010-preparation.md`
+- Failed F010 packet review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F010-packet-review.md`
+- F011 packet preparation: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F011-preparation.md`
 - Contract amendment: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract.md`
 - Contract fix: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract-A002.md`
 - Contract fix: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract-A003.md`
@@ -165,9 +167,10 @@ and a pure exact-scope manifest preflight rejects
 review then failed without reopening the substantive cleanup contract. F007
 review and F008 review also failed/refused with exact reviewer counts recorded in
 their evidence. F009's review also failed with the exact per-reviewer counts in
-its evidence. F010 adds a dedicated one-time grant ref and small immutable Git
-object validator without changing F006. No implementation started. Three
-independent F010 packet reviews must pass before A10 may be committed and the
-absent ref created. A007 claim and A008 delete completion remain non-
+its evidence. F010 review also blocked with exact outcomes/counts in its
+evidence. F011 retires the security-capability framing and uses a trusted-local
+procedural P11/reviews/A11/C11/reviews/I11 trace without changing F006. No
+implementation started. Three independent F011 packet reviews must pass before
+A11 dispatch. A007 claim and A008 delete completion remain non-
 executable just-in-time outlines. T202C3 and T110 are not Accepted; the authority
 umbrella remains Draft.

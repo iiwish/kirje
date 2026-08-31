@@ -25,8 +25,10 @@
   failed/refused review. F008 then failed with exact counts spec C0/H2/M2/L0,
   engineering/security C0/H4/M1/L0, and QA C0/H4/M2/L0. F009 review failed with
   spec C0/H1/M0/L0, engineering/security C0/H1/M2/L0, and QA C0/H1/M1/L0. The
-  orchestrator approved F010's one-time local-ref clarification under delegated
-  authority; this is not user review of the resulting packet. F010 awaits three
+  F010 review returned spec PASS C0/H0/M0/L0, engineering/security BLOCK
+  C0/H3/M3/L0, and QA BLOCK C0/H1/M2/L0. The orchestrator approved F011's
+  trusted-local procedural clarification under delegated authority; this is not
+  user review of the resulting packet. F011 awaits three
   independent packet reviews with every write permission closed; A007/A008
   remain non-executable.
 - For the user-authorized unattended delegation beginning 2026-08-30, the
@@ -174,11 +176,12 @@ No implementation started. Under the user's 2026-08-31 delegated clarification
 authority, F008 review failed/refused with spec C0/H2/M2/L0,
 engineering/security C0/H4/M1/L0, and QA C0/H4/M2/L0. The orchestrator approved
 `T202C3-A006-F009`. Its review failed with spec C0/H1/M0/L0,
-engineering/security C0/H1/M2/L0, and QA C0/H1/M1/L0. F010 preserves the
-immutable Git DAG and adds an absent-to-A10 then A10-to-C10 compare-and-swap on
-`refs/kirje/authority/T202C3-A006`, enforced by a small Git-object validator.
-The substantive F006 cleanup contract, workspace gates, and exact scope are
-unchanged. F010 is `ready_for_f010_packet_review`; all
+engineering/security C0/H1/M2/L0, and QA C0/H1/M1/L0. F010 review returned spec
+PASS C0/H0/M0/L0, engineering/security BLOCK C0/H3/M3/L0, and QA BLOCK
+C0/H1/M2/L0. F011 treats governance as trusted-local traceability rather than a
+security capability and uses P11/reviews/A11/C11/reviews/I11. The substantive
+F006 cleanup contract, workspace gates, and exact scope are unchanged. F011 is
+`ready_for_f011_packet_review`; all
 production/test/fixture permissions remain none. A007 claim and A008 delete
 completion remain non-executable just-in-time outlines.
 Priority: P0
@@ -291,10 +294,10 @@ Evidence required:
    `authorization_malformed` before apply lock, file, database, or entropy work.
    unrelated blocked and unrelated recovery are independent exact rows, each
    crossed with all six private-invalid cells; workspace test/Clippy/build are
-   explicit while cargo-deny remains the T111 baseline blocker. F010 adds only
-   the dedicated-ref P10-A10-C10-I10 Git authority lifecycle. No core change is allowed.
+   explicit while cargo-deny remains the T111 baseline blocker. F011 adds only
+   the trusted-local procedural delivery trace. No core change is allowed.
    Three independent packet reviews under the packet's severity/disposition rule
-   are required before standalone authorization A10 may open one exact-scope attempt.
+   are required before standalone A11 may dispatch one exact-scope attempt.
    A007 owns the unpublished credential crate/opaque locator, store-only direct
    dependency, store-private fake deletion hook, permit, claim, and event 16.
    A008 owns the real low-level keyring delete, exact private adapter method,

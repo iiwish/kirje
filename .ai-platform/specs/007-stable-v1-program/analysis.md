@@ -38,9 +38,11 @@ review on authority-source, strict-parsing, phase-lifecycle, and negative-contro
 defects. F007 and F008 reviews then failed/refused. F008's exact counts are spec
 C0/H2/M2/L0, engineering/security C0/H4/M1/L0, and QA C0/H4/M2/L0. F009 review
 failed with spec C0/H1/M0/L0, engineering/security C0/H1/M2/L0, and QA
-C0/H1/M1/L0. Under delegated authority, the orchestrator approved F010's
-one-time local-ref clarification. This is delegated contract approval, not user
-review of the unseen F010 packet. No implementation started; F010 awaits three independent
+C0/H1/M1/L0. F010 review returned spec PASS C0/H0/M0/L0,
+engineering/security BLOCK C0/H3/M3/L0, and QA BLOCK C0/H1/M2/L0. Under
+delegated authority, the orchestrator approved F011's trusted-local procedural
+clarification. This is delegated contract approval, not user review of the
+unseen F011 packet. No implementation started; F011 awaits three independent
 reviews with all permissions closed. A007 claim and
 A008 delete completion remain non-executable just-in-time outlines. One separate dependency Medium
 implementation finding is assigned: the unchanged branch dependency graph contains yanked
@@ -262,7 +264,7 @@ changed grant recovery third, signed-context/clock/expiry next, then current
 eligibility and target lifecycle, while existing store/backend codes remain
 stable.
 
-Result: `T202C3_A006_F010_READY_FOR_PACKET_REVIEW_NO_EXECUTION_PERMISSION`. The historical
+Result: `T202C3_A006_F011_READY_FOR_PACKET_REVIEW_NO_EXECUTION_PERMISSION`. The historical
 packet gate authorized only returned production candidate `2241a946`, whose one
 High and five Medium findings remain open. F001 failed spec review C0/H1/M2/L0;
 the user approved F002's contract resolution, but its packet review failed with
@@ -270,10 +272,11 @@ engineering C0/H1/M2/L0 and spec C0/H0/M1/L0 while QA passed C0/H0/M0/L0. The
 F008 review failed/refused with spec C0/H2/M2/L0, engineering/security
 C0/H4/M1/L0, and QA C0/H4/M2/L0. The orchestrator approved the existing-boundary
 F009 clarification under explicit delegated authority, recorded its failed
-review, and approved F010's one-time local-ref correction. No implementation
+review, then recorded F010's mixed PASS/BLOCK review and approved F011's
+trusted-local procedural correction. No implementation
 attempt started. Production, test, and fixture permissions are none; three
-independent F010 packet reviews under the packet's severity/disposition rule
-must pass before standalone authorization A10 can open the exact scope. A007 and A008 remain
+independent F011 packet reviews under the packet's substantive severity rule
+must pass before standalone A11 can dispatch the exact scope. A007 and A008 remain
 unpacketized, non-executable outlines and are not Ready.
 
 ## Current Implementation Evidence Check
@@ -413,9 +416,9 @@ workspace handoff gates. Within the
 exact A006 scope, one pure `authority.rs` manifest preflight rejects
 `transition_id=None` as `authorization_malformed` before apply lock, file,
 database, or entropy work, with zero I/O/mutation/entropy and no core change.
-F010 leaves that substantive contract unchanged and enforces immutable
-P10/A10/C10/I10 commits with an atomically created and consumed dedicated local
-ref. Historical tokens and Markdown are inert evidence, not execution gates.
+F011 leaves that substantive contract unchanged and defines governance as a
+trusted-local P11/reviews/A11/C11/reviews/I11 trace, not a product-security
+credential or malicious-local-admin defense.
 
 ### Low
 
@@ -424,7 +427,7 @@ None.
 ## Residual Risks
 
 - T109 and the account-create checkpoint were explicitly accepted by the user
-  on 2026-08-30. F010 clarification is approved under delegated authority but
+  on 2026-08-30. F011 clarification is approved under delegated authority but
   remains packet-review-only with no production, test, or fixture permission.
 - Cross-platform support claims remain Draft until T119 produces platform
   evidence.
@@ -434,7 +437,7 @@ None.
 
 ## Gate Result
 
-`T109_ACCEPTED_T202C3_A006_F010_READY_FOR_PACKET_REVIEW_NO_EXECUTION_PERMISSION`
+`T109_ACCEPTED_T202C3_A006_F011_READY_FOR_PACKET_REVIEW_NO_EXECUTION_PERMISSION`
 
 The user approved `plan.md` and `tasks.md` on 2026-08-30. T109 review and fresh
 validation are complete at `94f3495`; the user explicitly accepted the

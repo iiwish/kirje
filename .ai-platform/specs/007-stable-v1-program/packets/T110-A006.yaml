@@ -1,10 +1,10 @@
 schema_version: 1
-packet_id: 007-T110-T202C3-A006-F010
+packet_id: 007-T110-T202C3-A006-F011
 task_id: T110
 feature_id: 007-stable-v1-program
 mode: delegated_test_first_execution
 adapter: codex_worker
-status: ready_for_f010_packet_review
+status: ready_for_f011_packet_review
 
 governance_inputs:
   constitution: .ai-platform/memory/constitution.md
@@ -25,14 +25,14 @@ governance_inputs:
   returned_attempt_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A006.md
   failed_f008_review: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F008-packet-review.md
   failed_f009_review: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F009-packet-review.md
-  dag_validator: .ai-platform/scripts/validate_a006_dag.rb
+  failed_f010_review: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F010-packet-review.md
 
 approval_gates:
   t202c3_a005: accepted by user on 2026-08-30 at production commit 316dae0
   cleanup_contract: approved by user on 2026-08-30
   explicit_resume: user resumed A006 repair on 2026-08-31
   delegated_clarification: >-
-    The Delivery Orchestrator approved F010 on 2026-08-31 under the user's
+    The Delivery Orchestrator approved F011 on 2026-08-31 under the user's
     standing authority for existing-boundary clarification. This is not user
     review of unseen work and does not authorize implementation.
   f008_review: >-
@@ -43,10 +43,14 @@ approval_gates:
     Failed/refused. Spec compliance C0/H1/M0/L0; engineering/security
     C0/H1/M2/L0; QA acceptance C0/H1/M1/L0. The per-reviewer counts are retained
     exactly and no implementation authority exists.
+  f010_review: >-
+    Spec compliance PASS C0/H0/M0/L0; engineering/security BLOCK
+    C0/H3/M3/L0; QA acceptance BLOCK C0/H1/M2/L0. The original counts and mixed
+    outcomes are retained exactly. No implementation authority exists.
 
 work_unit:
   title: Issue an exact effect-free credential-cleanup challenge
-  attempt: T202C3-A006-F010
+  attempt: T202C3-A006-F011
   parent: T110 Complete Authority Lifecycles
   security_task: T202C3 Account Credential And Cleanup Lifecycles
   goal: >-
@@ -58,7 +62,7 @@ work_unit:
     - T202C3-A005 Accepted at production commit 316dae0
     - approved cleanup security contract in 008 canonical artifacts
     - explicit user resume on 2026-08-31
-    - immutable F010 packet preparation commit reviewed by three independent reviewers
+    - immutable F011 packet preparation commit reviewed by three independent reviewers
   blocks:
     - T202C3-A007 cleanup claim
     - T202C3 completion
@@ -68,12 +72,28 @@ work_unit:
 
 codebase_context:
   branch: codex/v1-roadmap-governance
-  baseline_head: 6acd4f238618a3ed10a594ef66406b941cb9074f
+  baseline_head: 0e321de6bdd73d51528c105101e7f284dc76f5a9
   returned_candidate: 2241a946c399ba9c61e67e808a85f777c0d2b402
   implementation_rule: >-
     Existing storage and parsing mechanics do not override the F006 security
-    contract. Historical F001-F009 tokens and prose are inert evidence text and
-    are never authorization inputs.
+    contract. Delivery governance evidence is review and traceability material,
+    not a product security credential, lock service, or defense against a local
+    repository administrator who can rewrite commits or refs.
+  trusted_local_execution_boundary:
+    trusted: [current user and Delivery Orchestrator, Git binary, repository identity]
+    assumptions:
+      - no malicious GIT_DIR or other unexpected GIT_* environment override
+      - no replace refs, grafts, shallow history, ref deletion, or commit rewrite
+      - no dirty or conflicting worktree at dispatch, candidate, review, or integration checks
+    operational_stop: >-
+      Unexpected Git environment, replace/graft/shallow state, dirty/conflicting
+      worktree, or repository identity mismatch stops the operation for human
+      inspection. Governance does not claim resistance to an administrator who
+      can rewrite the local repository.
+    product_security_basis: >-
+      Kirje product security depends on the F006 substantive contract,
+      implementation, discriminating tests, complete validation, and independent
+      review, never on a governance token, ref, or script.
 
 contract_snapshot:
   unchanged_owner: T202C3-A006
@@ -125,9 +145,9 @@ contract_snapshot:
     - evidence contains only synthetic vector IDs, digests, counts, and results
 
 execution_constraints:
-  production_permission: none_pending_f010_authorization_record
-  test_permission: none_pending_f010_authorization_record
-  fixture_permission: none_pending_f010_authorization_record
+  production_permission: none_pending_f011_authorization_dispatch
+  test_permission: none_pending_f011_authorization_dispatch
+  fixture_permission: none_pending_f011_authorization_dispatch
   future_allowed_files:
     - crates/kirje-store/src/authority.rs
     - crates/kirje-store/tests/authority_registry.rs
@@ -137,33 +157,31 @@ execution_constraints:
     - cleanup claim/delete, permit, deletion backend, runtime, config, keyring, protocol, CLI, MCP, network, or remote-effect behavior
     - transition state-machine behavior outside locator input hardening before cleanup insertion
   write_rules:
-    - No production, test, or fixture edit may begin from this packet preparation commit.
-    - Only a direct-child standalone authorization commit with three passing packet reviews may authorize one worker candidate.
-    - The worker edits only the exact future_allowed_files and never edits governance or evidence.
-    - Evidence and authorization records are orchestrator-owned.
-    - Do not mark A007, A008, T202C3, or T110 Ready or Accepted from this packet.
+    - No production, test, or fixture edit begins from P11.
+    - After three substantive packet-review passes, the orchestrator may create one A11 authorization/dispatch record under delegated authority without another user checkpoint.
+    - A11 dispatches one worker for attempt T202C3-A006-F011-IMPLEMENTATION and the worker edits only future_allowed_files.
+    - A failed candidate or blocking implementation review ends that dispatch; create a new named implementation-fix attempt and record rather than reusing A11.
+    - Evidence and authorization records remain orchestrator-owned; A007/A008, T202C3, and T110 remain closed.
 
 tdd_plan:
   ordering: >-
-    After authorization, write discriminating REDs before production changes.
-    Each returned-review category requires a real RED where the defect exists;
-    already-correct behavior receives honest test-only proof.
-  red:
+    After A11 dispatch, add discriminating tests first. Run the exact focused
+    command at RED and again at GREEN. RED must be nonzero because a newly added
+    test exposes the defect; GREEN must be zero after the minimum production fix.
+  focused_red_command: cargo test -p kirje-store --test authority_registry credential_cleanup_challenge_is_exact --all-features --locked
+  focused_green_command: cargo test -p kirje-store --test authority_registry credential_cleanup_challenge_is_exact --all-features --locked
+  red_obligations:
     - transition_id absence returns authorization_malformed before lock, file, database, entropy, or mutation
     - independently cross every public-pair row with all six private-invalid cells and prove exact closed precedence plus zero mutation/entropy
-    - prove the complete challenge phase order and unchanged claim/delete proof-expiry order
-    - cover correct-kind legacy success and negatives, numeric-only private length classifier, and closed-form locator/tombstone mutation matrices
-    - prove blocked/recovery zero-pending interaction and active-pair fault rollback
-    - prove complete immutable challenge projection, clock-only reuse/losers, response loss, concurrent issuance, replacement, restart, entropy, and event cardinality
-    - prove later update/remove/recreation do not rebind and all descriptor/origin/tuple/timestamp/ready-state restart corruption fails closed
+    - prove complete phase order, legacy/bounds/mutation matrices, blocked/recovery zero-pending interaction, and active-pair fault rollback
+    - prove immutable projection, clock-only reuse/losers, response loss, concurrency, replacement, restart, entropy, and event cardinality
+    - prove later update/remove/recreation does not rebind and every descriptor/origin/tuple/timestamp/ready-state corruption fails closed
     - prove six effect-table deltas, zero external calls, zero keyring capability, and privacy invariants
-  green:
-    - parse the canonical locator at reservation and rederive kind/service/username/digest from realm plus historical-before origin before insertion
-    - rederive the tombstone from immutable origin history with bounded streaming validation
-    - admit only exact ready challenge issuance and exact pending reuse with zero authorization effect
-    - extend restart validation for the A006 challenge graph without claim/delete rows or events 16/17
-  refactor:
-    - share helpers only when action-specific bounds, precedence, and private-data closure remain explicit
+  green_obligations:
+    - canonical locator reservation and historical-before rederivation precede cleanup insertion
+    - tombstone rederivation uses immutable origin history and bounded validation
+    - only exact ready issuance and exact pending reuse succeed without authorization effects
+    - restart validation covers the A006 challenge graph without claim/delete rows or events 16/17
 
 validation_loop:
   focused:
@@ -180,138 +198,95 @@ validation_loop:
     - cargo build --workspace --all-features --locked
   known_baseline_blocker:
     - cargo deny remains the T111-owned yanked chacha20/io-imap baseline blocker and is not reported as passing
-  integrity:
-    - git diff --check
-    - ruby -c .ai-platform/scripts/validate_a006_dag.rb
-    - ruby .ai-platform/scripts/validate_a006_dag.rb --self-test
-    - ruby .ai-platform/scripts/validate_a006_dag.rb preparation P10_COMMIT40
-    - verify crates/kirje-store/src/authority/schema_v1.sql and Cargo.lock are unchanged from the authorization commit
+  candidate_scope_checks:
+    - git -c status.showUntrackedFiles=all status --porcelain=v2 --untracked-files=all
+    - git diff --name-status A11..C11 contains authority.rs and authority_registry.rs, optional cleanup fixtures, and no other path
+    - git diff --summary A11..C11 and git ls-tree prove every candidate blob is regular and non-executable
+    - Cargo.lock, authority schema, dependency manifests, and .ai-platform are unchanged from A11
+  evidence_rule: record every command, exit code, and bounded result summary; record cargo deny only as the known T111 blocker
 
-authority_dag:
-  model: append_only_single_parent
-  grant_ref: refs/kirje/authority/T202C3-A006
-  packet_preparation_P:
-    rule: >-
-      This packet commit is clean, has baseline_head as its direct parent, keeps
-      all permissions closed, and contains no F010 review, authorization, or
-      implementation evidence record. The dedicated grant ref must not exist.
-      The packet is immutable after P10.
-  authorization_A:
-    parent: P10
-    exact_added_files:
-      - .ai-platform/evidence/T202C3/attempts/T202C3-A006-F010-spec-review.yaml
-      - .ai-platform/evidence/T202C3/attempts/T202C3-A006-F010-engineering-review.yaml
-      - .ai-platform/evidence/T202C3/attempts/T202C3-A006-F010-qa-review.yaml
-      - .ai-platform/evidence/T202C3/attempts/T202C3-A006-F010-authorization.yaml
-    rules:
-      - A10 is P10's direct single-parent child and adds exactly the four regular 100644 files above without modifying P10 artifacts.
-      - Each review binds P10 commit and tree, records PASS with exact severity counts, and has an explicit residual_risk disposition.
-      - The authorization record references P10 and all three review paths, records authority_basis f010_packet_reviews, the fixed grant ref, and unspent_one_time; it introduces no scope field.
-      - After A10 is committed, the orchestrator atomically creates the absent ref with git update-ref --create-reflog refs/kirje/authority/T202C3-A006 A10 0000000000000000000000000000000000000000. Existing ref blocks authorization.
-      - A10 does not name or hash itself; any sibling authorization is inert.
-  production_candidate_C:
-    parent: A10
-    rules:
-      - C10 is A10's direct single-parent child and has a non-empty diff.
-      - C10 must modify authority.rs and authority_registry.rs; cleanup fixture files are optional.
-      - C10 changes no other path and no .ai-platform file.
-      - Every changed path is a regular 100644 blob; deletion, rename, copy, symlink, submodule, executable mode, and type change are forbidden.
-      - After C10 is committed, the orchestrator atomically consumes A10 with git update-ref --create-reflog refs/kirje/authority/T202C3-A006 C10 A10. CAS failure invalidates the candidate and stops work.
-      - Only a candidate exactly named by the dedicated ref is authorized. The ref is never deleted, reset, rewound, or recreated, and a failed candidate requires a new packet and authorization.
-  terminal_integration_I:
-    parent: C10
-    exact_added_files:
-      - .ai-platform/evidence/T202C3/attempts/T202C3-A006-F010-implementation-spec-review.yaml
-      - .ai-platform/evidence/T202C3/attempts/T202C3-A006-F010-implementation-engineering-review.yaml
-      - .ai-platform/evidence/T202C3/attempts/T202C3-A006-F010-implementation-qa-review.yaml
-      - .ai-platform/evidence/T202C3/attempts/T202C3-A006-F010-integration.yaml
-    rules:
-      - I10 is C10's direct single-parent child and adds exactly the four regular 100644 files above.
-      - Each implementation review binds the same C10 commit and tree and records exact finding counts plus residual-risk disposition.
-      - Integration binds P10, A10, and C10; records derived candidate changes, RED, GREEN, every focused/complete validation, cargo-deny blocker, review paths, review_complete, and spent_non_replayable consumed_candidate C10.
-      - The dedicated ref must remain exactly C10; its reflog records A10 then C10. It is never advanced to I10.
-      - I10 never records or hashes itself; repeat validation accepts explicit P10/A10/C10/I10 and derives committed I10.
-
-review_schemas:
-  roles:
-    spec_compliance: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F010-spec-review.yaml
-    engineering_security: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F010-engineering-review.yaml
-    qa_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F010-qa-review.yaml
-  residual_risk:
-    exact_keys: [status, items]
-    status_values: [none, accepted_nonblocking]
-    item_exact_keys: [severity, finding_id, disposition, blocking_dimension]
-    item_severity_values: [MEDIUM, LOW]
-    required_blocking_dimension: none
-  packet_review:
-    exact_keys: [schema_version, review_kind, status, reviewed_packet_commit, reviewed_packet_tree, findings, residual_risk]
-    required_status: PASS
-    findings_keys: [critical, high, medium, low]
-  authorization:
-    exact_keys: [schema_version, status, reviewed_packet_commit, reviewed_packet_tree, review_paths, authority_basis, grant_ref, grant_state]
-    required_status: AUTHORIZED
-    authority_basis: f010_packet_reviews
-    grant_ref: refs/kirje/authority/T202C3-A006
-    grant_state: unspent_one_time
-  implementation_review:
-    exact_keys: [schema_version, review_kind, status, candidate_commit, candidate_tree, findings, residual_risk]
-    required_status: PASS
-    roles:
-      spec_compliance: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F010-implementation-spec-review.yaml
-      engineering_security: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F010-implementation-engineering-review.yaml
-      qa_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F010-implementation-qa-review.yaml
-  integration:
-    exact_keys: [schema_version, status, packet_commit, authorization_commit, candidate_commit, candidate_tree, candidate_changes, red_observed, green_passed, validations, cargo_deny, implementation_review_paths, grant_ref, grant_state, consumed_candidate]
-    required_status: review_complete
-    grant_ref: refs/kirje/authority/T202C3-A006
-    grant_state: spent_non_replayable
-    candidate_change_exact_keys: [path, status, old_mode, new_mode]
-    red_exact_keys: [command, exit_code, failure_summary]
-    green_exact_keys: [command, exit_code, summary]
-    validation_exact_keys: [command, exit_code, summary]
-    cargo_deny_exact_keys: [status, summary]
-    cargo_deny_status: known_t111_blocker
+procedural_trace:
+  model: trusted_local_linear_delivery_record
+  preparation_P11:
+    - P11 is this immutable reviewed packet commit with permissions closed.
+    - Three independent packet reviews bind the exact P11 commit and tree.
+  authorization_dispatch_A11:
+    - A11 is a later standalone record of delegated authorization and one-worker dispatch, not a security capability.
+    - A11 records only the exact schema below and does not expand P11 scope.
+  candidate_C11:
+    - C11 is the single dispatched worker candidate based on A11.
+    - The orchestrator runs the clean-worktree, exact-diff, mode, and unchanged-file commands above and records their bounded output.
+  integration_I11:
+    - Three independent implementation reviews bind the same C11 commit and tree.
+    - I11 records TDD, every validation, scope evidence, review paths, and review_complete.
+  limitations:
+    - Linear local history is an operating convention, not a cryptographic or malicious-admin replay defense.
+    - Historical validators, tokens, refs, and self-tests are inert evidence and have no product-security meaning.
 
 evidence_contract:
-  preparation_path: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F010-preparation.md
-  authorization_path: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F010-authorization.yaml
-  integration_path: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F010-integration.yaml
-  required:
-    - exact RED and GREEN command/results
-    - complete validation results and explicit cargo-deny T111 blocker
-    - exact candidate diff paths and regular Git modes
-    - three packet reviews binding P10 and three implementation reviews binding C10
-    - sanitized evidence with no raw locator or private data
-  prohibited:
-    - authorization inferred from Markdown prose, historical tokens, file cardinality, or an audit script
-    - packet or review artifact mutation after its committed phase
-    - self-referential commit, tree, file, or manifest hashes
+  record_check: >-
+    Reviewers and the orchestrator inspect the records and use Ruby Psych
+    safe_load with aliases disabled plus exact-key comparison. This is ordinary
+    evidence validation, not a security auditor or authorization capability.
+  packet_review_paths:
+    spec_compliance: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F011-spec-review.yaml
+    engineering_security: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F011-engineering-review.yaml
+    qa_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F011-qa-review.yaml
+  packet_review_exact_keys: [schema_version, review_kind, status, packet_commit, packet_tree, findings, residual_risk]
+  packet_review_required_status: PASS
+  findings_exact_keys: [critical, high, medium, low]
+  residual_risk_exact_keys: [status, items]
+  authorization_path: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F011-authorization-dispatch.yaml
+  authorization_exact_keys: [schema_version, status, authority_basis, attempt_id, packet_commit, allowed_files, review_paths]
+  authorization_values:
+    status: AUTHORIZED_FOR_DISPATCH
+    authority_basis: user_delegated_orchestrator_self_approval
+    attempt_id: T202C3-A006-F011-IMPLEMENTATION
+  authorization_field_rules:
+    packet_commit: exact reviewed P11 commit
+    allowed_files: exact future_allowed_files
+    review_paths: exact packet_review_paths
+  implementation_review_paths:
+    spec_compliance: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F011-implementation-spec-review.yaml
+    engineering_security: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F011-implementation-engineering-review.yaml
+    qa_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F011-implementation-qa-review.yaml
+  implementation_review_exact_keys: [schema_version, review_kind, status, candidate_commit, candidate_tree, findings, residual_risk]
+  implementation_review_required_status: PASS
+  integration_path: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F011-integration.yaml
+  integration_exact_keys: [schema_version, status, attempt_id, packet_commit, authorization_commit, candidate_commit, candidate_tree, candidate_changes, red_observed, green_passed, validations, cargo_deny, scope_checks, implementation_review_paths]
+  integration_required:
+    - status review_complete and exact P11/A11/C11 references
+    - real RED nonzero and GREEN zero for the exact focused command
+    - every focused and complete command with exit code and bounded result
+    - exact candidate scope/mode/unchanged-file command summaries
+    - cargo deny recorded only as known_t111_blocker
+    - three implementation review paths and sanitized evidence
 
 review_contract:
+  blocking_dimensions: [product_security, F006_contract, exact_scope, definition_of_done, validation_sufficiency]
   packet_pass_rule:
-    - unresolved Critical or High findings block authorization
-    - Medium blocks only when it violates the F006 substantive contract, exact scope, Definition of Done, or validation sufficiency
-    - other Medium and Low findings require explicit disposition but do not create an automatic successor packet
-    - all three reviewers must return PASS under this rule before A10 is created
+    - Critical or High findings in a blocking dimension block dispatch.
+    - Medium findings in a blocking dimension block dispatch.
+    - Local-admin tamper resistance, governance format preference, and other non-product governance hardening are out of scope and receive explicit nonblocking disposition.
+    - All three packet reviewers must pass before the orchestrator records A11 and dispatches one worker.
   implementation_pass_rule:
-    - the same severity/disposition rule applies to implementation review
-    - all three reviews must bind the same candidate commit and tree
+    - The same substantive blocking dimensions apply and all reviews bind the same C11.
   acceptance_rule:
-    - review_complete requires TDD, all complete gates, sanitized evidence, and three passing implementation reviews
-    - delegated acceptance never claims user personal review of unseen work
+    - review_complete requires real TDD, all complete gates, exact scope evidence, sanitized evidence, and three passing implementation reviews.
+    - Delegated acceptance never claims user personal review of unseen work.
 
 handoff:
-  current_state: F010 packet preparation only; permissions are closed and the dedicated grant ref is absent
-  next_state: three independent reviews bind immutable P10, then standalone direct-child authorization A10 may be committed and its absent ref atomically created
-  after_authorization: one worker creates exact-scope candidate C10 and the orchestrator atomically consumes A10 to C10 before implementation reviews and standalone I10
+  current_state: F011 packet preparation only; all production, test, and fixture permissions are closed
+  next_state: three independent reviews bind P11, then the orchestrator may create A11 and dispatch one worker under delegated authority
+  after_authorization: one exact-scope C11 candidate, three implementation reviews, then I11 review_complete or a new named fix attempt
   later_tasks: A007/A008 remain non-executable and T202C3/T110 remain unaccepted
   commit_policy:
-    - local commits only
+    - local commits only; ordinary branch history remains linear where practical
     - no push, merge, tag, publish, GitHub Release, live provider, mailbox, credential, or external destructive operation
 
 stop_conditions:
-  - Any unresolved Critical or High packet-review or implementation-review finding.
-  - A Medium finding that violates the F006 contract, exact scope, Definition of Done, or validation sufficiency.
-  - Production work requested before standalone authorization A10 exists, the dedicated ref is atomically created, and both are verified.
+  - Any unresolved finding in a substantive blocking dimension.
+  - Production work requested before A11 is recorded after three packet-review passes.
   - Schema, dependency, core transcript/type, runtime, keyring, protocol, CLI, MCP, network, or external-effect change is required.
+  - Unexpected Git environment/repository state, dirty/conflicting worktree, or repository identity mismatch.
   - Any locator material, secret, credential, private origin value, or real provider data would enter committed evidence.

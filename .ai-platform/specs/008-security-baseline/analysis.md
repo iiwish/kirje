@@ -3,7 +3,7 @@
 ## Metadata
 
 - Feature ID: `008-security-baseline`
-- Status: T202C3_A006_F010_Ready_For_Packet_Review_No_Execution_Permission
+- Status: T202C3_A006_F011_Ready_For_Packet_Review_No_Execution_Permission
 - Updated: 2026-08-31
 - Inputs: `spec.md`, `checklists/requirements.md`, `plan.md`, `research.md`,
   `data-model.md`, `contracts/**`, `tasks.md`, project constitution and AGENTS
@@ -29,7 +29,9 @@
   authority, F008 review failed/refused with exact counts spec C0/H2/M2/L0,
   engineering/security C0/H4/M1/L0, and QA C0/H4/M2/L0. F009 review failed with
   spec C0/H1/M0/L0, engineering/security C0/H1/M2/L0, and QA C0/H1/M1/L0. The
-  orchestrator approved F010's one-time local-ref clarification. F010 leaves the substantive F006
+  F010 review returned spec PASS C0/H0/M0/L0, engineering/security BLOCK
+  C0/H3/M3/L0, and QA BLOCK C0/H1/M2/L0. The orchestrator approved F011's
+  trusted-local procedural clarification. F011 leaves the substantive F006
   cleanup contract unchanged. Complete request-independent step-2
   validation remains intact and may stream all private graphs. After the request-
   independent global validation pass, source/call-order proof must show no
@@ -50,7 +52,7 @@
   no pending expiry is durable before eligibility. Claim/delete proof-expiry
   ordering remains unchanged. Same-origin proposed is corruption; only an
   unrelated matched proposed pair is a reachable public projection.
-  No implementation started; F010 awaits three reviews with permissions closed. The first A006 packet
+  No implementation started; F011 awaits three reviews with permissions closed. The first A006 packet
   review rejected the current-binding contradiction, incomplete clock-only
   recovery rule, and non-implementable cross-crate delete capability. The
   revised amendment makes cleanup the explicit historical-before exception,
@@ -67,10 +69,9 @@
   `T202C3_A006_PACKET_REVIEW_PASS`; that historical packet pass does not
   override the later failed production review. A007/A008 remain non-executable
   JIT outlines.
-  F010 keeps the bespoke token auditor retired and uses immutable
-  P10/A10/C10/I10 commits plus an atomically created and consumed dedicated
-  local ref. Git topology, exact diffs/modes, strict review records, the ref,
-  its two-entry reflog, and real validation evidence establish the lifecycle. Cargo deny
+  F011 keeps bespoke authority auditors retired and defines governance as a
+  trusted-local procedural trace, not a product-security credential. Real scope,
+  TDD, validation, and independent review evidence establish delivery. Cargo deny
   remains an explicit T111 baseline blocker rather than an A006 pass claim.
   The 3 A001 T202C1 findings are closed by A002
   and `T202C1_A002_PACKET_REVIEW_PASS`. Historical challenge validation is now
@@ -153,8 +154,8 @@ must preserve that placement or add an explicit counter before loop expansion.
   user approved F002 on 2026-08-31. F002 packet review returned QA PASS
   C0/H0/M0/L0, spec FAIL C0/H0/M1/L0, and engineering FAIL C0/H1/M2/L0 at
   `38ca4273`. Under the user's delegated existing-boundary clarification
-  authority, F008 review failed/refused, F009 review failed, and the orchestrator
-  approved F010's one-time local-ref clarification. It is ready for three independent packet
+  authority, F008 and F009 reviews failed, F010 review blocked, and the
+  orchestrator approved F011's trusted-local clarification. It is ready for three independent packet
   reviews under the packet's severity/disposition rule; permissions remain none,
   and A007/A008 remain closed.
   T202C4, T202D-T202E, and T203-T212 remain dependency-gated Draft work. T204
@@ -647,7 +648,7 @@ permission to merge child evidence or relax the strict serial gates.
 
 ## Execution Gate
 
-`T202C3_A006_F010_READY_FOR_PACKET_REVIEW_NO_EXECUTION_PERMISSION`
+`T202C3_A006_F011_READY_FOR_PACKET_REVIEW_NO_EXECUTION_PERMISSION`
 
 T202A is accepted from four test-first attempts, independent security and QA
 review, its bootstrap-schema digest, and fresh packet/workspace gates. A003
@@ -702,8 +703,8 @@ pending/private lookup and durable expiry before public eligibility, separating
 same-origin proposed corruption from unrelated proposed public conflict,
 retaining active-pair fault rollback, and completing effect/gate/audit proof.
 F006 audit review then failed without reopening that substantive contract. F007
-and F008 reviews also failed/refused. F009 review failed. F010 keeps the bespoke
-token auditor retired and defines the dedicated-ref P10-A10-C10-I10 authority
-DAG. No implementation started. F010 requires three independent packet reviews
-before A10 and atomic absent-ref creation; the T202C and T202
+and F008 reviews also failed/refused. F009 review failed and F010 review blocked.
+F011 keeps bespoke authority auditors retired and defines a trusted-local
+procedural delivery trace. No implementation started. F011 requires three
+independent packet reviews before A11 dispatch; the T202C and T202
 umbrellas remain non-Accepted.
