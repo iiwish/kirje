@@ -3,7 +3,7 @@
 ## Metadata
 
 - Feature ID: `008-security-baseline`
-- Status: T202C3_A006_F003_Ready_For_Packet_Review
+- Status: T202C3_A006_F004_Ready_For_Packet_Review_No_Execution_Permission
 - Updated: 2026-08-31
 - Inputs: `spec.md`, `checklists/requirements.md`, `plan.md`, `research.md`,
   `data-model.md`, `contracts/**`, `tasks.md`, project constitution and AGENTS
@@ -13,7 +13,7 @@
 ## Gate Result
 
 - Critical findings: 0 unresolved.
-- High findings: the A006 production-review High remains open. F003 resolves the
+- High findings: the A006 production-review High remains open. F004 resolves the
   F002 packet-review High at the contract layer. Cleanup validates
   origin/locator/tombstone before blocked/recovery eligibility, so mixed invalid
   target plus blocked/recovery state returns `credential_cleanup_invalid`
@@ -26,12 +26,20 @@
   approved the F002 contract revision on 2026-08-31. Its packet review failed
   because a literal no-private-read claim contradicted mandatory global graph
   validation. Under the user's delegated existing-boundary clarification
-  authority, the orchestrator approved F003. Complete request-independent step-2
+  authority, the orchestrator approved F004 after F003 packet review failed
+  engineering C0/H1/M0/L0, spec C0/H0/M1/L0, and QA C0/H0/M1/L0. Complete request-independent step-2
   validation remains intact and may stream all private graphs. After the request-
   independent global validation pass, source/call-order proof must show no
-  request-directed private lookup or request-dependent private branch before
-  closed public pair classification. No
-  implementation started; F003 awaits three reviews with permissions closed. The first A006 packet
+  request-directed pending/private lookup or request-dependent private branch
+  before closed public pair classification. Same-context expired pending plus
+  later blocked/recovery performs no pending-row lookup-dependent interaction;
+  active eligible rollback uses the two existing expiration fault hooks. No
+  generic projection sample is accepted: absent store, absent account, pair
+  mismatch, matched recovery, matched blocked store, matched blocked/proposed
+  account, unrelated matched blocked/recovery, active/active, and active/removed
+  are each crossed independently with wrong origin, locator kind, locator
+  digest, tombstone, lifecycle, and descriptor.
+  implementation started; F004 awaits three reviews with permissions closed. The first A006 packet
   review rejected the current-binding contradiction, incomplete clock-only
   recovery rule, and non-implementable cross-crate delete capability. The
   revised amendment makes cleanup the explicit historical-before exception,
@@ -69,13 +77,15 @@
   external-call, and privacy proof. F001 additionally failed on two Medium
   packet defects: its same-context invalid-target expired-replacement case is
   unreachable except as step-2 persisted corruption, and closed locator shapes
-  cannot prove generic parser bounds at the integration surface. F003 defines
-  exactly three reachable branches: same-context expired pending plus later
-  blocked/recovery with no successor and exact-prestate rollback of tentative
-  predecessor/paired-clock work; different-context invalid target with zero
-  predecessor interaction; and persisted step-2 corruption. It retains the
+  cannot prove generic parser bounds at the integration surface. F004 requires
+  same-context expired pending plus later blocked/recovery to return the public
+  error without pending lookup-dependent interaction and with predecessor/event/
+  clocks unchanged. It moves rollback proof to an active eligible valid-target
+  path using `OldChallengeExpiredState` and `OldChallengeExpiredEvent`; a
+  different-context invalid target has zero predecessor interaction and
+  persisted corruption remains step 2. It retains the
   private numeric classifier with numeric-only unit tests; no public/test-support
-  API is added and closed-form bytes stay in `authority_registry.rs`. F003 also
+  API is added and closed-form bytes stay in `authority_registry.rs`. F004 also
   replaces the stale data-model branch, fixes the execution gate, and chooses a pure exact-
   scope manifest preflight for `transition_id=None` without a core change. The
   earlier literal sole-call scan can be bypassed by aliases, wildcards, re-
@@ -126,7 +136,7 @@ must preserve that placement or add an explicit counter before loop expansion.
   user approved F002 on 2026-08-31. F002 packet review returned QA PASS
   C0/H0/M0/L0, spec FAIL C0/H0/M1/L0, and engineering FAIL C0/H1/M2/L0 at
   `38ca4273`. Under the user's delegated existing-boundary clarification
-  authority, the orchestrator approved F003. It is ready for three independent
+  authority, the orchestrator approved F004 after the failed F003 review. It is ready for three independent
   zero-finding packet reviews; production/test/fixture permissions remain none,
   and A007/A008 remain closed.
   T202C4, T202D-T202E, and T203-T212 remain dependency-gated Draft work. T204
@@ -619,7 +629,7 @@ permission to merge child evidence or relax the strict serial gates.
 
 ## Execution Gate
 
-`APPROVED_FOR_T202C2_DELEGATED_EXECUTION`
+`T202C3_A006_F004_READY_FOR_PACKET_REVIEW_NO_EXECUTION_PERMISSION`
 
 T202A is accepted from four test-first attempts, independent security and QA
 review, its bootstrap-schema digest, and fresh packet/workspace gates. A003
@@ -666,10 +676,11 @@ prior findings, reported zero Critical, High, Medium, or Low, and issued
 `T202C2_A006_PACKET_REVIEW_PASS`. T202C2 is Accepted. Returned candidate
 `T202C3-A006` retains one High and five Medium findings. The user resumed repair,
 F001 failed spec review C0/H1/M2/L0, and the user approved the F002 contract
-revision. F002 then failed packet review. F003 resolves its findings by keeping
-complete request-independent step-2 validation, closing request-directed lookup/
-branch ordering before public classification, defining only the three reachable
-replacement branches, and selecting a pure exact-scope `authority.rs` manifest
-preflight without a core change. No implementation started. F003 requires three
+revision. F002 and F003 then failed packet review. F004 resolves the F003 findings
+by keeping complete request-independent step-2 validation, closing request-
+directed pending/private lookup and branch ordering before public classification,
+moving tentative-expiry rollback to the active-pair fault-injection path, and
+selecting a pure exact-scope `authority.rs` manifest preflight without a core
+change. No implementation started. F004 requires three
 independent zero-finding reviews plus governance follow-up; the T202C and T202
 umbrellas remain non-Accepted.

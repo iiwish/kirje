@@ -333,12 +333,18 @@ text in `data-model.md`, unresolved `transition_id=None` error/preflight
 ownership, and a stale F001 review gate. F002 is blocked, the heartbeat is
 paused, and production, test, and fixture permissions are none.
 
-F003 is governance-only and has no new production RED/GREEN or validation
-result. Under the user's explicit existing-boundary delegated authority, the
-orchestrator approved its contract clarification on 2026-08-31. The packet
-preserves request-independent global validation, requires source/call-order
-proof before public classification, defines only the three reachable replacement
-branches, and requires a pure `authority.rs` preflight for `transition_id=None`
-before apply lock/file/database/entropy with zero I/O/mutation/entropy and no
-core change. Production, test, and fixture permissions remain none pending three
-independent zero-finding F003 packet reviews and governance follow-up.
+F003 was governance-only and had no production RED/GREEN or implementation.
+Its packet review failed engineering C0/H1/M0/L0, spec C0/H0/M1/L0, and QA
+C0/H0/M1/L0. No pass token or execution permission exists.
+
+F004 is governance-only and has no new production RED/GREEN result. Under the
+user's explicit existing-boundary delegated authority, the orchestrator approved
+its clarification on 2026-08-31. The packet preserves request-independent global
+validation, prohibits request-directed pending/private lookup before public
+classification, requires the complete public-pair by six-private-invalid matrix,
+makes blocked/recovery zero-interaction, and moves rollback proof to active-pair
+`OldChallengeExpiredState`/`OldChallengeExpiredEvent` faults. The pure
+`authority.rs` preflight for `transition_id=None`, numeric-only bounds helper,
+prior matrices, and exact future scope remain unchanged. Production, test, and
+fixture permissions remain none pending three independent zero-finding F004
+packet reviews and governance follow-up.

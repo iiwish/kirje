@@ -19,12 +19,13 @@
   High and one Medium. The final independent spec, engineering, and QA passes at
   governance HEAD `3533054` returned zero Critical, High, Medium, or Low finding
   and issued `T202C3_A006_PACKET_REVIEW_PASS` for the packet's exact scopes. Its
-  production candidate later failed review; F001 and F002 packet reviews also
+  production candidate later failed review; F001, F002, and F003 packet reviews also
   failed. On 2026-08-31 the user authorized the Delivery Orchestrator to approve
   existing-boundary clarifications. Under that authority, the orchestrator
-  approved F003's request-independent validation ordering, three reachable
-  replacement branches, and exact-scope manifest preflight. This records
-  delegated contract approval, not user review of the unseen F003 artifact.
+  approved F004's request-independent validation ordering, pre-classification
+  pending/private lookup prohibition, active-pair rollback path, and exact-scope
+  manifest preflight. This records delegated contract approval, not user review
+  of the unseen F004 artifact.
 
 ## Goal
 
@@ -316,12 +317,26 @@ granting mailbox access.
   supplied common store/account IDs are untrusted typed request values. Complete
   request-independent global authority validation may already stream all private
   cleanup, origin, locator, and tombstone graphs. After the request-independent
-  global validation pass, no request-directed private lookup or request-dependent
-  private branch may occur before the closed public pair classification. Absent or pair-mismatched public IDs
-  fail as `credential_cleanup_invalid`; a matched public blocked/recovery
-  projection returns its stable conflict/recovery result, including for an
-  unrelated matched pair. Active plus active/removed alone proceeds to request-
-  directed private cleanup validation. One pure `authority.rs` manifest
+  global validation pass, no request-directed pending/private lookup or request-
+  dependent private branch may occur before the closed public pair
+  classification. Absent store, absent account, or a pair mismatch returns
+  `credential_cleanup_invalid`; matched recovery store returns
+  `owner_recovery_required`; matched blocked store or blocked/proposed account
+  returns `account_update_conflict`; an unrelated but matched blocked/recovery
+  pair deliberately returns the same public projection. Each of those public
+  classes is crossed independently with wrong origin, locator kind, locator
+  digest, tombstone, lifecycle, and descriptor and may not distinguish the
+  private cell. Active store with active or removed account alone proceeds; each
+  of the six private-invalid cells then returns `credential_cleanup_invalid`.
+  A same-context expired pending challenge followed by a later matched blocked/
+  recovery public state returns the public result with no pending-row lookup-
+  dependent interaction, unchanged predecessor state/event and both clock
+  fields, and zero entropy/successor/grant/nonce/cleanup change. With an active
+  eligible pair and valid private target, deterministic faults
+  `OldChallengeExpiredState` and `OldChallengeExpiredEvent` prove complete
+  transactional rollback and zero entropy/successor/cleanup. Different-context
+  invalid targets have zero predecessor interaction; persisted corruption
+  remains step-2 `owner_recovery_required`. One pure `authority.rs` manifest
   preflight rejects cleanup `transition_id=None` as `authorization_malformed`
   before apply lock, file, database, or entropy work, with zero I/O, mutation,
   or entropy and no core change.

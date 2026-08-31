@@ -2,10 +2,10 @@
 
 ## Status
 
-`PENDING_THREE_INDEPENDENT_REVIEWS`
+`FAILED_NO_EXECUTION_AUTHORIZATION`
 
 - Packet: `.ai-platform/specs/007-stable-v1-program/packets/T110-A006.yaml`
-- Baseline governance HEAD: `c92e32b9807a2cf6f7b86c0d782168fb7f0c438d`
+- Packet governance HEAD: `1d143ccadd24bd4cd3432f7a8b5f3356cd1ce623`
 - Contract clarification approval: Delivery Orchestrator on 2026-08-31 under
   the user's explicit existing-boundary delegated authority
 - Execution authorization: none
@@ -17,28 +17,27 @@ delegated approval is limited to existing-boundary clarification. Any unresolved
 material safety, scope, schema, dependency, external credential, or external-
 state issue remains a stop condition.
 
-## Clarification Under Review
+## Review Result
 
-1. Complete schema, anchor, history, transcript, and event validation remains a
-   request-independent global pass and may already stream every private cleanup,
-   origin, locator, and tombstone graph. After the request-independent global
-   validation pass, no request-directed private lookup or request-dependent
-   private branch may occur before the closed public pair classification. Source
-   and call-order proof is mandatory.
-2. Replacement has exactly three reachable branches: same-context expired
-   pending plus later blocked/recovery fails without a successor and rolls back
-   tentative predecessor/paired-clock work according to exact prestate;
-   different-context invalid target has zero predecessor interaction; persisted
-   corruption is step-2 `owner_recovery_required`.
-3. Within the exact A006 scope, one pure `authority.rs` cleanup-manifest
-   preflight runs before apply lock, file, database, or entropy work.
-   `transition_id=None` returns `AuthorizationMalformed` with zero I/O, mutation,
-   or entropy. Core types and transcript bytes remain unchanged.
-4. Historical F001/F002 reviews do not authorize execution. Only three
-   independent zero-finding F003 reviews plus a governance follow-up may open
-   the exact production/test/fixture scopes.
-5. The untrusted public pair algorithm, private numeric-only bounds classifier,
-   and all initial/F001 QA matrices remain mandatory.
+| Pass | Status | Findings |
+| --- | --- | --- |
+| Spec compliance | FAIL C0/H0/M1/L0 | Exact public-pair by six-private-invalid matrix was incomplete. |
+| Engineering/security | FAIL C0/H1/M0/L0 | Same-context blocked/recovery still depended on pending-row lookup before public classification. |
+| QA/evidence | FAIL C0/H0/M1/L0 | Stale 008 execution token and stale F001/F002/F003 authorization scan gap. |
+
+The High requires complete request-independent global step-2 validation first
+and no request-directed pending/private lookup before closed public-pair
+classification. Same-context expired pending plus later matched blocked/recovery
+must return the public result with zero pending-row lookup-dependent interaction:
+predecessor state/event and both clock fields remain unchanged, and entropy,
+successor, grant, nonce, and cleanup deltas are zero. Tentative-expiry rollback
+belongs to the active eligible, valid-target path using existing deterministic
+faults `OldChallengeExpiredState` and `OldChallengeExpiredEvent`.
+
+The spec Medium requires every public row to be independently crossed with
+wrong origin, locator kind, locator digest, tombstone, lifecycle, and descriptor.
+The QA Medium requires replacement of the stale execution token and a scan for
+stale F001/F002/F003 execution authorization.
 
 ## Exact Future Scope
 
@@ -50,18 +49,11 @@ The signature fixture may change only when deterministic synthetic public
 signatures truly change and may never contain locator transcripts. Governance,
 packet, status, and evidence files remain orchestrator-owned.
 
-## Review Placeholders
+## Gate
 
-| Pass | Status | Findings |
-| --- | --- | --- |
-| Spec compliance | PENDING | Not assessed |
-| Engineering/security | PENDING | Not assessed |
-| QA/evidence | PENDING | Not assessed |
-
-All three reviews must independently return PASS with zero unresolved Critical,
-High, Medium, or Low finding. Only a later governance follow-up may open the
-packet's exact production/test/fixture permissions. A007/A008 remain non-
-executable; T202C3/T110 remain unaccepted.
+F003 is closed as failed. No pass token exists and no implementation attempt
+started. Production, test, and fixture permissions remain none. A007/A008 remain
+non-executable; T202C3/T110 remain unaccepted.
 
 ## Governance Preparation Validation
 

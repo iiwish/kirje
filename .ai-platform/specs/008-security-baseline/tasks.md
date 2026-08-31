@@ -40,11 +40,12 @@
   `kirje-store` as its sole direct dependent and supersedes the flawed shared
   runtime/pluggable deletion formulation identified by repeat review. The
   decision is not implementation evidence. A006's historical packet gate passed
-  only for returned candidate `2241a946`. F001 and F002 packet reviews failed.
+  only for returned candidate `2241a946`. F001, F002, and F003 packet reviews failed.
   On 2026-08-31 the user authorized orchestrator approval of existing-boundary
-  clarifications. The orchestrator approved F003's exact clarification under
-  that authority; this is not user review of the unseen artifact. F003 awaits
-  three independent zero-finding reviews with permissions closed. A007/A008
+  clarifications. The orchestrator approved F004's exact clarification under
+  that authority after F003 failed engineering C0/H1/M0/L0, spec C0/H0/M1/L0,
+  and QA C0/H0/M1/L0; this is not user review of the unseen artifact. F004
+  awaits three independent zero-finding reviews with permissions closed. A007/A008
   remain closed, and no execution is accepted before its TDD, validation,
   evidence, and implementation reviews.
 - No task may expose credentials, owner private keys, signatures, mailbox
@@ -767,11 +768,13 @@ algorithm, three reachable replacement branches, and a private numeric-only
 length helper. Its packet review returned QA PASS C0/H0/M0/L0, spec FAIL
 C0/H0/M1/L0, and engineering FAIL C0/H1/M2/L0 at `38ca4273`; no implementation
 started. Under the user's delegated existing-boundary clarification authority,
-the orchestrator approved F003. It preserves request-independent global graph
-validation, closes pre-public-classification lookup/branch ordering, defines the
-three reachable replacement branches, and selects an exact-scope pure manifest
-preflight before apply lock/file/database/entropy without a core change. F003 is
-`ready_for_f003_packet_review`; every code/fixture permission remains none. A007
+the orchestrator approved F004 after F003 failed engineering C0/H1/M0/L0, spec
+C0/H0/M1/L0, and QA C0/H0/M1/L0. F004 preserves request-independent global graph
+validation, prohibits request-directed pending/private lookup before public-pair
+classification, moves tentative-expiry rollback to the active-pair post-
+classification fault path, and retains the exact-scope pure manifest preflight
+before apply lock/file/database/entropy without a core change. F004 is
+`ready_for_f004_packet_review`; every code/fixture permission remains none. A007
 claim and A008 delete-completion are non-executable just-in-time outlines;
 neither is Ready or packetized.
 Priority: P0
@@ -819,20 +822,27 @@ Test targets:
   wrong-origin active-v2/legacy-v1 transcripts with zero durable mutation
 - Exact pending-reuse and claimed-recovery clock-only mutation; expired-pending
   replacement and concurrent exact issuance entropy/event/restart matrices
-- Cleanup challenge public projection crosses absent store/account, pair
-  mismatch, matched/unrelated blocked/recovery pairs, and active/removed pairs
-  with private target mismatch. Complete request-independent global validation
-  may already stream every private graph; source/call-order proof shows that
-  after the request-independent global validation pass, no request-directed
-  private lookup or request-dependent private branch occurs before closed public
-  pair classification, with no target distinction or mutation/entropy
+- Cleanup challenge public projection crosses absent store, absent account, pair
+  mismatch, matched recovery store, matched blocked store, matched blocked or
+  proposed account, unrelated matched blocked/recovery pair, active/active, and
+  active/removed independently with wrong origin, locator kind, locator digest,
+  tombstone, lifecycle, and descriptor. Every public-ineligible class returns the
+  closed public result without request-directed pending/private lookup or target
+  distinction; both active classes proceed and each private-invalid cell returns
+  `credential_cleanup_invalid`. Complete request-independent global validation
+  may already stream every private graph; source/call-order proof enforces this
+  boundary with no mutation/entropy
 - Pure `authority.rs` manifest preflight rejects cleanup `transition_id=None` as
   `authorization_malformed` before apply lock, file, database, or entropy work,
   with zero I/O/mutation/entropy and no core change
-- Replacement proof covers exactly three reachable branches: same-context
-  expired pending plus later blocked/recovery with exact-prestate rollback and
-  no successor; different-context invalid target with zero predecessor
-  interaction; and persisted target corruption at step 2
+- Same-context expired pending plus later matched blocked/recovery returns the
+  public result with zero pending-row lookup-dependent interaction, unchanged
+  predecessor state/event and both clocks, and zero entropy/successor/grant/
+  nonce/cleanup. Active eligible pair plus valid target uses deterministic
+  `OldChallengeExpiredState` and `OldChallengeExpiredEvent` faults to prove full
+  transaction rollback and zero entropy/successor/cleanup. Different-context
+  invalid target has zero predecessor interaction; persisted corruption remains
+  step-2 `owner_recovery_required`
 - Private numeric service/username/total-length classifier unit boundaries in
   authority.rs with no public/test-support API or locator byte vectors; closed-
   form locator bytes remain only in authority_registry.rs
@@ -875,9 +885,9 @@ there is no separate `008-security-baseline/packets/T202C3.yaml`.
 Attempt ownership is serial: A006 owns canonical locator validation at
 reservation/prepare plus effect-free cleanup challenge issuance, without
 changing transition state-machine behavior. Its candidate is Returned/Needs Fix
-and blocks all later outlines. F001 and F002 packet reviews failed. Under the
+and blocks all later outlines. F001, F002, and F003 packet reviews failed. Under the
 user's delegated existing-boundary clarification authority, the orchestrator
-approved F003. F003 is `ready_for_f003_packet_review` and requires three
+approved F004. F004 is `ready_for_f004_packet_review` and requires three
 independent zero-finding PASS reviews plus a governance follow-up before any
 exact production/test/fixture scope opens.
 A007 owns the new unpublished

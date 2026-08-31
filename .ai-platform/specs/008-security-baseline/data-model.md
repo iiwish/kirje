@@ -1210,11 +1210,15 @@ Exact pending challenge reuse and exact claimed recovery append no event and
 change no challenge, cleanup, grant, lifecycle, or event timestamp. They may
 advance only the paired `authority_meta` clock high-water. Expired-pending
 replacement records one predecessor event 5 before one successor event 3 only
-when valid. Failure has exactly three reachable branches. Same-context expired
-pending plus later blocked/recovery eligibility creates no successor and rolls
-back tentative predecessor and paired-clock work according to exact prestate: a
-durably expired predecessor stays expired, while tentative expiry of a pending
-predecessor rolls back to pending. Different-context invalid target has zero
+when valid. Public classification occurs before request-directed pending/private
+lookup. A same-context expired pending row followed by matched blocked/recovery
+public state returns that public error without pending-row lookup-dependent
+interaction: predecessor state/event/clock is unchanged and entropy, successor,
+grant, nonce, and cleanup deltas are zero. For an active eligible public pair and
+valid private target, deterministic failures after `OldChallengeExpiredState`
+and `OldChallengeExpiredEvent` each roll the entire tentative predecessor/
+event/clock transaction back to exact prestate with zero entropy, successor,
+grant, nonce, or cleanup delta. Different-context invalid target has zero
 predecessor interaction. Persisted target/history corruption is global step 2
 and returns `owner_recovery_required`.
 

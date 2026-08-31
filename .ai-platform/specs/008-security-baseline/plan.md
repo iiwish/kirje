@@ -354,18 +354,29 @@ Cleanup challenge creation begins with a pure `authority.rs` manifest preflight:
 database, or entropy work, with zero I/O, mutation, or entropy and no core
 change. Complete request-independent global authority validation then may stream
 all private cleanup, origin, locator, and tombstone graphs. After the request-
-independent global validation pass, no request-directed private lookup or
-request-dependent private branch may occur before the closed public pair
+independent global validation pass, no request-directed pending/private lookup
+or request-dependent private branch may occur before the closed public pair
 classification. Absent store/account or persisted
 pair mismatch returns `credential_cleanup_invalid`; a matched recovery store
 returns `owner_recovery_required`; matched blocked store or blocked/proposed
 account returns `account_update_conflict`, including for an unrelated matched
 pair. Active store plus active/removed account proceeds to request-directed
-private target validation. Replacement tests cover exactly three reachable
-branches: same-context expired pending plus later blocked/recovery fails with no
-successor and rolls back tentative predecessor/paired-clock work according to
-exact prestate; different-context invalid target has zero predecessor
-interaction; persisted corruption is step-2 `owner_recovery_required`. Generic
+private target validation. The public-pair matrix crosses absent store, absent
+account, pair mismatch, matched recovery store, matched blocked store, matched
+blocked/proposed account, unrelated matched blocked/recovery pair, and active
+store with active/removed account independently with wrong origin, locator kind,
+locator digest, tombstone, lifecycle, and descriptor; every public-ineligible
+class returns its closed public result without target distinction, while the
+two active classes proceed and return `credential_cleanup_invalid` for each
+private-invalid cell. A same-context expired pending challenge followed by a
+later matched blocked/recovery public state returns that public result without a
+pending-row lookup-dependent interaction: predecessor state/event and both
+clock fields remain unchanged, and entropy/successor/grant/nonce/cleanup deltas
+are zero. For an active eligible pair and valid private target, deterministic
+faults `OldChallengeExpiredState` and `OldChallengeExpiredEvent` prove rollback
+of all tentative predecessor/event/clock work and zero entropy/successor/cleanup.
+A different-context invalid target has zero predecessor interaction; persisted
+corruption is step-2 `owner_recovery_required`. Generic
 locator length gates use one private numeric classifier with numeric-only
 `#[cfg(test)]` unit tests; closed-form bytes remain in the registry integration
 test.
@@ -672,10 +683,10 @@ implementation claim and not a claim that the user personally reviewed the
 resulting artifact. `T202C3_A006_PACKET_REVIEW_PASS` authorized only A006's exact
 candidate scopes at governance HEAD `3533054`. Candidate `2241a946` later failed
 spec and QA review and is Returned/Needs Fix with no current write permission.
-The user explicitly resumed A006 repair on 2026-08-31. F001 and F002 packet
+The user explicitly resumed A006 repair on 2026-08-31. F001, F002, and F003 packet
 reviews failed. The user then authorized the orchestrator to approve existing-
 boundary clarifications without requesting approval at each node. Under that
-authority, the orchestrator approved F003's exact clarification; this does not
+authority, the orchestrator approved F004's exact clarification; this does not
 claim user review of the resulting artifact. Only three independent zero-
-finding F003 packet reviews plus a governance follow-up can open the exact
+finding F004 packet reviews plus a governance follow-up can open the exact
 production/test/fixture scopes. Later A007/A008 attempts remain closed.

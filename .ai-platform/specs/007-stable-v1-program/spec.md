@@ -101,10 +101,20 @@ its checksum, provenance, dependency inventory, and release notes.
   caller-supplied common subject IDs remain untrusted typed request values.
   Complete request-independent global authority validation may already stream
   all private graphs. After the request-independent global validation pass, no
-  request-directed private lookup or request-dependent private branch may occur
+  request-directed pending/private lookup or request-dependent private branch may occur
   before the closed public pair
   classification, so absent/mismatched or blocked/recovery public subjects
   cannot reveal whether a private target exists or is valid. Credential cleanup
+  tests cross absent store, absent account, pair mismatch, matched recovery,
+  matched blocked store, matched blocked/proposed account, unrelated matched
+  blocked/recovery pair, and active store with active/removed account independently
+  with wrong origin, locator kind, locator digest, tombstone, lifecycle, and
+  descriptor. Same-context expired pending plus later matched blocked/recovery
+  performs no pending lookup-dependent interaction and changes no predecessor,
+  event, clock, entropy, successor, grant, nonce, or cleanup state. Active-pair
+  rollback uses `OldChallengeExpiredState` and `OldChallengeExpiredEvent`.
+  Different-context invalid targets do not interact with predecessors, and
+  persisted corruption remains global step 2.
   with `transition_id=None` fails a pure `authority.rs` manifest preflight as
   `authorization_malformed` before apply lock, file, database, or entropy work,
   with no core type or transcript change.

@@ -374,16 +374,23 @@ untrusted typed request values, even though a later persisted challenge binds
 them into the signing payload. Complete schema, anchor, history, transcript, and
 event validation is a request-independent global pass and may already have
 streamed every private cleanup, origin, locator, and tombstone graph. After the
-request-independent global validation pass, no request-directed private lookup
-or request-dependent private branch may occur before the closed public pair
+request-independent global validation pass, no request-directed pending/private
+lookup or request-dependent private branch may occur before the closed public pair
 classification. An absent store, absent account, or persisted account/store pair
 mismatch is `credential_cleanup_invalid`. For an existing matched public pair,
 recovery-required store is `owner_recovery_required`; blocked store or blocked/
 proposed account is `account_update_conflict`. This deliberately applies to an
 unrelated matched blocked/recovery pair and reveals no cleanup validity. Active
 store plus active or removed account alone proceeds to request-directed private
-cleanup validation. These rules do not make caller-supplied IDs signed authority
-before proof verification.
+cleanup validation. The matrix independently crosses every public class with
+wrong origin, locator kind, locator digest, tombstone, lifecycle, and descriptor;
+the pre-private classes never distinguish those cells, while active/active and
+active/removed return `credential_cleanup_invalid` for each invalid private
+cell. A same-context expired pending row plus later matched blocked/recovery
+returns the public result with zero pending-row lookup-dependent interaction and
+unchanged predecessor/event/clocks; active eligible valid-target rollback uses
+`OldChallengeExpiredState` and `OldChallengeExpiredEvent`. These rules do not
+make caller-supplied IDs signed authority before proof verification.
 
 ### Send Manifest
 

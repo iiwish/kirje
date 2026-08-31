@@ -1280,10 +1280,10 @@ account IDs as bounded untrusted typed request values. Complete schema, anchor,
 history, transcript, and event integrity validation is request-independent and
 may already have streamed every private cleanup, origin, locator, and tombstone
 graph. After the request-independent global validation pass, no request-directed
-private lookup or request-dependent private branch may occur before the closed
-public pair classification. An absent store, absent account, or account whose
-persisted `store_id` differs from the requested store ID returns
-`credential_cleanup_invalid`.
+pending/private lookup or request-dependent private branch may occur before the
+closed public pair classification. An absent store, absent account, or account
+whose persisted `store_id` differs from the requested store ID returns
+`credential_cleanup_invalid` without request-directed pending/private lookup.
 
 For an existing matched public store/account pair, a `recovery_required` store
 returns `owner_recovery_required`; a blocked store or a blocked/proposed account
@@ -1297,6 +1297,19 @@ finalized origin transition, and the historical-before binding. A removed
 account is eligible and a new account with the same display ID is irrelevant.
 Provisional, claimed, deleted, wrong-kind, wrong-origin, duplicated-descriptor,
 or mismatched locator/tombstone state is `credential_cleanup_invalid`.
+
+The public-pair cross-product is complete rather than sampled. Absent store,
+absent account, and pair mismatch each return `credential_cleanup_invalid`.
+Matched recovery store returns `owner_recovery_required`. Matched blocked store,
+blocked account, and proposed account each return `account_update_conflict`.
+An unrelated but matched blocked/recovery pair returns that same public result.
+Every one of those public-ineligible cells is crossed independently with wrong
+origin, wrong locator kind, wrong locator digest, wrong tombstone, wrong
+lifecycle, and wrong descriptor target cells; none performs request-directed
+pending/private lookup or distinguishes target validity. Active store with
+active account and active store with removed account each proceed, and each of
+the six private-invalid cells then returns `credential_cleanup_invalid` from the
+private validation stage.
 
 Issuance is effect-free: it consumes no grant, changes no cleanup row, and
 creates no effect, invocation, or external-call capability. Exact pending reuse
@@ -1313,16 +1326,23 @@ with a fresh grant UUID and nonce, and appends one event 3 after the predecessor
 terminal event. Both events use the transaction's effective time; no cleanup,
 grant-use, effect, or external row is written.
 
-Replacement proof uses only three reachable branches. A same-context expired-
-pending predecessor has the same immutable manifest; later blocked/recovery
-eligibility fails without a successor and rolls back tentative predecessor and
-paired-clock work according to the exact prestate: a previously durable expired
-predecessor stays expired, while tentative expiry of a previously pending row
-rolls back to pending. No successor, new event, committed clock change, or
-entropy remains. A different-context invalid target has zero interaction with
-that predecessor. Persisted target/history corruption is global step 2 and
-returns `owner_recovery_required`. No test or implementation invents a same-
-context manifest mutation.
+Replacement proof separates public classification from pending-row work. A test
+may arrange a same-context expired pending row and then make its matched store
+recovery-required, its matched store blocked, or its matched account blocked or
+proposed. Each call returns the closed public recovery/conflict error with zero
+request-directed pending-row lookup-dependent interaction: predecessor state,
+events, and both authority clock fields are unchanged; entropy, successor,
+grant, nonce, and cleanup deltas are zero.
+
+Tentative-expiry rollback is proved only after an active-store plus active-or-
+removed-account public classification and valid private target validation. The
+existing deterministic fault hooks `OldChallengeExpiredState` and
+`OldChallengeExpiredEvent` independently fail after predecessor state mutation
+and after predecessor event insertion. Each fault rolls the entire transaction
+back to the exact prestate with no committed predecessor/event/clock change and
+zero entropy, successor, grant, nonce, or cleanup delta. A different-context
+invalid target has zero predecessor interaction. Persisted target/history
+corruption is global step 2 and returns `owner_recovery_required`.
 
 Concurrent exact issuance has one creator. The winner commits one challenge,
 one grant identity, one nonce, and one event 3. Every loser reopens the winning
