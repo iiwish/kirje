@@ -12,15 +12,15 @@ and QA passed C0/H0/M0/L0. No implementation started. The user explicitly
 approved the F002 contract revision on 2026-08-31. F002 packet review at
 `38ca4273` returned QA PASS C0/H0/M0/L0, spec FAIL C0/H0/M1/L0, and engineering
 FAIL C0/H1/M2/L0. No implementation started. Under the user's explicit delegated
-existing-boundary clarification authority, F007 review failed/refused with exact
-counts spec C0/H0/M2/L1, engineering/security C0/H3/M2/L0, and QA acceptance
-C0/H4/M2/L1. The orchestrator approved F008's audit/lifecycle-only clarification.
-F008 leaves the substantive F006 cleanup contract, exact blocked/recovery rows,
-phase order, matrices, workspace gates, and future scope unchanged. It supplies
-two independently literal 24-path maps, secure file identity, exact schema/token
-placement, review-artifact binding, an independent 25-path terminal lifecycle,
-candidate/evidence integrity, and 32 deterministic self-tests. This is not user
-review of the unseen F008 packet. F008 awaits three independent zero-finding reviews with all permissions
+existing-boundary clarification authority, F008 review failed/refused with exact
+counts spec C0/H2/M2/L0, engineering/security C0/H4/M1/L0, and QA acceptance
+C0/H4/M2/L0. The orchestrator approved F009's append-only Git authority
+clarification. F009 leaves the substantive F006 cleanup contract, exact
+blocked/recovery rows, phase order, matrices, workspace gates, and future scope
+unchanged. It retires bespoke token/Markdown audit authority and defines
+immutable packet P, standalone authorization A, exact-scope candidate C, and
+standalone integration I. This is not user review of the unseen F009 packet.
+F009 awaits three independent packet reviews with all permissions
 closed. A006, T202C3, and T110 remain unaccepted. `T202C3-A001` challenge issuance is reviewed
 at production commit
 `daf22a0`. `T202C3-A002` account-update transition execution is accepted at
@@ -120,10 +120,8 @@ e5613c2fef5f0181dfe06ededec939b4e132fc4bbf1cd656dbdfbfe26f076608  crates/kirje-s
 - Failed F005 packet review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F005-packet-review.md`
 - Failed F006 packet review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F006-packet-review.md`
 - Failed F007 packet review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F007-packet-review.md`
-- Pending F008 packet review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F008-packet-review.md`
-- Pending F008 spec review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F008-spec-review.md`
-- Pending F008 engineering review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F008-engineering-review.md`
-- Pending F008 QA review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F008-qa-review.md`
+- Failed F008 packet review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F008-packet-review.md`
+- F009 packet preparation: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F009-preparation.md`
 - Contract amendment: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract.md`
 - Contract fix: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract-A002.md`
 - Contract fix: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract-A003.md`
@@ -159,13 +157,13 @@ phase order with no pending/private lookup before public classification and no
 durable expiry before eligibility; claim/delete proof expiry remains separate;
 same-origin proposed is corruption while unrelated proposed is public conflict;
 active-pair rollback uses the existing hooks; per-path six-table deltas, core/
-workspace tests, workspace Clippy/build, and three-stage authority audits are mandatory;
+workspace tests, and workspace Clippy/build are mandatory;
 and a pure exact-scope manifest preflight rejects
 `transition_id=None` before lock/I/O/entropy without a core change. F006 audit
 review then failed without reopening the substantive cleanup contract. F007
-review also failed/refused with exact reviewer counts recorded in its evidence.
-F008 replaces only the audit/lifecycle proof. No implementation started. Three
-independent zero-finding F008 reviews plus
-governance follow-up are required. A007 claim and A008 delete completion remain non-
+review and F008 review also failed/refused with exact reviewer counts recorded in
+their evidence. F009 replaces only the authority lifecycle with immutable P-A-C-I
+Git commits. No implementation started. Three independent F009 packet reviews
+must pass before standalone authorization A. A007 claim and A008 delete completion remain non-
 executable just-in-time outlines. T202C3 and T110 are not Accepted; the authority
 umbrella remains Draft.

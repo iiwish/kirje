@@ -370,8 +370,13 @@ execution authority or production attempt exists.
 
 F008 is governance-only and has no production RED/GREEN result. It preserves
 the substantive F006 contract, TDD matrix, workspace gates, and exact future
-code scope. Ruby syntax and the 32-case self-test pass. The real pre-review audit
-requires two independently literal 24-path maps, secure file identity, exact
-schema/token placement, F001-F007 failed-state isolation, and PENDING/none F008
-authority. Post-authorization and terminal post-integration remain unexecuted
-future gates. Production, test, and fixture permissions remain none.
+code scope. Review failed/refused with exact counts spec C0/H2/M2/L0,
+engineering/security C0/H4/M1/L0, and QA C0/H4/M2/L0. No production attempt or
+authorization exists.
+
+F009 is governance-only and has no production RED/GREEN result. It retires the
+bespoke A006 audit script and defines an immutable append-only P-A-C-I Git DAG.
+Historical tokens and Markdown are inert evidence. The F006 contract, exact
+three-file future scope, TDD matrix, complete workspace gates, and cargo-deny
+T111 blocker remain unchanged. Production, test, and fixture permissions remain
+none pending three packet reviews and a standalone authorization record.

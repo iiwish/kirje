@@ -35,12 +35,12 @@ C0/H0/M0/L0, spec FAIL C0/H0/M1/L0, and engineering FAIL C0/H1/M2/L0 at
 `38ca4273`. The user then authorized orchestrator approval of existing-boundary
 clarifications. F006 preserved the substantive cleanup contract but failed
 review on authority-source, strict-parsing, phase-lifecycle, and negative-control
-defects. F007 review then failed/refused with exact counts: spec C0/H0/M2/L1,
-engineering/security C0/H3/M2/L0, and QA C0/H4/M2/L1. Under delegated authority,
-the orchestrator approved F008's audit/lifecycle-only clarification. This is
-delegated contract approval, not user review of the unseen F008 packet. No
-implementation started; F008 awaits three independent reviews with all
-permissions closed. A007 claim and
+defects. F007 and F008 reviews then failed/refused. F008's exact counts are spec
+C0/H2/M2/L0, engineering/security C0/H4/M1/L0, and QA C0/H4/M2/L0. Under
+delegated authority, the orchestrator approved F009's minimal append-only Git
+authority DAG. This is delegated contract approval, not user review of the
+unseen F009 packet. No implementation started; F009 awaits three independent
+reviews with all permissions closed. A007 claim and
 A008 delete completion remain non-executable just-in-time outlines. One separate dependency Medium
 implementation finding is assigned: the unchanged branch dependency graph contains yanked
 `chacha20 0.10.1`, which makes `cargo deny check advisories` fail. T111
@@ -261,17 +261,17 @@ changed grant recovery third, signed-context/clock/expiry next, then current
 eligibility and target lifecycle, while existing store/backend codes remain
 stable.
 
-Result: `T202C3_A006_F008_READY_FOR_PACKET_REVIEW_NO_EXECUTION_PERMISSION`. The historical
+Result: `T202C3_A006_F009_READY_FOR_PACKET_REVIEW_NO_EXECUTION_PERMISSION`. The historical
 packet gate authorized only returned production candidate `2241a946`, whose one
 High and five Medium findings remain open. F001 failed spec review C0/H1/M2/L0;
 the user approved F002's contract resolution, but its packet review failed with
 engineering C0/H1/M2/L0 and spec C0/H0/M1/L0 while QA passed C0/H0/M0/L0. The
-F007 review then failed/refused with spec C0/H0/M2/L1, engineering/security
-C0/H3/M2/L0, and QA C0/H4/M2/L1. The orchestrator approved the existing-boundary
-F008 audit clarification under explicit delegated authority. No implementation
-attempt started. Production, test, and fixture permissions are none; only three
-independent zero-finding F008 reviews
-plus governance follow-up can open the exact scopes. A007 and A008 remain
+F008 review failed/refused with spec C0/H2/M2/L0, engineering/security
+C0/H4/M1/L0, and QA C0/H4/M2/L0. The orchestrator approved the existing-boundary
+F009 clarification under explicit delegated authority. No implementation
+attempt started. Production, test, and fixture permissions are none; three
+independent F009 packet reviews under the packet's severity/disposition rule
+must pass before standalone authorization A can open the exact scope. A007 and A008 remain
 unpacketized, non-executable outlines and are not Ready.
 
 ## Current Implementation Evidence Check
@@ -406,17 +406,15 @@ rows returning `account_update_conflict` and `owner_recovery_required`,
 respectively. Those rows and every other exact public row are independently
 crossed with wrong origin, locator kind, locator digest, tombstone, lifecycle,
 and descriptor. F006 removes same-origin proposed from reachable projection,
-retains active-pair rollback, and requires per-path six-table deltas, workspace
-handoff gates, and exact pre-review/post-authorization/post-integration audits. Within the
+retains active-pair rollback and requires per-path six-table deltas plus complete
+workspace handoff gates. Within the
 exact A006 scope, one pure `authority.rs` manifest preflight rejects
 `transition_id=None` as `authorization_malformed` before apply lock, file,
 database, or entropy work, with zero I/O/mutation/entropy and no core change.
-F008 leaves that substantive contract unchanged and replaces only the authority
-audit/lifecycle with two independent verbatim path allowlists, secure file
-identity, exact parsing/token placement, review-artifact binding, terminal
-candidate/evidence validation, and 32 deterministic self-tests. Only three
-independent zero-finding F008 reviews plus governance follow-up can open the
-exact scopes; historical F001-F007 reviews are not execution gates.
+F009 leaves that substantive contract unchanged and replaces bespoke audit
+authority with immutable packet P, standalone direct-child authorization A,
+exact-scope candidate C, and standalone direct-child integration I. Historical
+tokens and Markdown are inert evidence, not execution gates.
 
 ### Low
 
@@ -425,7 +423,7 @@ None.
 ## Residual Risks
 
 - T109 and the account-create checkpoint were explicitly accepted by the user
-  on 2026-08-30. F008 clarification is approved under delegated authority but
+  on 2026-08-30. F009 clarification is approved under delegated authority but
   remains packet-review-only with no production, test, or fixture permission.
 - Cross-platform support claims remain Draft until T119 produces platform
   evidence.
@@ -435,7 +433,7 @@ None.
 
 ## Gate Result
 
-`T109_ACCEPTED_T202C3_A006_F008_READY_FOR_PACKET_REVIEW_NO_EXECUTION_PERMISSION`
+`T109_ACCEPTED_T202C3_A006_F009_READY_FOR_PACKET_REVIEW_NO_EXECUTION_PERMISSION`
 
 The user approved `plan.md` and `tasks.md` on 2026-08-30. T109 review and fresh
 validation are complete at `94f3495`; the user explicitly accepted the

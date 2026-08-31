@@ -42,12 +42,12 @@
   decision is not implementation evidence. A006's historical packet gate passed
   only for returned candidate `2241a946`. F001 through F006 packet reviews failed.
   On 2026-08-31 the user authorized orchestrator approval of existing-boundary
-  clarifications. F007 review then failed/refused with exact counts spec
-  C0/H0/M2/L1, engineering/security C0/H3/M2/L0, and QA C0/H4/M2/L1. The
-  orchestrator approved F008's audit/lifecycle-only clarification under that
-  authority. F008 leaves the substantive F006 cleanup contract unchanged; this
-  is not user review of the unseen artifact. F008 awaits three independent
-  zero-finding reviews with permissions closed. A007/A008
+  clarifications. F008 review failed/refused with exact counts spec C0/H2/M2/L0,
+  engineering/security C0/H4/M1/L0, and QA C0/H4/M2/L0. The orchestrator
+  approved F009's minimal append-only Git authority clarification under that
+  authority. F009 leaves the substantive F006 cleanup contract unchanged; this
+  is not user review of the unseen artifact. F009 awaits three independent
+  packet reviews with permissions closed. A007/A008
   remain closed, and no execution is accepted before its TDD, validation,
   evidence, and implementation reviews.
 - No task may expose credentials, owner private keys, signatures, mailbox
@@ -770,14 +770,13 @@ algorithm, three reachable replacement branches, and a private numeric-only
 length helper. Its packet review returned QA PASS C0/H0/M0/L0, spec FAIL
 C0/H0/M1/L0, and engineering FAIL C0/H1/M2/L0 at `38ca4273`; no implementation
 started. Under the user's delegated existing-boundary clarification authority,
-F007 review then failed/refused with spec C0/H0/M2/L1, engineering/security
-C0/H3/M2/L0, and QA C0/H4/M2/L1. The orchestrator approved F008 under delegated
-authority. F008 changes only the authority audit/lifecycle: two independent
-verbatim path maps, secure physical-file checks, exact schema/token placement,
-cryptographic review binding, terminal candidate/evidence verification, and 32
-deterministic self-tests. The substantive F006 rows, phase order,
+F008 review failed/refused with spec C0/H2/M2/L0, engineering/security
+C0/H4/M1/L0, and QA C0/H4/M2/L0. The orchestrator approved F009 under delegated
+authority. F009 retires bespoke audit authority and defines immutable packet P,
+standalone direct-child authorization A, exact-scope candidate C, and standalone
+direct-child integration I. The substantive F006 rows, phase order,
 fault/effect/privacy matrices, workspace gates, and exact scope remain unchanged.
-F008 is `ready_for_f008_packet_review`; every code/fixture permission remains none. A007
+F009 is `ready_for_f009_packet_review`; every code/fixture permission remains none. A007
 claim and A008 delete-completion are non-executable just-in-time outlines;
 neither is Ready or packetized.
 Priority: P0
@@ -882,14 +881,11 @@ Test targets:
   change is reviewed and the production Cargo tree remains unchanged
 - Opaque-type compile negatives and deterministic store-private fake deletion
   call log
-- A006 F008 audit owns two independently literal exact key/path maps. Syntax and
-  32 deterministic self-tests precede every phase. Pre-review reads exactly 24
-  active paths and requires F008 PENDING/none; post-authorization reads the same
-  set, binds three zero-finding reviews to the preparation commit/script/packet/
-  canonical manifest, permits only exact authority deltas, and requires no
-  attempt evidence; terminal post-integration reads exactly 25 paths and
-  validates spent/non-replayable authority, candidate existence/HEAD/ancestry/
-  exact scope, actual hashes, and structured packet/review/summary/test linkage
+- A006 F009 authority is the append-only P-A-C-I Git DAG declared by the
+  immutable packet. Historical Markdown/tokens and the retired audit script have
+  no authorization meaning. Orchestrator checks direct-parent topology, exact
+  raw diff paths/status/modes, three packet reviews bound to P, a standalone
+  one-time authorization A, and three implementation reviews bound to C.
 
 Validation commands:
 ```bash
@@ -922,13 +918,12 @@ there is no separate `008-security-baseline/packets/T202C3.yaml`.
 Attempt ownership is serial: A006 owns canonical locator validation at
 reservation/prepare plus effect-free cleanup challenge issuance, without
 changing transition state-machine behavior. Its candidate is Returned/Needs Fix
-and blocks all later outlines. F001 through F006 packet reviews failed. Under the
-user's delegated existing-boundary clarification authority, the orchestrator
-F007 review failed/refused and the orchestrator approved F008's audit/lifecycle-
-only clarification without changing the substantive F006 contract. F008 is
-`ready_for_f008_packet_review` and requires three
-independent zero-finding PASS reviews plus a governance follow-up before any
-exact production/test/fixture scope opens.
+and blocks all later outlines. Historical F001-F008 attempts remain evidence but
+are not active authority. Under delegated existing-boundary clarification
+authority, the orchestrator approved F009 without changing the substantive F006
+contract. F009 is `ready_for_f009_packet_review` and requires three independent
+packet reviews under its severity/disposition rule before standalone
+authorization A can open one exact production/test/fixture attempt.
 A007 owns the new unpublished
 `kirje-credential` workspace crate, root/store-only dependency entries, opaque
 locator, store-private fake deletion hook, store-owned permit and combined

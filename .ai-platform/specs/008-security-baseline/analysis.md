@@ -3,7 +3,7 @@
 ## Metadata
 
 - Feature ID: `008-security-baseline`
-- Status: T202C3_A006_F008_Ready_For_Packet_Review_No_Execution_Permission
+- Status: T202C3_A006_F009_Ready_For_Packet_Review_No_Execution_Permission
 - Updated: 2026-08-31
 - Inputs: `spec.md`, `checklists/requirements.md`, `plan.md`, `research.md`,
   `data-model.md`, `contracts/**`, `tasks.md`, project constitution and AGENTS
@@ -26,9 +26,9 @@
   approved the F002 contract revision on 2026-08-31. Its packet review failed
   because a literal no-private-read claim contradicted mandatory global graph
   validation. Under the user's delegated existing-boundary clarification
-  authority, F007 review failed/refused with exact counts spec C0/H0/M2/L1,
-  engineering/security C0/H3/M2/L0, and QA C0/H4/M2/L1. The orchestrator approved
-  F008's audit/lifecycle-only clarification. F008 leaves the substantive F006
+  authority, F008 review failed/refused with exact counts spec C0/H2/M2/L0,
+  engineering/security C0/H4/M1/L0, and QA C0/H4/M2/L0. The orchestrator approved
+  F009's append-only Git authority clarification. F009 leaves the substantive F006
   cleanup contract unchanged. Complete request-independent step-2
   validation remains intact and may stream all private graphs. After the request-
   independent global validation pass, source/call-order proof must show no
@@ -49,7 +49,7 @@
   no pending expiry is durable before eligibility. Claim/delete proof-expiry
   ordering remains unchanged. Same-origin proposed is corruption; only an
   unrelated matched proposed pair is a reachable public projection.
-  No implementation started; F008 awaits three reviews with permissions closed. The first A006 packet
+  No implementation started; F009 awaits three reviews with permissions closed. The first A006 packet
   review rejected the current-binding contradiction, incomplete clock-only
   recovery rule, and non-implementable cross-crate delete capability. The
   revised amendment makes cleanup the explicit historical-before exception,
@@ -66,13 +66,11 @@
   `T202C3_A006_PACKET_REVIEW_PASS`; that historical packet pass does not
   override the later failed production review. A007/A008 remain non-executable
   JIT outlines.
-  F008 governance preparation separately proves the exact 24-path PENDING/none
-  pre-review state. Worker execution later requires the exact normalized
-  aggregate, three zero-finding reviews bound to the preparation artifacts,
-  governance follow-up, and post-authorization audit without attempt evidence.
-  Orchestrator integration then requires the independent 25-path terminal audit,
-  spent/non-replayable authority, a real scoped HEAD candidate, actual hashes,
-  and structured attempt/summary/test-results linkage. Cargo deny
+  F009 retires the bespoke audit script. Immutable packet P is followed only by
+  direct-child packet reviews and standalone authorization A, direct-child
+  exact-scope candidate C, and direct-child implementation reviews plus
+  standalone integration I. Git topology, exact diffs/modes, structured review
+  records, and real validation evidence establish the lifecycle. Cargo deny
   remains an explicit T111 baseline blocker rather than an A006 pass claim.
   The 3 A001 T202C1 findings are closed by A002
   and `T202C1_A002_PACKET_REVIEW_PASS`. Historical challenge validation is now
@@ -155,9 +153,9 @@ must preserve that placement or add an explicit counter before loop expansion.
   user approved F002 on 2026-08-31. F002 packet review returned QA PASS
   C0/H0/M0/L0, spec FAIL C0/H0/M1/L0, and engineering FAIL C0/H1/M2/L0 at
   `38ca4273`. Under the user's delegated existing-boundary clarification
-  authority, F007 review failed/refused and the orchestrator approved F008's
-  audit/lifecycle clarification. It is ready for three independent
-  zero-finding packet reviews; production/test/fixture permissions remain none,
+  authority, F008 review failed/refused and the orchestrator approved F009's
+  append-only authority clarification. It is ready for three independent packet
+  reviews under the packet's severity/disposition rule; permissions remain none,
   and A007/A008 remain closed.
   T202C4, T202D-T202E, and T203-T212 remain dependency-gated Draft work. T204
   and every later task directly require the T202 umbrella to be Accepted.
@@ -649,7 +647,7 @@ permission to merge child evidence or relax the strict serial gates.
 
 ## Execution Gate
 
-`T202C3_A006_F008_READY_FOR_PACKET_REVIEW_NO_EXECUTION_PERMISSION`
+`T202C3_A006_F009_READY_FOR_PACKET_REVIEW_NO_EXECUTION_PERMISSION`
 
 T202A is accepted from four test-first attempts, independent security and QA
 review, its bootstrap-schema digest, and fresh packet/workspace gates. A003
@@ -704,9 +702,7 @@ pending/private lookup and durable expiry before public eligibility, separating
 same-origin proposed corruption from unrelated proposed public conflict,
 retaining active-pair fault rollback, and completing effect/gate/audit proof.
 F006 audit review then failed without reopening that substantive contract. F007
-review also failed/refused. F008 adds two independently literal path maps,
-secure physical-file checks, exact schema/token placement, review-artifact
-binding, independent terminal candidate/evidence validation, and 32 deterministic
-self-tests. No implementation started. F008 requires three
-independent zero-finding reviews plus governance follow-up; the T202C and T202
+and F008 reviews also failed/refused. F009 retires the bespoke audit and defines
+the immutable P-A-C-I Git authority DAG. No implementation started. F009 requires
+three independent packet reviews before standalone authorization A; the T202C and T202
 umbrellas remain non-Accepted.

@@ -274,14 +274,10 @@ Within T110, returned A006 candidate `2241a946` remains unaccepted. The user
 authorized orchestrator approval of existing-boundary clarifications on
 2026-08-31. F003-F006 packet reviews failed. F006 preserves the substantive
 cleanup contract but exposed authority-source, strict-parsing, phase-lifecycle,
-and negative-control defects. F007 review then failed/refused: spec compliance
-C0/H0/M2/L1, engineering/security C0/H3/M2/L0, and QA acceptance
-C0/H4/M2/L1. These are the exact reviewer counts. Under delegated authority,
-the orchestrator approved F008's audit/lifecycle clarification; this is not a
-claim of user review of the resulting packet. F008 is ready for three
-independent zero-finding packet reviews with all production, test, and fixture
-permissions closed. A007/A008 remain non-executable.
-The F008 pre-review audit is governance-only at 24 active paths. Worker
-execution requires a separate post-authorization audit bound to the preparation
-commit, script, packet, and canonical manifest. Attempt evidence is required
-only by the independent 25-path terminal post-integration audit.
+and negative-control defects. F007 and F008 packet reviews also failed. F008's
+exact counts are spec C0/H2/M2/L0, engineering/security C0/H4/M1/L0, and QA
+C0/H4/M2/L0. Under delegated authority, the orchestrator approved F009's minimal
+append-only Git authority DAG. The immutable F009 packet is ready for three
+independent reviews; no authorization record exists and every code permission
+is closed. The packet is the canonical execution detail. A007/A008 remain
+non-executable.

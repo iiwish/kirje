@@ -2,7 +2,7 @@
 
 ## Status
 
-`PENDING_THREE_INDEPENDENT_REVIEWS`
+`FAILED_NO_EXECUTION_AUTHORIZATION`
 
 - Packet: `.ai-platform/specs/007-stable-v1-program/packets/T110-A006.yaml`
 - Baseline HEAD: `0bfc1c37c6cf383c255b90cee0f22bfced6d8850`
@@ -20,7 +20,7 @@ and exact future code scope are unchanged.
 <!-- A006_AUTHORITY_GATE_START
 authority_gate:
   schema_version: 2
-  state: PENDING_REVIEW
+  state: FAILED_NO_EXECUTION_AUTHORIZATION
   grant_state: closed
   packet_review_token: none
   execution_authorization: none
@@ -34,21 +34,21 @@ authority_gate:
     canonical_manifest: []
   reviews:
     spec_compliance:
-      status: PENDING
+      status: FAIL_REFUSE
       token: none
-      findings: null
+      findings: {critical: 0, high: 2, medium: 2, low: 0}
       evidence_path: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F008-spec-review.md
       evidence_sha256: none
     engineering_security:
-      status: PENDING
+      status: FAIL_REFUSE
       token: none
-      findings: null
+      findings: {critical: 0, high: 4, medium: 1, low: 0}
       evidence_path: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F008-engineering-review.md
       evidence_sha256: none
     qa_evidence:
-      status: PENDING
+      status: FAIL_REFUSE
       token: none
-      findings: null
+      findings: {critical: 0, high: 4, medium: 2, low: 0}
       evidence_path: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F008-qa-review.md
       evidence_sha256: none
 A006_AUTHORITY_GATE_END -->
@@ -57,14 +57,13 @@ A006_AUTHORITY_GATE_END -->
 
 | Pass | Status | Findings | Review token |
 | --- | --- | --- | --- |
-| Spec compliance | PENDING | Not assessed | none |
-| Engineering/security | PENDING | Not assessed | none |
-| QA/evidence | PENDING | Not assessed | none |
+| Spec compliance | FAIL/REFUSE | C0/H2/M2/L0 | none |
+| Engineering/security | FAIL/REFUSE | C0/H4/M1/L0 | none |
+| QA/evidence | FAIL/REFUSE | C0/H4/M2/L0 | none |
 
-All three independent reviews must bind the same preparation commit, audit
-script hash, packet hash, and canonical input manifest/hash. Production, test,
-and fixture permissions remain none pending a zero-finding packet pass,
-governance follow-up, and successful post-authorization audit.
+These are the reviewers' exact original counts. All three reviews failed/refused.
+No packet pass, execution authorization, governance follow-up, or implementation
+attempt exists. Production, test, and fixture permissions remain closed.
 
 ## Governance Preparation Validation
 
