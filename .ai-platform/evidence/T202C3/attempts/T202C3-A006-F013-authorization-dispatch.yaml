@@ -1,0 +1,14 @@
+schema_version: 1
+status: AUTHORIZED_FOR_DISPATCH
+authority_basis: user_delegated_orchestrator_self_approval
+attempt_id: T202C3-A006-F013-IMPLEMENTATION
+packet_commit: 670c99b37382cc310dd748b7724c428f411bf3ed
+packet_tree: 41567ac97e422a12deeca67b5064b4bd5c3906aa
+allowed_files:
+  - crates/kirje-store/src/authority.rs
+  - crates/kirje-store/tests/authority_registry.rs
+  - crates/kirje-store/tests/fixtures/authority/registry/account_credential_cleanup/**
+review_paths:
+  spec_compliance: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F013-spec-review.yaml
+  engineering_security: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F013-engineering-review.yaml
+  qa_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F013-qa-review.yaml
