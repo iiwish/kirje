@@ -392,14 +392,15 @@ winner/every-loser paths each prove zero delta in all six effect/external tables
 zero external calls, and unchanged cleanup; origin grant uses may preexist, so
 `grant_uses` is asserted by delta.
 
-The A006 F009 authority lifecycle leaves the substantive F006 cleanup contract
-unchanged and retires the bespoke audit script. Authority is an append-only,
-single-parent Git DAG: immutable reviewed packet P; direct-child packet reviews
-and standalone authorization A; direct-child non-empty exact-scope candidate C;
-then direct-child implementation reviews and standalone review-complete
-integration I. P and A are never rewritten, no record names or hashes its own
-commit, and historical tokens or Markdown have no authorization meaning. The
-F009 packet is the canonical schema and diff contract.
+The A006 F010 authority lifecycle leaves the substantive F006 cleanup contract
+unchanged and keeps the bespoke token auditor retired. Authority is an
+append-only, single-parent P10/A10/C10/I10 Git DAG. The dedicated local ref
+`refs/kirje/authority/T202C3-A006` is atomically created from absent to A10 and
+consumed from A10 to C10; it is never deleted, reset, rewound, recreated, or
+advanced to I10. Only C10 exactly named by that ref is authorized. A small
+validator checks immutable Git objects, exact diffs/modes, strict structured
+YAML, the ref, and its two-entry reflog. Historical prose has no authorization
+meaning. The F010 packet is the canonical schema and diff contract.
 
 ### D-009 Unified Same-Handle Bounded Input
 
@@ -708,8 +709,11 @@ reviews failed. The user then authorized the orchestrator to approve existing-
 boundary clarifications without requesting approval at each node. F008 review
 failed/refused with exact counts spec C0/H2/M2/L0, engineering/security
 C0/H4/M1/L0, and QA C0/H4/M2/L0. Under that authority, the orchestrator approved
-F009's append-only Git authority clarification; this does not claim user review
-of the resulting artifact. F009 leaves F006's substantive cleanup contract
-unchanged. Three independent packet reviews under F009's severity/disposition
-rule must pass before standalone authorization A can open the exact
+F009's append-only Git authority clarification, whose review then failed with
+spec C0/H1/M0/L0, engineering/security C0/H1/M2/L0, and QA C0/H1/M1/L0. The
+orchestrator approved F010's one-time local-ref clarification; this does not
+claim user review of the resulting artifact. F010 leaves F006's substantive
+cleanup contract unchanged. Three independent packet reviews under F010's
+severity/disposition rule must pass before A10 may be committed and the absent
+dedicated ref atomically created for the exact
 production/test/fixture scope. Later A007/A008 attempts remain closed.

@@ -23,11 +23,12 @@
   failed. On 2026-08-31 the user authorized the Delivery Orchestrator to approve
   existing-boundary clarifications. F008 review failed/refused with exact counts
   spec C0/H2/M2/L0, engineering/security C0/H4/M1/L0, and QA C0/H4/M2/L0.
-  Under delegated authority, the orchestrator approved F009's minimal append-only
-  Git authority DAG. The substantive F006 public rows, workspace gates,
+  F009 review failed with spec C0/H1/M0/L0, engineering/security C0/H1/M2/L0,
+  and QA C0/H1/M1/L0. Under delegated authority, the orchestrator approved
+  F010's one-time local-ref clarification. The substantive F006 public rows, workspace gates,
   phase-specific challenge precedence, and exact-scope manifest preflight remain
   unchanged. This records delegated contract approval, not user review of the
-  unseen F009 artifact.
+  unseen F010 artifact.
 
 ## Goal
 

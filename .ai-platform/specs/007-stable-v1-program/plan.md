@@ -276,8 +276,10 @@ authorized orchestrator approval of existing-boundary clarifications on
 cleanup contract but exposed authority-source, strict-parsing, phase-lifecycle,
 and negative-control defects. F007 and F008 packet reviews also failed. F008's
 exact counts are spec C0/H2/M2/L0, engineering/security C0/H4/M1/L0, and QA
-C0/H4/M2/L0. Under delegated authority, the orchestrator approved F009's minimal
-append-only Git authority DAG. The immutable F009 packet is ready for three
+C0/H4/M2/L0. F009 review failed with spec C0/H1/M0/L0,
+engineering/security C0/H1/M2/L0, and QA C0/H1/M1/L0. Under delegated authority,
+the orchestrator approved F010's dedicated one-time local-ref clarification.
+The immutable F010 packet is ready for three
 independent reviews; no authorization record exists and every code permission
 is closed. The packet is the canonical execution detail. A007/A008 remain
 non-executable.

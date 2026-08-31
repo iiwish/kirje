@@ -376,7 +376,13 @@ authorization exists.
 
 F009 is governance-only and has no production RED/GREEN result. It retires the
 bespoke A006 audit script and defines an immutable append-only P-A-C-I Git DAG.
-Historical tokens and Markdown are inert evidence. The F006 contract, exact
-three-file future scope, TDD matrix, complete workspace gates, and cargo-deny
-T111 blocker remain unchanged. Production, test, and fixture permissions remain
-none pending three packet reviews and a standalone authorization record.
+Its packet review failed with exact counts spec C0/H1/M0/L0,
+engineering/security C0/H1/M2/L0, and QA C0/H1/M1/L0. No authorization or
+implementation exists.
+
+F010 is governance-only and has no production RED/GREEN result. It preserves
+the F006 contract, exact three-file future scope, TDD matrix, complete workspace
+gates, and cargo-deny T111 blocker. It adds a dedicated one-time local ref and a
+small immutable-object/strict-YAML DAG validator. Production, test, and fixture
+permissions remain none pending three F010 packet reviews, A10, and atomic ref
+creation.
