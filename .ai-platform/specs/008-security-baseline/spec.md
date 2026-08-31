@@ -21,12 +21,13 @@
   and issued `T202C3_A006_PACKET_REVIEW_PASS` for the packet's exact scopes. Its
   production candidate later failed review; F001 through F006 packet reviews also
   failed. On 2026-08-31 the user authorized the Delivery Orchestrator to approve
-  existing-boundary clarifications. Under that authority, the orchestrator
-  approved F007's independent strict authority audit after F006 audit review
-  failed. The substantive F006 public rows, workspace gates, phase-specific
-  challenge precedence, and exact-scope manifest preflight remain unchanged.
-  This records delegated contract approval, not user review of the unseen F007
-  artifact.
+  existing-boundary clarifications. F007 review failed/refused with exact counts
+  spec C0/H0/M2/L1, engineering/security C0/H3/M2/L0, and QA C0/H4/M2/L1.
+  Under delegated authority, the orchestrator approved F008's audit/lifecycle
+  clarification. The substantive F006 public rows, workspace gates,
+  phase-specific challenge precedence, and exact-scope manifest preflight remain
+  unchanged. This records delegated contract approval, not user review of the
+  unseen F008 artifact.
 
 ## Goal
 

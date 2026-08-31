@@ -364,7 +364,14 @@ no production attempt started.
 
 F007 is governance-only and has no production RED/GREEN result. It leaves every
 substantive F006 contract and workspace gate unchanged. Its audit script owns
-the exact 21/22-path allowlists, scans complete active/historical contents,
-strictly joins visible and structured status/permissions/tokens, requires exact
-attempt status/commit/hashes/linkage, and runs 17 deterministic self-test cases
-before each phase audit. Permissions remain none pending three reviews.
+the attempted 21/22-path allowlists. Review failed/refused with exact counts:
+spec C0/H0/M2/L1, engineering/security C0/H3/M2/L0, and QA C0/H4/M2/L1. No
+execution authority or production attempt exists.
+
+F008 is governance-only and has no production RED/GREEN result. It preserves
+the substantive F006 contract, TDD matrix, workspace gates, and exact future
+code scope. Ruby syntax and the 32-case self-test pass. The real pre-review audit
+requires two independently literal 24-path maps, secure file identity, exact
+schema/token placement, F001-F007 failed-state isolation, and PENDING/none F008
+authority. Post-authorization and terminal post-integration remain unexecuted
+future gates. Production, test, and fixture permissions remain none.

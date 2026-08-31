@@ -42,11 +42,12 @@
   decision is not implementation evidence. A006's historical packet gate passed
   only for returned candidate `2241a946`. F001 through F006 packet reviews failed.
   On 2026-08-31 the user authorized orchestrator approval of existing-boundary
-  clarifications. The orchestrator approved F007's audit-only clarification
-  under that authority after F006 review found authority-source, strict-parsing,
-  phase-lifecycle, and negative-control defects. F007 leaves the substantive F006
-  cleanup contract unchanged; this is not user review of the unseen artifact. F007
-  awaits three independent zero-finding reviews with permissions closed. A007/A008
+  clarifications. F007 review then failed/refused with exact counts spec
+  C0/H0/M2/L1, engineering/security C0/H3/M2/L0, and QA C0/H4/M2/L1. The
+  orchestrator approved F008's audit/lifecycle-only clarification under that
+  authority. F008 leaves the substantive F006 cleanup contract unchanged; this
+  is not user review of the unseen artifact. F008 awaits three independent
+  zero-finding reviews with permissions closed. A007/A008
   remain closed, and no execution is accepted before its TDD, validation,
   evidence, and implementation reviews.
 - No task may expose credentials, owner private keys, signatures, mailbox
@@ -769,12 +770,14 @@ algorithm, three reachable replacement branches, and a private numeric-only
 length helper. Its packet review returned QA PASS C0/H0/M0/L0, spec FAIL
 C0/H0/M1/L0, and engineering FAIL C0/H1/M2/L0 at `38ca4273`; no implementation
 started. Under the user's delegated existing-boundary clarification authority,
-the orchestrator approved F007 after F006 audit review failed. F007 changes only
-the authority audit: independent hard-coded active/historical path allowlists,
-strict visible/structured parsing, exact phase permission/token placement, and
-deterministic negative self-tests. The substantive F006 rows, phase order,
+F007 review then failed/refused with spec C0/H0/M2/L1, engineering/security
+C0/H3/M2/L0, and QA C0/H4/M2/L1. The orchestrator approved F008 under delegated
+authority. F008 changes only the authority audit/lifecycle: two independent
+verbatim path maps, secure physical-file checks, exact schema/token placement,
+cryptographic review binding, terminal candidate/evidence verification, and 32
+deterministic self-tests. The substantive F006 rows, phase order,
 fault/effect/privacy matrices, workspace gates, and exact scope remain unchanged.
-F007 is `ready_for_f007_packet_review`; every code/fixture permission remains none. A007
+F008 is `ready_for_f008_packet_review`; every code/fixture permission remains none. A007
 claim and A008 delete-completion are non-executable just-in-time outlines;
 neither is Ready or packetized.
 Priority: P0
@@ -879,13 +882,14 @@ Test targets:
   change is reviewed and the production Cargo tree remains unchanged
 - Opaque-type compile negatives and deterministic store-private fake deletion
   call log
-- A006 F007 audit owns independent exact key/path truth. Syntax and deterministic
-  negative self-tests precede every phase. Pre-review reads exactly 21 active
-  paths and requires F007 PENDING/none; post-authorization reads the same exact
-  set, requires strict packet/aggregate status, exact permissions and token
-  placement, three zero-finding reviews, and no attempt evidence; post-integration
-  reads exactly 22 paths and validates attempt status/commit, packet/aggregate
-  hashes, and structured packet/review/summary/test linkage
+- A006 F008 audit owns two independently literal exact key/path maps. Syntax and
+  32 deterministic self-tests precede every phase. Pre-review reads exactly 24
+  active paths and requires F008 PENDING/none; post-authorization reads the same
+  set, binds three zero-finding reviews to the preparation commit/script/packet/
+  canonical manifest, permits only exact authority deltas, and requires no
+  attempt evidence; terminal post-integration reads exactly 25 paths and
+  validates spent/non-replayable authority, candidate existence/HEAD/ancestry/
+  exact scope, actual hashes, and structured packet/review/summary/test linkage
 
 Validation commands:
 ```bash
@@ -920,8 +924,9 @@ reservation/prepare plus effect-free cleanup challenge issuance, without
 changing transition state-machine behavior. Its candidate is Returned/Needs Fix
 and blocks all later outlines. F001 through F006 packet reviews failed. Under the
 user's delegated existing-boundary clarification authority, the orchestrator
-approved F007's audit-only clarification without changing the substantive F006
-contract. F007 is `ready_for_f007_packet_review` and requires three
+F007 review failed/refused and the orchestrator approved F008's audit/lifecycle-
+only clarification without changing the substantive F006 contract. F008 is
+`ready_for_f008_packet_review` and requires three
 independent zero-finding PASS reviews plus a governance follow-up before any
 exact production/test/fixture scope opens.
 A007 owns the new unpublished

@@ -1,10 +1,10 @@
 schema_version: 1
-packet_id: 007-T110-T202C3-A006-F007
+packet_id: 007-T110-T202C3-A006-F008
 task_id: T110
 feature_id: 007-stable-v1-program
 mode: delegated_test_first_execution
 adapter: codex_worker
-status: ready_for_f007_packet_review
+status: ready_for_f008_packet_review
 
 governance_inputs:
   constitution: .ai-platform/memory/constitution.md
@@ -30,7 +30,11 @@ governance_inputs:
   failed_f004_packet_review_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F004-packet-review.md
   failed_f005_packet_review_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F005-packet-review.md
   failed_f006_packet_review_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F006-packet-review.md
-  f007_packet_review_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F007-packet-review.md
+  failed_f007_packet_review_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F007-packet-review.md
+  f008_packet_review_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F008-packet-review.md
+  f008_spec_review_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F008-spec-review.md
+  f008_engineering_review_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F008-engineering-review.md
+  f008_qa_review_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F008-qa-review.md
   approval_gates:
     T202C3_A005: accepted by user on 2026-08-30 at production commit 316dae0
     cleanup_contract: approved by user on 2026-08-30
@@ -69,7 +73,7 @@ governance_inputs:
       subsequent path as A006 repair and re-review, then A007 claim, then A008
       delete, then closure of T202C3/T110. This clears only the prior resume
       gate; it does not authorize production, test, or fixture edits before
-      F007 receives three independent zero-finding PASS reviews and a governance
+      F008 receives three independent zero-finding PASS reviews and a governance
       follow-up opens the exact scope.
     f001_packet_review: >-
       FAILED at governance HEAD c5732acb78409e20ba8f74a8a0c1f31dcbd19f69:
@@ -112,17 +116,24 @@ governance_inputs:
       permissive duplicate/contradiction parsing, incomplete phase permissions,
       and missing deterministic negative controls. No pass token, execution
       authorization, governance follow-up, or implementation attempt exists.
-    f007_audit_contract_clarification: >-
+    f007_packet_review: >-
+      FAILED at governance HEAD 0bfc1c37c6cf383c255b90cee0f22bfced6d8850.
+      Spec compliance FAIL/REFUSE C0/H0/M2/L1; engineering/security FAIL/REFUSE
+      C0/H3/M2/L0; QA acceptance FAIL/REFUSE C0/H4/M2/L1. These are the exact
+      reviewer counts, not consolidated counts. No pass token, execution
+      authorization, governance follow-up, or implementation attempt exists.
+    f008_audit_contract_clarification: >-
       Approved by the Delivery Orchestrator on 2026-08-31 under the user's
-      explicit existing-boundary clarification authority. F007 changes only the
-      authority audit and lifecycle; the substantive F006 cleanup contract is
-      unchanged. This is delegated approval, not user review of this packet.
-    f007_packet_review: pending; three independent zero-finding PASS reviews are required
-    historical_f001_f006_active_authority_token_allowlist: []
+      explicit existing-boundary clarification authority. F008 repairs only the
+      authority audit and lifecycle findings from F007; the substantive F006
+      cleanup contract, TDD matrix, workspace gates, and exact future code scope
+      are unchanged. This is delegated approval, not user review of this packet.
+    f008_packet_review: pending; three independent zero-finding PASS reviews are required
+    historical_f001_f007_active_authority_token_allowlist: []
 
 work_unit:
   title: Issue an exact effect-free credential-cleanup challenge
-  attempt: T202C3-A006-F007
+  attempt: T202C3-A006-F008
   parent: T110 Complete Authority Lifecycles
   security_task: T202C3 Account Credential And Cleanup Lifecycles
   goal: >-
@@ -138,7 +149,7 @@ work_unit:
     - approved cleanup security contract in 008 canonical artifacts
     - historical T202C3_A006_PACKET_REVIEW_PASS at governance HEAD 3533054
     - explicit user resume on 2026-08-31 after the A006 blocker summary
-    - orchestrator delegated approval of the A006 F007 audit-only clarification on 2026-08-31
+    - orchestrator delegated approval of the A006 F008 audit-only clarification on 2026-08-31
   blocks:
     - T202C3-A007 cleanup claim packetization
     - T202C3 completion
@@ -148,7 +159,7 @@ work_unit:
 
 codebase_context:
   branch: codex/v1-roadmap-governance
-  baseline_head: c42e10d75cea45829cd0225aec661e7583653e0b
+  baseline_head: 0bfc1c37c6cf383c255b90cee0f22bfced6d8850
   reviewed_governance_head: 3533054
   existing_surfaces:
     - sealed CredentialCleanupManifest and canonical authorization TLV helpers in kirje-core
@@ -163,10 +174,10 @@ codebase_context:
     - exact pending reuse and claimed recovery may mutate only the paired authority clock high-water
     - the unpublished kirje-credential crate is a direct dependency of kirje-store only; no public trait/plugin surface lets runtime bypass authority
     - A008 uses an exhaustive AST allowlist rather than a bypassable literal sole-call scan
-    - F006 independently crosses unrelated blocked and unrelated recovery public rows with all six private-invalid cells and states each exact result; F007 leaves this substantive contract unchanged
-    - F007 defines independent hard-coded active/historical path allowlists, strict visible/structured authority parsing, exact phase permissions/token placement, and deterministic negative self-tests
-    - F006 adds full workspace test and Clippy handoff gates while recording cargo-deny as the T111 baseline blocker; F007 retains those gates
-    - F006 retains phase-specific challenge precedence, transition absence, numeric helper, active-pair rollback, full effect/privacy matrices, and registry-only locator bytes; F007 makes no substantive change
+    - F006 independently crosses unrelated blocked and unrelated recovery public rows with all six private-invalid cells and states each exact result; F008 leaves this substantive contract unchanged
+    - F008 defines two independent hard-coded path/key allowlists, lstat/realpath/inode checks, exact YAML and Markdown field shapes, complete semantic token scanning, cryptographic review bindings, and separate pre-review, post-authorization, and terminal post-integration lifecycles
+    - F006 adds full workspace test and Clippy handoff gates while recording cargo-deny as the T111 baseline blocker; F008 retains those gates
+    - F006 retains phase-specific challenge precedence, transition absence, numeric helper, active-pair rollback, full effect/privacy matrices, and registry-only locator bytes; F008 makes no substantive change
 
 execution_result:
   candidate_commit: 2241a946c399ba9c61e67e808a85f777c0d2b402
@@ -188,11 +199,12 @@ execution_result:
   f004_packet_review: failed with phase-ordering High and matrix/effect/gate/audit findings; no implementation started
   f005_packet_review: failed with public-matrix, audit-lifecycle, validation, and grammar findings; no implementation started
   f006_contract_clarification: approved by orchestrator under explicit delegated authority on 2026-08-31; its packet review failed and no implementation started
-  f007_audit_contract_clarification: approved by orchestrator under explicit delegated authority on 2026-08-31; no implementation or packet-review pass yet
+  f007_packet_review: spec C0/H0/M2/L1; engineering C0/H3/M2/L0; QA C0/H4/M2/L1; all FAIL/REFUSE and no implementation started
+  f008_audit_contract_clarification: approved by orchestrator under explicit delegated authority on 2026-08-31; no implementation or packet-review pass yet
   resume_gate: satisfied by explicit user resume on 2026-08-31
-  contract_gate: satisfied by delegated orchestrator approval of F007 on 2026-08-31
+  contract_gate: satisfied by delegated orchestrator approval of F008 on 2026-08-31
   f002_packet_review: QA PASS C0/H0/M0/L0; spec FAIL C0/H0/M1/L0; engineering FAIL C0/H1/M2/L0
-  next_gate: three independent zero-finding F007 packet reviews plus governance follow-up; no implementation attempt started
+  next_gate: three independent zero-finding F008 packet reviews plus governance follow-up; no implementation attempt started
 
 contract_snapshot:
   locator:
@@ -438,13 +450,23 @@ later_attempt_outlines:
     kirje-credential or locator material.
 
 execution_gate:
+  grant_state: closed
   packet_review_token: none
   execution_authorization: none
   governance_followup: none
 
+authority_review_binding:
+  state: pending
+  preparation_commit: none
+  audit_script_sha256: none
+  packet_sha256: none
+  canonical_manifest_sha256: none
+  review_refs: []
+
 execution_constraints:
-  production_permission: none_pending_three_independent_f007_packet_reviews
-  test_permission: none_pending_three_independent_f007_packet_reviews
+  production_permission: none_pending_three_independent_f008_packet_reviews
+  test_permission: none_pending_three_independent_f008_packet_reviews
+  fixture_permission: none_pending_three_independent_f008_packet_reviews
   future_allowed_files:
     - crates/kirje-store/src/authority.rs
     - crates/kirje-store/tests/authority_registry.rs
@@ -454,7 +476,7 @@ execution_constraints:
     - cleanup claim/delete, permit, deletion backend, runtime, config, keyring, protocol, CLI, MCP, network, or remote-effect behavior
     - transition state-machine behavior outside locator input hardening before cleanup insertion
   write_rules:
-    - No production, test, or fixture edit may begin until all three independent zero-finding F007 packet reviews pass, the aggregate gate is authorized, the post-authorization audit passes, and a governance follow-up opens the exact permissions.
+    - No production, test, or fixture edit may begin until all three independent zero-finding F008 packet reviews bind the preparation commit, audit script, packet, and canonical manifest; the aggregate gate is authorized; the post-authorization audit passes; and a governance follow-up opens the exact permissions.
     - The returned attempt scope is historical evidence, not current write permission.
     - Evidence, SSOT, packet, and status files remain orchestrator-owned.
     - >-
@@ -468,7 +490,7 @@ execution_constraints:
 
 tdd_plan:
   ordering: >-
-    F007 remains non-executable until all three independent packet reviews pass
+    F008 remains non-executable until all three independent packet reviews pass
     and the post-authorization audit succeeds. The pre-review audit is preparation
     evidence only and never authorizes worker execution.
     After governance authorization, the manifest-preflight and public-projection
@@ -527,8 +549,12 @@ validation_loop:
     - ruby .ai-platform/scripts/audit_a006_authority.rb post-integration
 
 evidence_contract:
-  attempt_path: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F007.md
-  packet_review_path: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F007-packet-review.md
+  attempt_path: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F008.md
+  packet_review_path: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F008-packet-review.md
+  review_paths:
+    spec_compliance: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F008-spec-review.md
+    engineering_security: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F008-engineering-review.md
+    qa_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F008-qa-review.md
   summary_path: .ai-platform/evidence/T202C3/summary.md
   test_results_path: .ai-platform/evidence/T202C3/test-results.md
   required:
@@ -541,9 +567,9 @@ evidence_contract:
     - historical later-update/remove/recreation non-rebinding and descriptor/origin/tuple/timestamp/ready-state restart-corruption matrices
     - per-scenario zero delta across challenge_effects, remote_effects, effect_claims, effect_invocations, effect_observations, and grant_uses for first/reuse/response-loss/valid-replacement/both-fault/restart/winner/every-loser paths, with grant_uses measured from prestate, zero cleanup/external-call, and privacy/capability source proof
     - schema and Cargo.lock unchanged hashes
-    - syntax plus deterministic self-test and pre-review audit output with the independent exact 21-path allowlist, complete reads, F001-F006 failed/no-authority allowlist validation, historical PASS isolation, strict F007 PENDING/none state, and no execution claim
-    - syntax plus deterministic self-test and post-authorization audit output proving exact packet/aggregate status, permissions, future files, three zero-finding reviews, packet-review pass, execution authorization, governance follow-up, no F001-F006 active authority, exact 21-path enumeration, and no attempt-evidence dependency
-    - syntax plus deterministic self-test and post-integration audit output after orchestrator writes attempt/summary/test-results, proving exact 22-path enumeration, packet/aggregate hashes, review-complete candidate commit, and structured authority/evidence linkage
+    - syntax plus deterministic 32-case self-test and pre-review audit output with two independently literal exact 24-path allowlists, complete lstat/realpath/inode-safe reads, F001-F007 failed/no-authority validation, exact initial PASS placement isolation, strict F008 PENDING/none state, and no execution claim
+    - syntax plus deterministic self-test and post-authorization audit output proving exact packet/aggregate status, permissions, future files, three zero-finding reviews bound to the preparation commit/script/packet/canonical manifest, packet-review pass, execution authorization, governance follow-up, no F001-F007 active authority, exact 24-path enumeration, and no attempt-evidence dependency
+    - syntax plus deterministic self-test and post-integration audit output after orchestrator writes attempt/summary/test-results, proving the independent terminal review_complete/spent state, exact 25-path enumeration, candidate commit existence/HEAD/ancestry/scope, exact hashes, and structured authority/evidence linkage
     - spec, engineering, and QA reviews with residual risk
   prohibited:
     - raw locator transcript bytes; evidence names synthetic vector IDs and digests only
@@ -551,18 +577,22 @@ evidence_contract:
 
 authority_audit_contract:
   authority_source:
-    - the script owns an independent hard-coded exact key-to-path active allowlist and never derives canonical truth from the packet
-    - the packet path declarations are checked against a second hard-coded exact key-to-path map; substitution, extra nesting, missing key, or duplicate path fails
-    - F001-F006 failed evidence is a separate hard-coded exact allowlist; every record must have one failed visible status and one none execution/review field with no old exact authority token anywhere in complete content
-    - every active and historical file must exist, be readable, and be read completely; pre-review/post-authorization require exactly 21 unique active paths and post-integration exactly 22
-    - script source constructs current authority tokens from namespace and suffix components and contains no joined current authority token; the script path is scanned like every other active input
+    - two verbatim hard-coded 24-key active path allowlists are authored independently and compared exactly; neither is derived from the packet, the other allowlist, or a shared path constant
+    - a separate verbatim hard-coded packet declaration map checks every governance/evidence path field, including the phase-specific review refs; substitution, extra nesting, missing key, wrong attempt path, or duplicate physical path fails
+    - F001-F007 failed evidence and the initial historical PASS are separate hard-coded allowlists; historical failed records must remain failed with no current authority
+    - lstat rejects symlinks and non-regular files; realpath must remain inside the repository; device/inode identity must be unique; every file is read completely
+    - pre-review and post-authorization require exactly 24 active inputs; post-integration independently requires exactly 25 including the structured attempt evidence
   strict_parsing:
-    - exactly one authority-gate block exists in the aggregate record and nowhere else
-    - strict YAML rejects duplicate keys and unrecognized or missing authority-gate, review, finding, execution-gate, and integration-link fields
-    - one visible status, one visible execution authorization, one visible review token, one visible governance follow-up, and three unique visible review rows must agree with the structured gate
-    - token scans cover complete multiline contents and enforce exact documented file/cardinality placement
+    - strict YAML plus exact-key/shape checks reject duplicate, unrecognized, shadow, or override fields in execution_constraints, execution_gate, authority_review_binding, review records, evidence_contract, integration evidence, and every path declaration
+    - one visible status and exactly one each visible execution authorization, packet-review token, and governance follow-up must agree with the one structured aggregate authority block; exactly three known review rows are allowed
+    - case-insensitive semantic token scans cover complete active, historical, initial-PASS, premature-attempt, and stage contents and detect underscore, decoration, cross-line, and multiline spellings
+    - current tokens are legal only in their exact parsed scalar/table fields and documented cardinalities; decoys, duplicate placement, stale predecessors, and stage-outside-authority placements fail
+  review_binding:
+    - every independent review binds the exact F008 preparation commit, audit script SHA-256, packet SHA-256, canonical input manifest, and canonical manifest SHA-256
+    - the preparation commit must exist, have baseline_head as its direct parent, and contain the reviewed script, packet, pending aggregate record, three pending review records, and all canonical inputs
+    - post-authorization rederives the manifest and hashes from Git and permits only the exact authority-state delta; substantive script, packet, aggregate, review, or canonical-input replacement fails
   token_construction:
-    namespace_components: [T202C3, A006, F007]
+    namespace_components: [T202C3, A006, F008]
     suffix_components:
       packet_review: [PACKET, REVIEW, PASS]
       spec_compliance: [SPEC, REVIEW, PASS]
@@ -575,13 +605,14 @@ authority_audit_contract:
       - ruby -c .ai-platform/scripts/audit_a006_authority.rb
       - ruby .ai-platform/scripts/audit_a006_authority.rb --self-test
       - ruby .ai-platform/scripts/audit_a006_authority.rb pre-review
-    packet_status: ready_for_f007_packet_review
+    packet_status: ready_for_f008_packet_review
     aggregate_state: PENDING_REVIEW
     packet_review_token: none
     execution_authorization: none
     governance_followup: none
-    production_permission: none_pending_three_independent_f007_packet_reviews
-    test_permission: none_pending_three_independent_f007_packet_reviews
+    production_permission: none_pending_three_independent_f008_packet_reviews
+    test_permission: none_pending_three_independent_f008_packet_reviews
+    fixture_permission: none_pending_three_independent_f008_packet_reviews
     rule: every constructed current PASS, authorization, or follow-up token has zero occurrences in all active content
   post_authorization:
     commands:
@@ -591,7 +622,8 @@ authority_audit_contract:
     packet_status: ready
     aggregate_state: PASSED_AUTHORIZED_FOR_EXECUTION
     production_permission: exact_authority_rs_scope_authorized
-    test_permission: exact_registry_and_cleanup_fixture_scope_authorized
+    test_permission: exact_authority_registry_scope_authorized
+    fixture_permission: exact_cleanup_fixture_scope_authorized
     aggregate_token_cardinality:
       packet_review: 2
       execution_authorization: 2
@@ -609,17 +641,24 @@ authority_audit_contract:
       - ruby .ai-platform/scripts/audit_a006_authority.rb --self-test
       - ruby .ai-platform/scripts/audit_a006_authority.rb post-integration
     attempt_evidence_required: true
-    attempt_path: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F007.md
+    attempt_path: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F008.md
     attempt_status: review_complete
-    required_fields: [status, attempt, candidate_commit, packet, packet_sha256, aggregate_review, aggregate_review_sha256, packet_review_token, execution_authorization, governance_followup, review_tokens, summary, test_results]
+    packet_status: review_complete
+    aggregate_state: REVIEW_COMPLETE
+    grant_state: spent_non_replayable
+    production_permission: closed_spent_non_replayable
+    test_permission: closed_spent_non_replayable
+    fixture_permission: closed_spent_non_replayable
+    required_fields: [schema_version, status, validation_status, attempt, preparation_commit, candidate_commit, expected_head, production_diff_paths, packet, aggregate, summary, test_results, review_refs, packet_review_token, review_tokens, execution_authorization_sha256, governance_followup_sha256]
     rules:
-      - candidate_commit is exactly 40 lowercase hexadecimal characters
-      - packet and aggregate SHA-256 values match complete current files
-      - each constructed authority token occurs exactly once in attempt linkage and nowhere outside the documented aggregate, packet, and attempt locations
-      - summary and test-results each reference the exact attempt path, aggregate path, and candidate commit
+      - candidate_commit must exist as an exact 40-lowercase-hex Git commit, equal expected_head and HEAD, descend from the preparation commit, and have no non-governance diff outside the exact future code scope
+      - terminal packet and aggregate are independently review_complete with all production/test/fixture permissions closed and the execution grant spent and non-replayable; ready/authorized checks are not reused
+      - packet, aggregate, summary, test-results, and all three review refs use exact structured paths and actual SHA-256 values; substring, wrong path/hash, missing commit, all-zero commit, NOT VALIDATED, or negated references fail
+      - summary and test-results contain one exact structured VALIDATED reference to the attempt, aggregate, and candidate commit
   self_test:
-    positive: exact pre-review and post-authorization fixtures pass
-    negatives: [substituted canonical path, missing path, unreadable path, duplicate allowlist path, duplicate YAML key, duplicate authority block, duplicate visible authority field, multiline stale historical token, multiline stale active token, premature current token, script self-token trap, pending packet with authorized aggregate, wrong permission, missing review]
+    positive: exact pre-review, post-authorization, and post-integration fixtures pass
+    case_count: 32
+    negatives: [independent allowlist substitution, packet path substitution, symlink alias, extra permission, shadow review row, wrong evidence path, underscore old token, historical current token, premature attempt token, lowercase field plus uppercase decoy, cross-line decorated token, post-review script mutation, post-review packet mutation, stale reviewed head, stale reviewed hash, replayable terminal permission, all-zero commit, nonexistent commit, wrong evidence hash, negated validation reference]
 
 review_contract:
   historical_review: T202C3_A006_PACKET_REVIEW_PASS at governance HEAD 3533054 authorized only the returned candidate
@@ -629,7 +668,9 @@ review_contract:
   failed_f004_packet_review: at 01c14778c780b456e3875953e4d968a55bdffdf1 engineering/spec phase-ordering High plus matrix/effect/gate/audit findings; no pass or execution authorization
   failed_f005_packet_review: at c42e10d75cea45829cd0225aec661e7583653e0b public-matrix/audit-lifecycle/validation/grammar findings; no pass or execution authorization
   failed_f006_packet_review: at 984af0c8fd0afcff9a44337dbb975db450eb53f2 authority-source, token-self-trap, strict-parsing, phase-permission, and negative-control findings; no pass or execution authorization
-  required_f007_packet_review: pending; three independent PASS reviews with zero findings plus governance follow-up and successful post-authorization audit are required before any permission opens
+  failed_f007_packet_review: at 0bfc1c37c6cf383c255b90cee0f22bfced6d8850 spec FAIL/REFUSE C0/H0/M2/L1, engineering/security FAIL/REFUSE C0/H3/M2/L0, QA acceptance FAIL/REFUSE C0/H4/M2/L1; exact per-reviewer counts retained and no pass or execution authorization
+  consolidated_f007_review_themes: audit token placement/completeness, exact schema/path truth, independent allowlists and secure file identity, cryptographic review binding, terminal lifecycle, candidate/evidence integrity, and deterministic negative controls
+  required_f008_packet_review: pending; three independent PASS reviews with zero findings plus governance follow-up and successful post-authorization audit are required before any permission opens
   production_review: failed at candidate commit 2241a946c399ba9c61e67e808a85f777c0d2b402
   pass_1_spec_compliance:
     - pure transition_id=None preflight; phase-specific cleanup precedence; no pre-public lookup/expiry; exact independent unrelated-blocked and unrelated-recovery rows each crossed with all six private-invalid cells; same-origin proposed corruption; fault rollback; proof-expiry preservation; numeric parser proof; and no core/schema change
@@ -645,15 +686,15 @@ review_contract:
     - orchestrator may then record delegated acceptance without claiming user personal review
 
 handoff:
-  current_state: substantive F006 contract unchanged; delegated F007 audit-only clarification approved; F007 is ready_for_f007_packet_review with no implementation started and all permissions closed
-  after_packet_review: three independent zero-finding F007 reviews, strict aggregate/packet authority, governance follow-up, syntax/self-test/post-authorization audit must pass before exact future scopes open
-  after_execution: F007 still requires TDD, full validation, syntax/self-test/post-integration audit, evidence, and three implementation reviews; A007/A008 remain non-executable and T202C3/T110 remain unaccepted
+  current_state: substantive F006 contract unchanged; F007 reviews failed/refused; delegated F008 audit-only clarification approved; F008 is ready_for_f008_packet_review with no implementation started and all permissions closed
+  after_packet_review: three independent zero-finding F008 reviews bound to the preparation commit and canonical manifest, strict aggregate/packet authority, governance follow-up, syntax/self-test/post-authorization audit must pass before exact future scopes open
+  after_execution: F008 still requires TDD, full validation, syntax/self-test/post-integration terminal audit, evidence, and three implementation reviews; A007/A008 remain non-executable and T202C3/T110 remain unaccepted
   commit_policy:
     - local commits only
     - no push, merge, tag, publish, GitHub Release, live provider, mailbox, credential, or external destructive operation
 
 stop_conditions:
-  - Any F007 packet-review or authority-audit finding blocks F007 execution permission; a within-boundary successor may be prepared only under delegated governance, while unresolved material safety/scope/schema/dependency/external-credential/external-state issues stop autonomous work.
+  - Any F008 packet-review or authority-audit finding blocks F008 execution permission; a within-boundary successor may be prepared only under delegated governance, while unresolved material safety/scope/schema/dependency/external-credential/external-state issues stop autonomous work.
   - Production, test, or fixture work is requested while permissions remain none.
   - A required change touches schema, core transcripts/types, dependencies, runtime, keyring, protocol, CLI, MCP, network, or external calls.
   - Locator material or private origin values would enter output, events, logs, fixtures, evidence, Debug, serialization, cloning, or byte export.
