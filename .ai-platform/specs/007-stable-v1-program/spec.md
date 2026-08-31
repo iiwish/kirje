@@ -8,7 +8,7 @@
 - Delivery checkpoints: `alpha.1`, `alpha.2`, `beta.1`, `beta.2`, `rc.1`,
   `rc.2`, and stable
 - Product: Kirje
-- Updated: 2026-08-30
+- Updated: 2026-08-31
 - Source: User-confirmed direct delivery of the narrow, reliability-first 1.0
   product through incremental, usable checkpoints.
 
@@ -97,7 +97,11 @@ its checksum, provenance, dependency inventory, and release notes.
   display and review a challenge but cannot create an approved state. Initial
   trust-root enrollment and recovery use a documented trusted bootstrap outside
   an agent-controlled session; later rotation requires the current owner key or
-  the documented offline recovery procedure.
+  the documented offline recovery procedure. Before a challenge is persisted,
+  caller-supplied common subject IDs remain untrusted typed request values.
+  Public registry eligibility is classified without consulting private cleanup
+  target state, so absent/mismatched or blocked/recovery public subjects cannot
+  reveal whether a private target exists or is valid.
 - SFR-004: Local attachment and JSON file import opens one bounded regular-file
   handle without following a symlink, reads no more than the declared maximum
   plus one byte, and validates metadata on that same handle. A path replacement

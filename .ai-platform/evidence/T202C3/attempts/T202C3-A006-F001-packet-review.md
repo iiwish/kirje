@@ -76,6 +76,12 @@ truly changed deterministic public signatures and may never contain a locator
 transcript. A007 and A008 remain non-executable; T202C3 and T110 remain
 unaccepted. The heartbeat is paused under the user's High-stop condition.
 
+## Subsequent F002 Decision
+
+The user explicitly approved the separate F002 contract revision on 2026-08-31.
+That decision does not convert this failed F001 review into a pass. F002 has its
+own packet and three-review gate.
+
 ## Governance Integration Validation
 
 - YAML parse: passed for all 32 `.ai-platform/**/*.yaml` files.

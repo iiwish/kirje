@@ -17,6 +17,9 @@
   dependency, migration, CI, and checkpoint-specific gates run once per tag.
 - Future packets are generated just in time after their predecessor clears its
   execution gate. The user explicitly accepted `T202C3-A005` on 2026-08-30.
+- The user explicitly approved the A006 F002 contract revision on 2026-08-31.
+  F002 requires three independent packet PASS reviews before any write
+  permission opens; A007/A008 remain non-executable.
 - For the user-authorized unattended delegation beginning 2026-08-30, the
   orchestrator may accept an internal attempt or major milestone only after
   TDD, the packet's full validation loop, required evidence, and all three
@@ -154,10 +157,11 @@ review but failed spec review with 1 High/1 Medium and QA with 4 Medium
 findings. Candidate `2241a946` is Returned/Needs Fix. Autonomous work stopped
 and the heartbeat was paused. The user explicitly resumed A006 repair
 on 2026-08-31. `T202C3-A006-F001` then failed spec review C0/H1/M2/L0 while
-engineering and QA each passed C0/H0/M0/L0. It is blocked for contract
-clarification with no implementation attempt or production/test/fixture
-permission. The heartbeat is paused under the High-stop condition. A007 claim
-and A008 delete completion remain non-executable just-in-time outlines.
+engineering and QA each passed C0/H0/M0/L0. The user explicitly approved the
+F002 contract revision on 2026-08-31. `T202C3-A006-F002` is ready for three
+independent packet reviews with no implementation attempt or production/test/
+fixture permission. A007 claim and A008 delete completion remain non-executable
+just-in-time outlines.
 Priority: P0
 Depends on: T109 Accepted
 Blocks: T111
@@ -243,10 +247,12 @@ Evidence required:
    it treated caller-supplied common IDs as signed and did not close absent/pair-
    mismatch/unrelated-row classification; it also specified an unreachable
    same-context invalid-target replacement and a non-discriminating generic
-   locator-length matrix. Future clarification must define the public projection
-   algorithm, split reachable replacement branches, and approve either an
-   isolated parser seam or source/negative-control proof. No user decision on
-   those choices is recorded. F001 is blocked with no write permission.
+   locator-length matrix. The user approved F002's exact resolution: untrusted
+   common IDs use the closed public pair projection before private step 7;
+   replacement proof uses three reachable branches; generic lengths use one
+   private numeric helper with numeric-only unit tests and registry-only byte
+   vectors. F002 awaits three independent PASS reviews and grants no write
+   permission.
    A007 owns the unpublished credential crate/opaque locator, store-only direct
    dependency, store-private fake deletion hook, permit, claim, and event 16.
    A008 owns the real low-level keyring delete, exact private adapter method,

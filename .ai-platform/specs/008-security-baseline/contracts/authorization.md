@@ -365,6 +365,19 @@ manifest locator kind and digest match the private canonical locator transcript,
 and `tombstone_sha256` is the digest of the exact tombstone transcript defined
 by the authority-store contract. No raw locator field enters this manifest.
 
+At cleanup challenge creation, `ActionManifest` is caller-supplied and has not
+yet been signed or proved. Its common store/account IDs are therefore bounded
+untrusted typed request values, even though a later persisted challenge binds
+them into the signing payload. After global authority integrity validation, an
+absent store, absent account, or persisted account/store pair mismatch is
+`credential_cleanup_invalid` without a requested cleanup, origin, locator, or
+tombstone read. For an existing matched public pair, recovery-required store is
+`owner_recovery_required`; blocked store or blocked/proposed account is
+`account_update_conflict`. This deliberately applies to an unrelated matched
+blocked/recovery pair and reveals no cleanup validity. Active store plus active
+or removed account alone proceeds to private cleanup validation. These rules do
+not make caller-supplied IDs signed authority before proof verification.
+
 ### Send Manifest
 
 The manifest covers:

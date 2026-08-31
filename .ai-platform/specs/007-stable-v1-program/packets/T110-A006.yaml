@@ -1,10 +1,10 @@
 schema_version: 1
-packet_id: 007-T110-T202C3-A006-F001
+packet_id: 007-T110-T202C3-A006-F002
 task_id: T110
 feature_id: 007-stable-v1-program
 mode: delegated_test_first_execution
 adapter: codex_worker
-status: blocked_needs_contract_clarification
+status: ready_for_f002_packet_review
 
 governance_inputs:
   constitution: .ai-platform/memory/constitution.md
@@ -23,7 +23,8 @@ governance_inputs:
   data_model: .ai-platform/specs/008-security-baseline/data-model.md
   predecessor_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A005.md
   historical_packet_review_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A006-packet-review.md
-  fix_packet_review_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F001-packet-review.md
+  failed_f001_packet_review_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F001-packet-review.md
+  f002_packet_review_evidence: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F002-packet-review.md
   approval_gates:
     T202C3_A005: accepted by user on 2026-08-30 at production commit 316dae0
     cleanup_contract: approved by user on 2026-08-30
@@ -56,14 +57,20 @@ governance_inputs:
       delete, then closure of T202C3/T110. This clears only the prior resume
       gate; it does not authorize production, test, or fixture edits before
       this F001 fix packet passes independent review.
-    fix_packet_review: >-
+    f001_packet_review: >-
       FAILED at governance HEAD c5732acb78409e20ba8f74a8a0c1f31dcbd19f69:
       engineering PASS C0/H0/M0/L0; QA PASS C0/H0/M0/L0; spec FAIL
       C0/H1/M2/L0. No pass token or execution authorization exists.
+    f002_contract_revision: >-
+      Explicitly approved by the user on 2026-08-31 with direction to continue.
+      This approves the exact untrusted-ID public projection, reachable
+      replacement branches, and private numeric length-classifier test seam in
+      this packet. It does not approve implementation or claim review of F002.
+    f002_packet_review: pending; three independent PASS reviews are required
 
 work_unit:
   title: Issue an exact effect-free credential-cleanup challenge
-  attempt: T202C3-A006-F001
+  attempt: T202C3-A006-F002
   parent: T110 Complete Authority Lifecycles
   security_task: T202C3 Account Credential And Cleanup Lifecycles
   goal: >-
@@ -79,6 +86,7 @@ work_unit:
     - approved cleanup security contract in 008 canonical artifacts
     - historical T202C3_A006_PACKET_REVIEW_PASS at governance HEAD 3533054
     - explicit user resume on 2026-08-31 after the A006 blocker summary
+    - explicit user approval of the A006 F002 contract revision on 2026-08-31
   blocks:
     - T202C3-A007 cleanup claim packetization
     - T202C3 completion
@@ -88,7 +96,7 @@ work_unit:
 
 codebase_context:
   branch: codex/v1-roadmap-governance
-  baseline_head: fc3f3bca62329cbe0424dfdd8fbe16540150f6b8
+  baseline_head: 2153f4b3699692970c95e224e45f2caa2e05be4c
   reviewed_governance_head: 3533054
   existing_surfaces:
     - sealed CredentialCleanupManifest and canonical authorization TLV helpers in kirje-core
@@ -103,6 +111,9 @@ codebase_context:
     - exact pending reuse and claimed recovery may mutate only the paired authority clock high-water
     - the unpublished kirje-credential crate is a direct dependency of kirje-store only; no public trait/plugin surface lets runtime bypass authority
     - A008 uses an exhaustive AST allowlist rather than a bypassable literal sole-call scan
+    - F002 treats cleanup common IDs as untrusted and closes absent, pair-mismatch, matched blocked/recovery, unrelated-pair, and active/removed public projection before private step 7
+    - F002 splits same-context later-eligibility failure, different-context invalid target, and persisted-corruption replacement branches
+    - F002 proves generic length gates through one private numeric classifier and keeps closed-form locator bytes in authority_registry.rs only
 
 execution_result:
   candidate_commit: 2241a946c399ba9c61e67e808a85f777c0d2b402
@@ -118,8 +129,11 @@ execution_result:
     - immutable projection, clock, entropy, concurrency, pending-reuse, and response-loss assertions are incomplete
     - historical later update/remove/recreation and durable restart-corruption matrices are incomplete
     - effect_observations, external-call cardinality, and privacy proof are incomplete
+  f001_packet_review: engineering and QA PASS C0/H0/M0/L0; spec FAIL C0/H1/M2/L0
+  f002_contract_revision: explicitly approved by user on 2026-08-31; no implementation or packet-review pass yet
   resume_gate: satisfied by explicit user resume on 2026-08-31
-  next_gate: contract clarification and a new independently reviewed fix packet; no implementation attempt started
+  contract_gate: satisfied by explicit user approval of F002 on 2026-08-31
+  next_gate: three independent F002 packet-review passes; no implementation attempt started
 
 contract_snapshot:
   locator:
@@ -172,9 +186,15 @@ contract_snapshot:
     - >-
       ActionManifest is caller-supplied and unproved at challenge creation.
       Common store/account IDs are untrusted typed request values, not a signed
-      subject. F001 therefore defines no executable mutable-eligibility
-      algorithm until the absent-projection, store/account pair-mismatch, and
-      unrelated-row behavior is clarified in the canonical contract.
+      subject. After global integrity validation, absent store, absent account,
+      or account.store_id mismatch returns credential_cleanup_invalid without
+      reading cleanup, origin, locator, or tombstone state.
+    - >-
+      For an existing matched pair, recovery_required store returns
+      owner_recovery_required; blocked store or blocked/proposed account returns
+      account_update_conflict before private target validity. This deliberately
+      applies to an unrelated existing matched pair. Active store plus active or
+      removed account alone proceeds to private step-7 validation.
   reservation_prepare:
     - CredentialCleanupReservation::new parses one complete bounded canonical locator transcript, checks caller kind, and derives its digest.
     - Before row insertion, prepare rederives exact kind/service/username/digest from authority realm and signed historical-before origin.
@@ -187,25 +207,27 @@ contract_snapshot:
     - Same-context replacement can fail after later blocked/recovery eligibility and rolls back expiry, successor, events, clock, and entropy; a different-context invalid target has zero predecessor interaction.
     - Public projection, errors, logs, events, fixtures, and evidence omit locator material and private fields.
 
-contract_clarification_required:
+f002_contract:
   public_projection_precedence:
     - >-
-      A future contract must run complete global schema, anchor, history,
-      transcript, and event validation first. Persisted corruption remains
-      precedence step 2 and returns owner_recovery_required.
+      Run complete global schema, anchor, history, transcript, and event
+      validation first. Persisted corruption remains precedence step 2 and
+      returns owner_recovery_required.
     - >-
-      It must then treat common store/account IDs only as bounded untrusted typed
-      request data and document one closed public projection classification that
-      consults no cleanup row, origin transition, locator, tombstone, or other
-      private target-validity signal.
+      Treat common store/account IDs only as bounded untrusted typed request
+      data. Absent store, absent account, or persisted account.store_id unequal
+      to the request store ID returns credential_cleanup_invalid without a
+      cleanup row, origin transition, locator, tombstone, or other private
+      target-validity read.
     - >-
-      The contract must define exact closed behavior for absent store/account
-      projections, store/account pair mismatch, and unrelated blocked or
-      recovery rows before permitting private step-7 target validation. F001
-      makes no choice among those unresolved behaviors and does not attribute a
-      choice to the user.
+      For an existing matched pair, recovery_required store returns
+      owner_recovery_required; blocked store or blocked/proposed account returns
+      account_update_conflict. An unrelated matched blocked/recovery pair
+      deliberately returns the same public result and never distinguishes
+      cleanup validity. Active store plus active/removed account proceeds to
+      private step-7 cleanup/origin/locator/tombstone validation.
     - >-
-      A future first RED must cover known, absent, pair-mismatched, and unrelated
+      The first RED must cover known, absent, pair-mismatched, and unrelated
       blocked/recovery public rows crossed with invalid private targets. Every
       case must prove no target-validity distinction, durable mutation, or
       entropy consumption.
@@ -217,23 +239,34 @@ contract_clarification_required:
       unrecognized/duplicate/out-of-order tags, trailing bytes, declared-length
       mismatch, malformed or noncanonical UTF-8, and embedded NUL.
     - >-
-      Closed active_v2 and legacy_v1 integration shapes cannot independently
-      prove generic parser length gates. A future contract must explicitly
-      choose and authorize either a safe isolated parser-classification test
-      seam or a source plus negative-control proof. Neither choice may expose
-      locator bytes outside authority_registry.rs, and F001 authorizes neither.
+      Generic service, username, and total-length gates use one private numeric
+      length-classification helper in authority.rs. Its #[cfg(test)] unit tests
+      pass numeric lengths and expected classes only: service byte/character
+      0, 1, 128, 129; username byte/character 0, 1, 1024, 1025; and total 0, 1,
+      4096, 4097 plus the greatest constructible canonical total. No public/
+      test-support API is added and no locator transcript/test-vector bytes are
+      added to authority.rs. Closed-form byte tests remain only in
+      authority_registry.rs.
     - >-
       One transition-bound legacy_v1 flow succeeds through reservation,
       prepare, finalize, and exact cleanup challenge issuance from the
       historical origin-before display ID.
+    - >-
+      authority_registry.rs retains canonical locator and exact 14-tag tombstone
+      byte/digest goldens, every one-field closed-form mutation, malformed
+      active_v2/legacy_v1 constructor cases, and canonical wrong-origin prepare
+      with zero durable mutation and entropy.
   replacement_reuse_and_races:
     - >-
-      The future matrix must separate three reachable branches: same-context
+      The matrix separates three reachable branches: same-context
       expired pending followed by later blocked/recovery eligibility;
       different-context invalid target with zero predecessor interaction; and
       persisted target/history corruption returning precedence-step-2
-      owner_recovery_required. It must not describe an unreachable
-      same-context invalid-target mutation as an executable test.
+      owner_recovery_required. It never describes an unreachable
+      same-context invalid-target mutation as an executable test. On failed
+      same-context replacement, a durably expired predecessor stays expired and
+      tentative expiry of a pending predecessor rolls back to pending; no new
+      predecessor event, successor, authority clock field, or entropy commits.
     - >-
       Valid expired replacement proves fresh grant and nonce, exactly one
       predecessor event 5 followed by exactly one successor event 3, unchanged
@@ -304,8 +337,8 @@ later_attempt_outlines:
     kirje-credential or locator material.
 
 execution_constraints:
-  production_permission: none_blocked_contract_clarification
-  test_permission: none_blocked_contract_clarification
+  production_permission: none_pending_three_independent_f002_packet_reviews
+  test_permission: none_pending_three_independent_f002_packet_reviews
   future_allowed_files:
     - crates/kirje-store/src/authority.rs
     - crates/kirje-store/tests/authority_registry.rs
@@ -315,9 +348,13 @@ execution_constraints:
     - cleanup claim/delete, permit, deletion backend, runtime, config, keyring, protocol, CLI, MCP, network, or remote-effect behavior
     - transition state-machine behavior outside locator input hardening before cleanup insertion
   write_rules:
-    - No production, test, or fixture edit may begin until a clarified successor packet passes fresh independent review and a governance follow-up opens its exact permissions.
+    - No production, test, or fixture edit may begin until all three independent F002 packet reviews pass and a governance follow-up opens the exact permissions.
     - The returned attempt scope is historical evidence, not current write permission.
     - Evidence, SSOT, packet, and status files remain orchestrator-owned.
+    - >-
+      The authority.rs length helper is private; its #[cfg(test)] tests use only
+      numeric lengths/classes, add no public or test-support API, and add no
+      locator transcript/test-vector bytes.
     - Deterministic synthetic non-real locator transcript bytes may appear only in authority_registry.rs for canonical byte goldens.
     - Signature fixtures may change only if deterministic synthetic public signatures truly change; they contain no locator transcript. Evidence/output/logs contain only vector IDs, digests, counts, and pass/fail results.
     - Real/private locator bytes remain prohibited in every committed file; private keys, seeds, real proofs/nonces, credentials, and real account data are also prohibited.
@@ -325,13 +362,14 @@ execution_constraints:
 
 tdd_plan:
   ordering: >-
-    Non-executable while contract clarification is unresolved. A successor
-    packet must replace, not silently reinterpret, the public-projection,
-    replacement-reachability, and parser-proof obligations below and pass
-    independent review before any test or production edit.
+    F002 remains non-executable until all three independent packet reviews pass.
+    After authorization, the public-projection RED is first. Each retained
+    initial/F001 review category receives its discriminating pre-change test;
+    real defects require a captured RED before corresponding production change,
+    while already-correct behavior receives honest test-only proof.
   red:
-    - After clarification, run the known/absent/pair-mismatch/unrelated-row public-projection matrix before every production edit and retain exact zero-mutation/entropy snapshots.
-    - After a parser-proof choice is approved, run correct-kind legacy and the authorized locator proof, plus the successful transition-bound legacy flow.
+    - Run the known/absent/pair-mismatch/unrelated-row public-projection matrix before every production edit and retain exact zero-mutation/entropy snapshots.
+    - Run correct-kind legacy, private numeric-only length-classifier unit tests, closed-form registry locator/tombstone goldens and mutations, malformed reservation/wrong-origin prepare, and the successful transition-bound legacy flow.
     - Run the three reachable replacement branches and valid replacement freshness/event-cardinality matrices.
     - Run complete immutable-projection, paired-clock-only reuse/loser, concurrent issuance, restart, and cleanup response-loss matrices.
     - Run later-history non-rebinding plus descriptor/origin/tuple/timestamp/ready-state durable restart-corruption matrices.
@@ -360,14 +398,14 @@ validation_loop:
     - python3 /Users/iiwish/.codex/skills/ai-delivery-governor/scripts/validate_delivery_artifacts.py --root /Users/iiwish/self/kirje --feature-id 008-security-baseline
 
 evidence_contract:
-  attempt_path: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F001.md
-  packet_review_path: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F001-packet-review.md
+  attempt_path: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F002.md
+  packet_review_path: .ai-platform/evidence/T202C3/attempts/T202C3-A006-F002-packet-review.md
   summary_path: .ai-platform/evidence/T202C3/summary.md
   test_results_path: .ai-platform/evidence/T202C3/test-results.md
   required:
     - exact RED/GREEN commands and results
     - clarified known/absent/pair-mismatch/unrelated-row public-projection RED, persisted-corruption control, and zero-target-distinction/mutation/entropy snapshots
-    - correct-kind legacy success/negatives and the approved isolated-parser or source/negative-control locator proof, with bytes confined to authority_registry.rs
+    - correct-kind legacy success/negatives, private numeric-only length-classifier unit proof, and closed-form locator/tombstone goldens and mutations confined to authority_registry.rs
     - three reachable replacement branches plus valid replacement, complete immutable projection, paired-clock-only reuse/loser, concurrency, restart, entropy/event, and cleanup response-loss matrices
     - historical later-update/remove/recreation non-rebinding and descriptor/origin/tuple/timestamp/ready-state restart-corruption matrices
     - zero grant-use and zero row delta for every effect table including effect_observations, plus zero cleanup/external-call and privacy/capability source proof
@@ -379,31 +417,32 @@ evidence_contract:
 
 review_contract:
   historical_review: T202C3_A006_PACKET_REVIEW_PASS at governance HEAD 3533054 authorized only the returned candidate
-  required_fix_packet_review: failed for T202C3-A006-F001 at c5732acb78409e20ba8f74a8a0c1f31dcbd19f69; engineering and QA passed, spec failed C0/H1/M2/L0
+  failed_f001_packet_review: at c5732acb78409e20ba8f74a8a0c1f31dcbd19f69 engineering and QA passed, spec failed C0/H1/M2/L0
+  required_f002_packet_review: pending; three independent PASS reviews with zero findings are required before any permission opens
   production_review: failed at candidate commit 2241a946c399ba9c61e67e808a85f777c0d2b402
   pass_1_spec_compliance:
-    - global corruption first; untrusted common IDs; exact absent/pair-mismatch/unrelated-row public classification before private step 7; reachable replacement branches; approved parser proof; and no core/schema change
+    - global corruption first; untrusted common IDs; exact absent/pair-mismatch/unrelated-row public classification before private step 7; reachable replacement branches; private numeric parser proof; and no core/schema change
   pass_2_engineering:
-    - implementable non-disclosing public classification, safe parser proof, reservation/prepare canonicality, streaming restart derivation, clock-only pending reuse/losers, reachable replacement/concurrency rollback, zero-effect transaction, and privacy/capability closure
+    - implementable non-disclosing public classification, private numeric-only classifier with no public/test-support API, reservation/prepare canonicality, streaming restart derivation, clock-only pending reuse/losers, reachable replacement/concurrency rollback, zero-effect transaction, and privacy/capability closure
   pass_3_qa:
-    - known/absent/pair-mismatch/unrelated public projection crossed with private mismatch, correct-kind legacy full flow, approved parser proof, reachable replacement, later-history/durable corruption, complete clock/projection/entropy rollback, concurrency/restart/response loss, all-effect-table zero counts, and privacy coverage
+    - known/absent/pair-mismatch/unrelated public projection crossed with private mismatch, correct-kind legacy full flow, numeric-only and registry-byte length proofs, reachable replacement, later-history/durable corruption, complete clock/projection/entropy rollback, concurrency/restart/response loss, all-effect-table zero counts, and privacy coverage
   packet_pass_condition:
     - no unresolved Critical, High, Medium, or Low finding
-    - independent reviewer explicitly authorizes production and test execution in a governance follow-up
+    - all three independent reviewers return PASS; a governance follow-up then explicitly authorizes the exact production/test/fixture scopes
   production_acceptance:
     - TDD, every validation command, sanitized evidence, and all three reviews pass
     - orchestrator may then record delegated acceptance without claiming user personal review
 
 handoff:
-  current_state: F001 packet review failed and is blocked pending contract clarification; no implementation attempt started and heartbeat is paused
-  after_packet_review: a clarified successor packet requires a fresh zero-finding independent review and explicit scope authorization
-  after_execution: no execution is authorized; A007/A008 remain non-executable and T202C3/T110 remain unaccepted
+  current_state: user approved F002 contract revision; F002 is ready for three independent packet reviews with permissions closed
+  after_packet_review: only three zero-finding PASS reviews plus governance authorization may open the exact future scopes
+  after_execution: F002 still requires TDD, full validation, evidence, and three implementation reviews; A007/A008 remain non-executable and T202C3/T110 remain unaccepted
   commit_policy:
     - local commits only
     - no push, merge, tag, publish, GitHub Release, live provider, mailbox, credential, or external destructive operation
 
 stop_conditions:
-  - The public-projection, replacement-reachability, or parser-proof contract remains unresolved.
+  - Any F002 packet review finds an unresolved Critical, High, Medium, or Low issue, or fewer than three independent PASS reviews exist.
   - Production, test, or fixture work is requested while permissions remain none.
   - A required change touches schema, core transcripts/types, dependencies, runtime, keyring, protocol, CLI, MCP, network, or external calls.
   - Locator material or private origin values would enter output, events, logs, fixtures, evidence, Debug, serialization, cloning, or byte export.

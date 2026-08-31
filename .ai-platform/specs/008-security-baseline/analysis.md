@@ -3,7 +3,7 @@
 ## Metadata
 
 - Feature ID: `008-security-baseline`
-- Status: T202C3_A006_F001_Blocked_Needs_Contract_Clarification
+- Status: T202C3_A006_F002_Ready_For_Packet_Review
 - Updated: 2026-08-31
 - Inputs: `spec.md`, `checklists/requirements.md`, `plan.md`, `research.md`,
   `data-model.md`, `contracts/**`, `tasks.md`, project constitution and AGENTS
@@ -21,9 +21,14 @@
   explicitly resumed A006 repair on 2026-08-31, but F001 failed spec review
   C0/H1/M2/L0 while engineering and QA each passed C0/H0/M0/L0. The packet
   wrongly treated caller-supplied common IDs as signed and did not close absent,
-  pair-mismatched, or unrelated-row classification. It is blocked for contract
-  clarification; no implementation started, permissions remain closed, and the
-  heartbeat is paused. The first A006 packet
+  pair-mismatched, or unrelated-row classification. The user explicitly
+  approved the F002 contract revision on 2026-08-31. F002 closes the public-pair
+  algorithm, reachable replacement branches, and private numeric length proof
+  and is ready for three independent packet reviews. Absent or pair-mismatched
+  IDs fail `credential_cleanup_invalid` without private reads; matched recovery
+  or blocked/proposed projections return the stable public recovery/conflict
+  result, including for unrelated pairs; active plus active/removed proceeds to
+  private step 7. No implementation started and permissions remain closed. The first A006 packet
   review rejected the current-binding contradiction, incomplete clock-only
   recovery rule, and non-implementable cross-crate delete capability. The
   revised amendment makes cleanup the explicit historical-before exception,
@@ -61,10 +66,10 @@
   external-call, and privacy proof. F001 additionally failed on two Medium
   packet defects: its same-context invalid-target expired-replacement case is
   unreachable except as step-2 persisted corruption, and closed locator shapes
-  cannot prove generic parser bounds at the integration surface. Future
-  clarification must split the three reachable replacement branches and approve
-  either a safe isolated parser seam or source/negative-control proof without
-  exposing locator bytes outside `authority_registry.rs`. The earlier literal
+  cannot prove generic parser bounds at the integration surface. Approved F002
+  splits the three reachable replacement branches and uses a private numeric
+  classifier with numeric-only unit tests; no public/test-support API is added
+  and closed-form bytes stay in `authority_registry.rs`. The earlier literal
   sole-call scan can be bypassed by aliases, wildcards, re-exports, macros,
   function pointers, or indirect bindings. A008 now owns a dedicated exhaustive
   AST allowlist over every production store Rust file, composed with Cargo
@@ -108,9 +113,10 @@ must preserve that placement or add an explicit counter before loop expansion.
   delegated authority on 2026-08-31, superseding the flawed shared formulation.
   T202C3-A006 candidate `2241a946` is Returned/Needs Fix. The user explicitly
   resumed A006 repair on 2026-08-31 and fixed the path as A006 repair/re-review,
-  A007 claim, A008 delete, then T202C3/T110 closure. F001 failed spec review and
-  is blocked for contract clarification; production, test, and fixture
-  permissions remain none, the heartbeat is paused, and A007/A008 remain closed.
+  A007 claim, A008 delete, then T202C3/T110 closure. F001 failed spec review; the
+  user approved F002 on 2026-08-31. F002 awaits three independent packet PASS
+  reviews; production, test, and fixture permissions remain none, and A007/A008
+  remain closed.
   T202C4, T202D-T202E, and T203-T212 remain dependency-gated Draft work. T204
   and every later task directly require the T202 umbrella to be Accepted.
 
@@ -647,6 +653,6 @@ terminal current row with no successor. Independent A006 review replayed the
 prior findings, reported zero Critical, High, Medium, or Low, and issued
 `T202C2_A006_PACKET_REVIEW_PASS`. T202C2 is Accepted. Returned candidate
 `T202C3-A006` retains one High and five Medium findings. The user resumed repair,
-but F001 failed spec review C0/H1/M2/L0 and is blocked pending contract
-clarification with no execution permission; the T202C and T202 umbrellas remain
-non-Accepted.
+F001 failed spec review C0/H1/M2/L0, and the user approved the F002 contract
+revision. F002 has no execution permission until three independent packet
+reviews pass; the T202C and T202 umbrellas remain non-Accepted.

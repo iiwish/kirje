@@ -39,9 +39,11 @@
   The same delegated decision specifies an unpublished crate with
   `kirje-store` as its sole direct dependent and supersedes the flawed shared
   runtime/pluggable deletion formulation identified by repeat review. The
-  decision is not implementation evidence. A006's independent packet gate has
-  passed for exact source/test scopes; A007/A008 remain closed, and no execution
-  is accepted before its TDD, validation, evidence, and implementation reviews.
+  decision is not implementation evidence. A006's historical packet gate passed
+  only for returned candidate `2241a946`. F001 later failed spec review; the
+  user approved the F002 contract revision, whose three packet reviews remain
+  pending. A007/A008 remain closed, and no execution is accepted before its TDD,
+  validation, evidence, and implementation reviews.
 - No task may expose credentials, owner private keys, signatures, mailbox
   content, account addresses, endpoints, UIDs, or raw provider responses in
   committed fixtures/evidence.
@@ -756,8 +758,11 @@ T202C3/T110 closure. `T202C3-A006-F001` failed spec review C0/H1/M2/L0 while
 engineering and QA each passed C0/H0/M0/L0. It is blocked pending clarification
 of untrusted common-ID public projection, absent/pair-mismatch/unrelated-row
 behavior, reachable replacement branches, and a safe parser-bound proof. No
-implementation started; every code/fixture permission is none and the heartbeat
-is paused under the High-stop condition. A007
+implementation started. The user explicitly approved the F002 contract revision
+on 2026-08-31. F002 closes those choices with the exact public pair algorithm,
+three reachable replacement branches, and a private numeric-only length helper.
+It is ready for three independent packet reviews; every code/fixture permission
+remains none. A007
 claim and A008 delete-completion are non-executable just-in-time outlines;
 neither is Ready or packetized.
 Priority: P0
@@ -805,6 +810,16 @@ Test targets:
   wrong-origin active-v2/legacy-v1 transcripts with zero durable mutation
 - Exact pending-reuse and claimed-recovery clock-only mutation; expired-pending
   replacement and concurrent exact issuance entropy/event/restart matrices
+- Cleanup challenge public projection crosses absent store/account, pair
+  mismatch, matched/unrelated blocked/recovery pairs, and active/removed pairs
+  with private target mismatch, proving exact errors and zero private-read/
+  target-distinction/mutation/entropy behavior
+- Replacement proof separates same-context later blocked/recovery failure,
+  different-context invalid target with zero predecessor interaction, and
+  persisted target corruption at step 2; no same-context manifest mutation
+- Private numeric service/username/total-length classifier unit boundaries in
+  authority.rs with no public/test-support API or locator byte vectors; closed-
+  form locator bytes remain only in authority_registry.rs
 - Cargo metadata/tree direct-dependency allowlist proving only `kirje-store`
   directly depends on unpublished `kirje-credential`
 - Dedicated AST allowlist parses every production Rust file under store and
@@ -845,9 +860,9 @@ Attempt ownership is serial: A006 owns canonical locator validation at
 reservation/prepare plus effect-free cleanup challenge issuance, without
 changing transition state-machine behavior. Its candidate is Returned/Needs Fix
 and blocks all later outlines. The user resumed repair, but F001 failed spec
-review and is `blocked_needs_contract_clarification`. A clarified successor
-packet must receive a fresh independent zero-finding review and explicit exact-
-scope authorization before execution.
+review. The user approved the F002 revision; F002 is
+`ready_for_f002_packet_review` and requires three independent zero-finding PASS
+reviews plus explicit exact-scope authorization before execution.
 A007 owns the new unpublished
 `kirje-credential` workspace crate, root/store-only dependency entries, opaque
 locator, store-private fake deletion hook, store-owned permit and combined

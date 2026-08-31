@@ -349,6 +349,19 @@ runtime `SecretStore` paths, wires runtime/CLI only to the high-level store API,
 and proves end-to-end crash recovery. No schema or core transcript changes are
 part of this architecture decision.
 
+Cleanup challenge creation validates global authority integrity before using
+common store/account IDs as untrusted typed request values. Absent store,
+absent account, or persisted pair mismatch returns
+`credential_cleanup_invalid` without a private cleanup-graph read. A matched
+recovery store returns `owner_recovery_required`; matched blocked store or
+blocked/proposed account returns `account_update_conflict`, including for an
+unrelated matched pair. Active store plus active/removed account proceeds to
+private target validation. Replacement tests distinguish same-context later
+blocked/recovery failure, different-context invalid target with no predecessor
+interaction, and persisted step-2 corruption. Generic locator length gates use
+one private numeric classifier with numeric-only `#[cfg(test)]` unit tests;
+closed-form bytes remain in the registry integration test.
+
 ### D-009 Unified Same-Handle Bounded Input
 
 One `kirje-local-io` service backs attachment, send, draft, operation,
@@ -653,5 +666,7 @@ candidate scopes at governance HEAD `3533054`. Candidate `2241a946` later failed
 spec and QA review and is Returned/Needs Fix with no current write permission.
 The user explicitly resumed A006 repair on 2026-08-31. F001 packet review failed
 spec compliance C0/H1/M2/L0 while engineering and QA passed C0/H0/M0/L0. F001
-is blocked for contract clarification with no implementation or production,
-test, or fixture permission; later A007/A008 attempts remain closed.
+is superseded for contract purposes by the user's explicit approval of the F002
+revision on 2026-08-31. F002 is ready for three independent packet reviews with
+no implementation or production, test, or fixture permission; later A007/A008
+attempts remain closed.

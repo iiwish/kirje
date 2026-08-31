@@ -1226,6 +1226,16 @@ realm/store/account/historical-credential/historical-binding tuple.
 The row's `locator_sha256` hashes that complete transcript. It never hashes raw
 concatenation, only a username, or a mutable current account.
 
+Generic service, username, and total-length gates are classified by one private
+numeric length helper in `authority.rs`. Its `#[cfg(test)]` unit tests pass only
+numeric byte/character/total lengths and expected classifications, including
+service 0/1/128/129, username 0/1/1024/1025, total 0/1/4096/4097, and the
+greatest constructible canonical total. They expose no public or test-support
+API and add no locator transcript or locator-field test bytes to `authority.rs`.
+Closed-form canonical and mutation byte vectors remain only in
+`authority_registry.rs`. This test seam changes no public type, schema,
+transcript, locator projection, or runtime capability.
+
 The signed tombstone digest is:
 
 ```text
@@ -1262,16 +1272,25 @@ graph. This rule changes no schema and no core transcript bytes.
 
 #### Effect-Free Challenge
 
-Credential-cleanup challenge issuance requires the exact cleanup manifest with
-expected state `ready`, the rederived locator and tombstone digests, one
-finalized origin transition, an active registered store, and the historical
-account's current registry projection in `active` or `removed`. The common
-account binding digest is the historical-before binding. A removed account is
-therefore eligible; a new account with the same display ID is irrelevant.
-Blocked store or account state is `account_update_conflict`, and a recovery-
-required store is `owner_recovery_required`. Provisional, claimed, deleted,
-wrong-kind, wrong-origin, duplicated-descriptor, or mismatched tombstone state
-is `credential_cleanup_invalid`.
+Credential-cleanup challenge creation treats the manifest's common store and
+account IDs as bounded untrusted typed request values. After complete global
+schema, anchor, history, transcript, and event integrity validation, an absent
+store, absent account, or account whose persisted `store_id` differs from the
+requested store ID returns `credential_cleanup_invalid` without reading or
+comparing the requested cleanup row, origin transition, locator, or tombstone.
+
+For an existing matched public store/account pair, a `recovery_required` store
+returns `owner_recovery_required`; a blocked store or a blocked/proposed account
+returns `account_update_conflict`. These public results occur before any private
+target-validity result. An unrelated but existing matched blocked/recovery pair
+deliberately returns that pair's public projection result and never reveals
+whether the requested cleanup target is valid. Only an active store plus an
+active or removed account proceeds to private validation of the exact cleanup
+manifest with expected state `ready`, rederived locator/tombstone digests, one
+finalized origin transition, and the historical-before binding. A removed
+account is eligible and a new account with the same display ID is irrelevant.
+Provisional, claimed, deleted, wrong-kind, wrong-origin, duplicated-descriptor,
+or mismatched locator/tombstone state is `credential_cleanup_invalid`.
 
 Issuance is effect-free: it consumes no grant, changes no cleanup row, and
 creates no effect, invocation, or external-call capability. Exact pending reuse
@@ -1281,15 +1300,22 @@ it never changes challenge, cleanup, lifecycle, or event timestamps and never
 appends an event. No public projection, event, log, fixture, or error contains
 the private locator transcript, service, username, or one of its raw fields.
 
-An expired matching pending cleanup challenge is replaced under the same
-global challenge transaction rule. One valid replacement atomically changes
-the predecessor pending challenge to expired, appends its one event 5, creates
-one successor with a fresh grant UUID and nonce, and appends one event 3 after
-the predecessor terminal event. Both events use the transaction's effective
-time; no cleanup, grant-use, effect, or external row is written. If historical
-origin, locator, tombstone, or current eligibility validation fails, the entire
-replacement attempt rolls back, including tentative expiry/event/clock work,
-and consumes no replacement entropy.
+An expired matching pending cleanup challenge is replaced under the same global
+challenge transaction rule. One valid replacement atomically changes a still-
+pending predecessor to expired, appends its one event 5, creates one successor
+with a fresh grant UUID and nonce, and appends one event 3 after the predecessor
+terminal event. Both events use the transaction's effective time; no cleanup,
+grant-use, effect, or external row is written.
+
+Replacement proof uses only reachable branches. A same-context predecessor has
+the same immutable manifest; if later public state is blocked or recovery-
+required, failed replacement leaves a previously durable expired predecessor
+expired, or rolls tentative expiry back so a previously pending predecessor
+remains pending, with no successor, replacement clock update, or entropy. A
+different-context invalid target has zero interaction with that predecessor.
+Persisted target/history mutation is global step-2 corruption and returns
+`owner_recovery_required`. No test or implementation invents a same-context
+manifest mutation.
 
 Concurrent exact issuance has one creator. The winner commits one challenge,
 one grant identity, one nonce, and one event 3. Every loser reopens the winning
@@ -1424,8 +1450,14 @@ Credential cleanup uses this closed failure precedence:
    `authorization_context_stale`.
 5. Clock rollback is checked before authorization expiry; expiry is durably
    recorded before mutable target eligibility.
-6. Blocked store/account is `account_update_conflict`; a recovery-required
-   store is `owner_recovery_required`.
+6. Common store/account IDs are untrusted request values. Without consulting
+   requested cleanup/origin/locator/tombstone state, absent store, absent
+   account, or store/account pair mismatch is `credential_cleanup_invalid`.
+   For an existing matched pair, a recovery-required store is
+   `owner_recovery_required`; blocked store or blocked/proposed account is
+   `account_update_conflict`. An unrelated matched blocked/recovery pair returns
+   the same public projection result. Active store plus active/removed account
+   advances to step 7.
 7. Target lifecycle, locator kind, locator/tombstone digest, origin graph, or a
    different-grant occupied target mismatch is `credential_cleanup_invalid`.
 8. Authority-store read/write and low-level keyring backend failures retain their existing

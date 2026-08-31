@@ -29,12 +29,12 @@ exhaustive production-store AST allowlist. The A006 challenge candidate
 `2241a946` remains Returned/Needs Fix: engineering passed, spec failed
 C0/H1/M1/L0, and QA failed C0/H0/M4/L0. The user explicitly resumed A006 repair
 on 2026-08-31. Fix packet `T202C3-A006-F001` failed spec review C0/H1/M2/L0;
-engineering and QA each passed C0/H0/M0/L0. It incorrectly treated caller-
-supplied common IDs as signed and left public-projection classification,
-reachable replacement cases, and parser-bound proof unresolved. No
-implementation started, all permissions remain closed, and the heartbeat is
-paused under the High-stop rule. A007 claim and A008 delete completion remain
-non-executable just-in-time outlines. One separate dependency Medium
+engineering and QA each passed C0/H0/M0/L0. The user explicitly approved the
+F002 contract revision on 2026-08-31. F002 closes the untrusted public-pair
+projection, reachable replacement branches, and private numeric length-proof
+design and is ready for three independent packet reviews. No implementation
+started and all permissions remain closed. A007 claim and A008 delete completion
+remain non-executable just-in-time outlines. One separate dependency Medium
 implementation finding is assigned: the unchanged branch dependency graph contains yanked
 `chacha20 0.10.1`, which makes `cargo deny check advisories` fail. T111
 owns remediation and Security Alpha cannot be Accepted until the complete
@@ -249,12 +249,13 @@ changed grant recovery third, signed-context/clock/expiry next, then current
 eligibility and target lifecycle, while existing store/backend codes remain
 stable.
 
-Result: `T202C3_A006_F001_BLOCKED_NEEDS_CONTRACT_CLARIFICATION`. The historical
+Result: `T202C3_A006_F002_READY_FOR_PACKET_REVIEW`. The historical
 packet gate authorized only returned production candidate `2241a946`, whose one
-High and five Medium findings remain open. The user resumed repair, but F001's
-spec review failed C0/H1/M2/L0. No implementation attempt started and no
-production, test, or fixture permission exists. A007 and A008 remain
-unpacketized, non-executable outlines and are not Ready.
+High and five Medium findings remain open. F001 failed spec review C0/H1/M2/L0;
+the user approved F002's exact contract resolution. No implementation attempt
+started and no production, test, or fixture permission exists until three
+independent F002 reviews pass. A007 and A008 remain unpacketized, non-executable
+outlines and are not Ready.
 
 ## Current Implementation Evidence Check
 
@@ -320,14 +321,13 @@ H-A006-EXEC-001: cleanup checks origin/locator/tombstone before blocked/recovery
 eligibility. Mixed invalid target plus blocked/recovery state therefore returns
 `credential_cleanup_invalid` before `account_update_conflict` or
 `owner_recovery_required`, leaking target validity. This production-review High
-is open in the returned candidate. F001's proposed repair is also blocked: it
-treated common store/account IDs as signed even though the challenge manifest
-is caller-supplied and unproved, and it did not define absent projections,
-store/account pair mismatch, or unrelated blocked/recovery rows. Contract
-clarification must preserve global corruption first, treat common IDs as
-untrusted typed input, define a closed public projection without consulting the
-private cleanup graph, then permit step-7 validation. The exact absent/mismatch
-behavior remains undecided.
+is open in the returned candidate. The approved F002 contract validates global
+integrity first and treats common IDs as untrusted typed request values. Absent
+store/account or pair mismatch returns `credential_cleanup_invalid` without a
+private target read. A matched recovery store returns
+`owner_recovery_required`; matched blocked store or blocked/proposed account
+returns `account_update_conflict`, including for an unrelated matched pair.
+Only active store plus active/removed account proceeds to private step 7.
 
 ### Medium
 
@@ -355,13 +355,12 @@ restart corruption; and zero rows across grant uses plus every effect table,
 including `effect_observations`, with source-level no-external-capability and
 privacy proof.
 
-F001 spec review added two packet Mediums. Same-context expired replacement
-cannot acquire an invalid target without persisted corruption, so future tests
-must separate later blocked/recovery eligibility, different-context invalid
-targets with no predecessor interaction, and step-2 corruption. Closed locator
-shapes also cannot prove generic length bounds through ordinary integration
-tests; a future contract must approve either an isolated parser-classification
-seam or source/negative-control proof without moving locator bytes outside
+F001 spec review added two packet Mediums. F002 resolves them by separating
+same-context later blocked/recovery failure, different-context invalid target
+with zero predecessor interaction, and step-2 persisted corruption. Generic
+service/username/total lengths use one private numeric classifier with
+numeric-only `#[cfg(test)]` unit tests, no public/test-support API, and no new
+locator byte vectors in `authority.rs`; closed-form bytes stay only in
 `authority_registry.rs`.
 
 ### Low
@@ -371,9 +370,8 @@ None.
 ## Residual Risks
 
 - T109 and the account-create checkpoint were explicitly accepted by the user
-  on 2026-08-30. The user resumed A006 repair on 2026-08-31, but F001 failed
-  spec review and is blocked for contract clarification with no production,
-  test, or fixture permission.
+  on 2026-08-30. The user approved F002 on 2026-08-31, but it remains packet-
+  review-only with no production, test, or fixture permission.
 - Cross-platform support claims remain Draft until T119 produces platform
   evidence.
 - Real-provider checks depend on dedicated credentials and may produce honest
@@ -382,7 +380,7 @@ None.
 
 ## Gate Result
 
-`T109_ACCEPTED_T202C3_A006_F001_BLOCKED_NEEDS_CONTRACT_CLARIFICATION`
+`T109_ACCEPTED_T202C3_A006_F002_READY_FOR_PACKET_REVIEW`
 
 The user approved `plan.md` and `tasks.md` on 2026-08-30. T109 review and fresh
 validation are complete at `94f3495`; the user explicitly accepted the

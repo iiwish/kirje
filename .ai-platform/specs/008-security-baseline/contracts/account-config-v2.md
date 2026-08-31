@@ -446,10 +446,13 @@ bytes and characters, and the complete transcript is 1..4096 bytes.
 `locator_sha256` is SHA-256 of the complete domain-prefixed transcript, never a
 hash of an implementation struct, concatenated strings, or only the username.
 
+Generic service, username, and total-length gates use one private numeric
+classification helper in `authority.rs`; its `#[cfg(test)]` unit tests contain
+only numeric lengths and expected classes and expose no public/test-support API.
 Canonical byte goldens may commit deterministic, clearly synthetic, non-real
-locator transcript bytes only inside Rust test source. Signature fixtures never
-contain locator transcripts. Evidence, output, events, errors, and logs record
-only synthetic vector IDs, expected digests, cardinalities, and pass/fail
+locator transcript bytes only in `authority_registry.rs`. Signature fixtures
+never contain locator transcripts. Evidence, output, events, errors, and logs
+record only synthetic vector IDs, expected digests, cardinalities, and pass/fail
 results. Real or private locator bytes are prohibited from every committed
 source, fixture, evidence, or generated artifact.
 

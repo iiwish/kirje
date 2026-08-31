@@ -320,3 +320,8 @@ test result. That packet review returned engineering PASS
 C0/H0/M0/L0, QA PASS C0/H0/M0/L0, and spec FAIL C0/H1/M2/L0. No implementation
 attempt or production test followed; F001 is blocked for contract clarification
 and the heartbeat is paused.
+
+The user approved the F002 contract revision on 2026-08-31. F002 has no new
+production RED/GREEN or validation result because its three independent packet
+reviews and execution authorization remain pending. Production, test, and
+fixture permissions are none.

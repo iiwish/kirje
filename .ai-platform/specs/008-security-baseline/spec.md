@@ -18,7 +18,10 @@
   review failed with three High findings and later review found one additional
   High and one Medium. The final independent spec, engineering, and QA passes at
   governance HEAD `3533054` returned zero Critical, High, Medium, or Low finding
-  and issued `T202C3_A006_PACKET_REVIEW_PASS` for the packet's exact scopes.
+  and issued `T202C3_A006_PACKET_REVIEW_PASS` for the packet's exact scopes. Its
+  production candidate later failed review, and F001 packet review failed spec
+  C0/H1/M2/L0. The user explicitly approved the F002 contract algorithm on
+  2026-08-31; F002 implementation and packet review remain unclaimed.
 
 ## Goal
 
@@ -306,7 +309,12 @@ granting mailbox access.
   removal and credential deletion use their current signed before binding.
   Credential cleanup is the closed historical exception and uses its finalized
   origin transition's immutable before binding; later account state cannot
-  rebind it.
+  rebind it. Before a cleanup challenge is persisted and signed, its caller-
+  supplied common store/account IDs are untrusted typed request values. After
+  global authority integrity validation, absent or pair-mismatched public IDs
+  fail closed without reading private cleanup target state; a matched public
+  blocked/recovery projection returns its stable conflict/recovery result before
+  private cleanup validation, including for an unrelated matched pair.
 - FR-014: The CLI emits one unambiguous, bounded signing payload and a digest of
   that payload together with the exact bounded action manifest an owner signer
   must independently parse and review. The signed representation is specified
