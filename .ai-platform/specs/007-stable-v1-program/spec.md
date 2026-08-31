@@ -106,15 +106,24 @@ its checksum, provenance, dependency inventory, and release notes.
   classification, so absent/mismatched or blocked/recovery public subjects
   cannot reveal whether a private target exists or is valid. Credential cleanup
   tests cross absent store, absent account, pair mismatch, matched recovery,
-  matched blocked store, matched blocked/proposed account, unrelated matched
-  blocked/recovery pair, and active store with active/removed account independently
+  matched blocked store/account, unrelated matched proposed pair, unrelated
+  matched blocked/recovery pair, and active store with active/removed account independently
   with wrong origin, locator kind, locator digest, tombstone, lifecycle, and
   descriptor. Same-context expired pending plus later matched blocked/recovery
   performs no pending lookup-dependent interaction and changes no predecessor,
   event, clock, entropy, successor, grant, nonce, or cleanup state. Active-pair
   rollback uses `OldChallengeExpiredState` and `OldChallengeExpiredEvent`.
   Different-context invalid targets do not interact with predecessors, and
-  persisted corruption remains global step 2.
+  persisted corruption remains global step 2. The same-context later-state
+  matrix is active/removed origin account, blocked account/store, or recovery-
+  required store; a finalized-origin account persisted as proposed is corruption,
+  while an unrelated matched proposed pair returns the
+  public conflict without target distinction. Cleanup challenge issuance orders
+  pure preflight, lock/transaction, global validation, checked effective time/
+  time shape without pending access, public classification, private validation,
+  pending lookup, reuse/replacement, and successor commit; pending expiry is not
+  durable before public eligibility. Ordinary claim/delete proof-expiry ordering
+  is unchanged. A credential-cleanup manifest
   with `transition_id=None` fails a pure `authority.rs` manifest preflight as
   `authorization_malformed` before apply lock, file, database, or entropy work,
   with no core type or transcript change.

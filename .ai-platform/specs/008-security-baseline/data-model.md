@@ -1210,8 +1210,12 @@ Exact pending challenge reuse and exact claimed recovery append no event and
 change no challenge, cleanup, grant, lifecycle, or event timestamp. They may
 advance only the paired `authority_meta` clock high-water. Expired-pending
 replacement records one predecessor event 5 before one successor event 3 only
-when valid. Public classification occurs before request-directed pending/private
-lookup. A same-context expired pending row followed by matched blocked/recovery
+when valid. Cleanup challenge issuance orders pure manifest preflight, lock/
+transaction, complete request-independent global validation, checked effective
+time/time shape without pending access, public pair classification, private
+target validation, pending lookup, reuse/replacement, and successor commit. No
+request-directed pending/private lookup precedes public classification, and no
+pending expiry is durably recorded before public eligibility. A same-context expired pending row followed by matched blocked/recovery
 public state returns that public error without pending-row lookup-dependent
 interaction: predecessor state/event/clock is unchanged and entropy, successor,
 grant, nonce, and cleanup deltas are zero. For an active eligible public pair and
@@ -1220,7 +1224,18 @@ and `OldChallengeExpiredEvent` each roll the entire tentative predecessor/
 event/clock transaction back to exact prestate with zero entropy, successor,
 grant, nonce, or cleanup delta. Different-context invalid target has zero
 predecessor interaction. Persisted target/history corruption is global step 2
-and returns `owner_recovery_required`.
+and returns `owner_recovery_required`. A finalized-origin account persisted as
+proposed is such corruption; the same-context later-state matrix is only active/
+removed origin account, blocked account/store, or recovery-required store. An unrelated matched proposed pair is reachable
+and returns `account_update_conflict` without target distinction. Ordinary
+cleanup claim/delete proof-expiry ordering is unchanged.
+
+Every first/reuse/response-loss/valid-replacement/both-fault/restart/concurrent-
+winner/concurrent-loser challenge path has zero delta in `challenge_effects`,
+`remote_effects`, `effect_claims`, `effect_invocations`, `effect_observations`,
+and `grant_uses`, zero external calls, and unchanged cleanup. `grant_uses` is a
+delta rather than an absolute count because the origin transition may already
+own immutable uses.
 
 ## Credential Locator V2
 

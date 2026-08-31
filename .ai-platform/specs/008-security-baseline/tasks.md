@@ -40,11 +40,11 @@
   `kirje-store` as its sole direct dependent and supersedes the flawed shared
   runtime/pluggable deletion formulation identified by repeat review. The
   decision is not implementation evidence. A006's historical packet gate passed
-  only for returned candidate `2241a946`. F001, F002, and F003 packet reviews failed.
+  only for returned candidate `2241a946`. F001 through F004 packet reviews failed.
   On 2026-08-31 the user authorized orchestrator approval of existing-boundary
-  clarifications. The orchestrator approved F004's exact clarification under
-  that authority after F003 failed engineering C0/H1/M0/L0, spec C0/H0/M1/L0,
-  and QA C0/H0/M1/L0; this is not user review of the unseen artifact. F004
+  clarifications. The orchestrator approved F005's exact clarification under
+  that authority after F004 review found a phase-ordering High plus matrix/
+  effect/gate/audit defects; this is not user review of the unseen artifact. F005
   awaits three independent zero-finding reviews with permissions closed. A007/A008
   remain closed, and no execution is accepted before its TDD, validation,
   evidence, and implementation reviews.
@@ -768,13 +768,13 @@ algorithm, three reachable replacement branches, and a private numeric-only
 length helper. Its packet review returned QA PASS C0/H0/M0/L0, spec FAIL
 C0/H0/M1/L0, and engineering FAIL C0/H1/M2/L0 at `38ca4273`; no implementation
 started. Under the user's delegated existing-boundary clarification authority,
-the orchestrator approved F004 after F003 failed engineering C0/H1/M0/L0, spec
-C0/H0/M1/L0, and QA C0/H0/M1/L0. F004 preserves request-independent global graph
-validation, prohibits request-directed pending/private lookup before public-pair
-classification, moves tentative-expiry rollback to the active-pair post-
-classification fault path, and retains the exact-scope pure manifest preflight
-before apply lock/file/database/entropy without a core change. F004 is
-`ready_for_f004_packet_review`; every code/fixture permission remains none. A007
+the orchestrator approved F005 after F004 review failed. F005 preserves request-
+independent global validation, makes challenge precedence phase-specific,
+prohibits pending/private lookup or durable expiry before public eligibility,
+separates same-origin proposed corruption from unrelated proposed conflict,
+retains active-pair rollback and exact-scope preflight, and completes effect/
+gate/audit proof without a core change. F005 is
+`ready_for_f005_packet_review`; every code/fixture permission remains none. A007
 claim and A008 delete-completion are non-executable just-in-time outlines;
 neither is Ready or packetized.
 Priority: P0
@@ -822,9 +822,15 @@ Test targets:
   wrong-origin active-v2/legacy-v1 transcripts with zero durable mutation
 - Exact pending-reuse and claimed-recovery clock-only mutation; expired-pending
   replacement and concurrent exact issuance entropy/event/restart matrices
+- First issuance, exact reuse, response-loss replay, valid expired replacement,
+  both failed replacement fault hooks, restart reuse, the concurrent winner, and
+  every loser each prove zero row delta in `challenge_effects`, `remote_effects`,
+  `effect_claims`, `effect_invocations`, `effect_observations`, and `grant_uses`,
+  zero external calls, and unchanged cleanup. `grant_uses` assertions compare
+  delta from the prestate so immutable origin-transition uses may already exist
 - Cleanup challenge public projection crosses absent store, absent account, pair
-  mismatch, matched recovery store, matched blocked store, matched blocked or
-  proposed account, unrelated matched blocked/recovery pair, active/active, and
+  mismatch, matched recovery store, matched blocked store/account, unrelated
+  matched proposed pair, unrelated matched blocked/recovery pair, active/active, and
   active/removed independently with wrong origin, locator kind, locator digest,
   tombstone, lifecycle, and descriptor. Every public-ineligible class returns the
   closed public result without request-directed pending/private lookup or target
@@ -832,6 +838,13 @@ Test targets:
   `credential_cleanup_invalid`. Complete request-independent global validation
   may already stream every private graph; source/call-order proof enforces this
   boundary with no mutation/entropy
+- Cleanup challenge issuance strictly orders pure request/manifest preflight,
+  lock/transaction, request-independent global validation, checked effective
+  time/time shape without pending access, public-pair classification, private
+  validation, pending lookup, reuse/replacement, and successor commit. No
+  pending/private request-directed lookup precedes public classification and no
+  pending expiry is durable before eligibility; claim/delete proof-expiry order
+  remains unchanged
 - Pure `authority.rs` manifest preflight rejects cleanup `transition_id=None` as
   `authorization_malformed` before apply lock, file, database, or entropy work,
   with zero I/O/mutation/entropy and no core change
@@ -843,6 +856,9 @@ Test targets:
   transaction rollback and zero entropy/successor/cleanup. Different-context
   invalid target has zero predecessor interaction; persisted corruption remains
   step-2 `owner_recovery_required`
+- Same-origin later state covers active, removed, blocked, and recovery only;
+  same-origin proposed is step-2 corruption, while an unrelated matched proposed
+  pair is reachable and returns `account_update_conflict` without target distinction
 - Private numeric service/username/total-length classifier unit boundaries in
   authority.rs with no public/test-support API or locator byte vectors; closed-
   form locator bytes remain only in authority_registry.rs
@@ -866,7 +882,9 @@ Validation commands:
 cargo test -p kirje-store --test authority_registry --all-features --locked
 cargo test -p kirje-credential -p kirje-store --all-features --locked
 cargo test -p kirje-store --all-features --locked
+cargo test -p kirje-core --all-features --locked
 cargo clippy -p kirje-credential -p kirje-store --all-targets --all-features --locked -- -D warnings
+cargo build --workspace --all-features --locked
 cargo metadata --no-deps --format-version 1
 cargo tree -p kirje-store -e normal --locked
 ```
@@ -885,9 +903,9 @@ there is no separate `008-security-baseline/packets/T202C3.yaml`.
 Attempt ownership is serial: A006 owns canonical locator validation at
 reservation/prepare plus effect-free cleanup challenge issuance, without
 changing transition state-machine behavior. Its candidate is Returned/Needs Fix
-and blocks all later outlines. F001, F002, and F003 packet reviews failed. Under the
+and blocks all later outlines. F001, F002, F003, and F004 packet reviews failed. Under the
 user's delegated existing-boundary clarification authority, the orchestrator
-approved F004. F004 is `ready_for_f004_packet_review` and requires three
+approved F005. F005 is `ready_for_f005_packet_review` and requires three
 independent zero-finding PASS reviews plus a governance follow-up before any
 exact production/test/fixture scope opens.
 A007 owns the new unpublished

@@ -1285,8 +1285,20 @@ closed public pair classification. An absent store, absent account, or account
 whose persisted `store_id` differs from the requested store ID returns
 `credential_cleanup_invalid` without request-directed pending/private lookup.
 
+The challenge-issuance phases are exact and cannot be reordered: (1) pure
+request/manifest preflight, including rejection of `transition_id=None`; (2)
+acquire the authority apply lock and begin the transaction; (3) complete the
+request-independent global step-2 integrity pass; (4) validate checked effective
+time and canonical time shape without pending-row access; (5) classify the
+closed public store/account pair; (6) validate the private cleanup, origin,
+locator, and tombstone target; (7) perform the first request-directed pending-
+challenge lookup; (8) return exact reuse or perform expired replacement; and
+(9) create and commit a successor when required. No request-directed pending or
+private lookup/branch occurs before phase 5, and no pending expiry is durably
+recorded before public eligibility succeeds.
+
 For an existing matched public store/account pair, a `recovery_required` store
-returns `owner_recovery_required`; a blocked store or a blocked/proposed account
+returns `owner_recovery_required`; a blocked store or a blocked account
 returns `account_update_conflict`. These public results occur before any private
 target-validity result. An unrelated but existing matched blocked/recovery pair
 deliberately returns that pair's public projection result and never reveals
@@ -1300,9 +1312,11 @@ or mismatched locator/tombstone state is `credential_cleanup_invalid`.
 
 The public-pair cross-product is complete rather than sampled. Absent store,
 absent account, and pair mismatch each return `credential_cleanup_invalid`.
-Matched recovery store returns `owner_recovery_required`. Matched blocked store,
-blocked account, and proposed account each return `account_update_conflict`.
-An unrelated but matched blocked/recovery pair returns that same public result.
+Matched recovery store returns `owner_recovery_required`. Matched blocked store
+or blocked account returns `account_update_conflict`. A finalized-origin account
+persisted as `proposed` is global step-2 corruption. An unrelated but matched
+proposed pair is reachable and returns `account_update_conflict`; an unrelated
+matched blocked/recovery pair returns its same public result.
 Every one of those public-ineligible cells is crossed independently with wrong
 origin, wrong locator kind, wrong locator digest, wrong tombstone, wrong
 lifecycle, and wrong descriptor target cells; none performs request-directed
@@ -1328,8 +1342,9 @@ grant-use, effect, or external row is written.
 
 Replacement proof separates public classification from pending-row work. A test
 may arrange a same-context expired pending row and then make its matched store
-recovery-required, its matched store blocked, or its matched account blocked or
-proposed. Each call returns the closed public recovery/conflict error with zero
+recovery-required, its matched store blocked, or its matched account blocked.
+The same finalized-origin account may otherwise remain active or become removed;
+persisting it as proposed is corruption. Each blocked/recovery call returns the closed public recovery/conflict error with zero
 request-directed pending-row lookup-dependent interaction: predecessor state,
 events, and both authority clock fields are unchanged; entropy, successor,
 grant, nonce, and cleanup deltas are zero.
@@ -1350,6 +1365,14 @@ pending row, returns its exact immutable projection, consumes no entropy,
 appends no event, and may advance only the paired clock high-water. Restart
 performs the same intrinsic validation and exact reuse without creating a
 second lifecycle interval.
+
+For first issuance, exact reuse, response-loss replay, valid expired replacement,
+each `OldChallengeExpiredState`/`OldChallengeExpiredEvent` failure, restart reuse,
+the concurrent winner, and every concurrent loser, the transaction has zero row
+delta in `challenge_effects`, `remote_effects`, `effect_claims`,
+`effect_invocations`, `effect_observations`, and `grant_uses`, zero external-call
+cardinality, and unchanged cleanup. `grant_uses` is measured as a prestate-to-
+poststate delta because immutable origin-transition uses may already exist.
 
 #### Claim And Permit
 
@@ -1465,35 +1488,30 @@ state-field combination fails the entire authority open as
 `owner_recovery_required`. Validation and public/error projection retain O(1)
 additional Rust history memory and never expose locator material.
 
-Credential cleanup uses this closed failure precedence:
+Credential cleanup uses phase-specific closed precedence. Cleanup challenge
+issuance uses exactly: (1) pure request/manifest bounds, encoding, and
+`transition_id=None` preflight; (2) lock/transaction acquisition; (3)
+request-independent schema/anchor/history/transcript/event/row validation, with
+corruption returning `owner_recovery_required`; (4) checked effective time and
+canonical time-shape validation without pending access; (5) closed public pair
+classification; (6) private cleanup/origin/locator/tombstone validation; (7)
+pending lookup; (8) exact reuse or expired replacement; and (9) successor
+creation/commit. At phase 5, absent store/account or pair mismatch is
+`credential_cleanup_invalid`, matched recovery store is
+`owner_recovery_required`, matched blocked store/account is
+`account_update_conflict`, and an unrelated matched proposed pair is
+`account_update_conflict`. A finalized-origin account persisted as proposed is
+phase-3 corruption. Only active store plus active/removed origin account reaches
+phase 6. No pending or private request-directed lookup/branch precedes phase 5,
+and pending expiry is never durable before public eligibility.
 
-1. Request bounds, canonical encoding, and time shape fail as `invalid_input`
-   or `authorization_malformed`. The pure cleanup-manifest preflight rejects
-   `transition_id=None` before apply lock, file, database, or entropy work.
-2. Schema, anchor, history, transcript, event, or row corruption, including a
-   persisted NULL transition, fails as `owner_recovery_required`.
-3. An existing grant is checked for exact terminal/recovery identity; changed
-   use of the same grant is `grant_already_used`.
-4. Receipt, challenge, manifest, or intent mismatch is
-   `authorization_context_stale`.
-5. Clock rollback is checked before authorization expiry; expiry is durably
-   recorded before mutable target eligibility.
-6. Common store/account IDs are untrusted request values. Complete request-
-   independent global validation may already have streamed every private graph.
-   After the request-independent global validation pass, no request-directed
-   private lookup or request-dependent private branch occurs before the closed
-   public pair classification. Absent
-   store, absent account, or store/account pair mismatch is
-   `credential_cleanup_invalid`.
-   For an existing matched pair, a recovery-required store is
-   `owner_recovery_required`; blocked store or blocked/proposed account is
-   `account_update_conflict`. An unrelated matched blocked/recovery pair returns
-   the same public projection result. Active store plus active/removed account
-   advances to step 7.
-7. Target lifecycle, locator kind, locator/tombstone digest, origin graph, or a
-   different-grant occupied target mismatch is `credential_cleanup_invalid`.
-8. Authority-store read/write and low-level keyring backend failures retain their existing
-   stable codes.
+Cleanup claim and delete retain the ordinary grant/proof precedence after global
+integrity validation: existing-grant exact recovery versus changed same-grant;
+receipt/challenge/manifest/intent match; clock rollback; proof authorization
+expiry and its ordinary durable expiry behavior; current eligibility; private
+target lifecycle/locator/tombstone/origin validation; then store/backend error.
+The cleanup-challenge issuance exception does not reorder claim/delete proof
+verification or weaken any corruption check.
 
 No failure contains a private locator value, account address, endpoint,
 credential presence distinction, digest, backend diagnostic, or other private

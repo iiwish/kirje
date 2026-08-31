@@ -337,14 +337,17 @@ F003 was governance-only and had no production RED/GREEN or implementation.
 Its packet review failed engineering C0/H1/M0/L0, spec C0/H0/M1/L0, and QA
 C0/H0/M1/L0. No pass token or execution permission exists.
 
-F004 is governance-only and has no new production RED/GREEN result. Under the
-user's explicit existing-boundary delegated authority, the orchestrator approved
-its clarification on 2026-08-31. The packet preserves request-independent global
-validation, prohibits request-directed pending/private lookup before public
-classification, requires the complete public-pair by six-private-invalid matrix,
-makes blocked/recovery zero-interaction, and moves rollback proof to active-pair
-`OldChallengeExpiredState`/`OldChallengeExpiredEvent` faults. The pure
-`authority.rs` preflight for `transition_id=None`, numeric-only bounds helper,
-prior matrices, and exact future scope remain unchanged. Production, test, and
-fixture permissions remain none pending three independent zero-finding F004
-packet reviews and governance follow-up.
+F004 was governance-only and had no production RED/GREEN result. Its packet
+review failed on the cleanup-challenge phase-ordering High and supporting matrix,
+effect, complete-gate, stale-authority-audit, and wording defects. No aggregate
+severity counts were supplied and none are inferred. No implementation started.
+
+F005 is governance-only and has no production RED/GREEN result. Under delegated
+existing-boundary authority, the orchestrator approved its clarification on
+2026-08-31. It defines the exact challenge phases, prohibits pre-public pending/
+private lookup and pre-eligibility durable expiry, preserves ordinary claim/
+delete proof expiry, closes same-origin versus unrelated-proposed reachability,
+and requires per-path zero deltas across all six effect/external tables. Core
+tests, workspace build, and the deterministic all-input authority audit join the
+gate. Prior preflight, numeric helper, matrices, fault hooks, and exact scope
+remain. Permissions are none pending three zero-finding F005 packet reviews.

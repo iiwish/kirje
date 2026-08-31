@@ -20,9 +20,9 @@
 - F002 packet review failed at `38ca4273` with engineering C0/H1/M2/L0, spec
   C0/H0/M1/L0, and QA PASS C0/H0/M0/L0. On 2026-08-31 the user authorized the
   orchestrator to approve existing-boundary clarifications. The orchestrator
-  approved F004's exact clarification under that authority after F003 review
-  failed engineering C0/H1/M0/L0, spec C0/H0/M1/L0, and QA C0/H0/M1/L0; this is
-  not user review of the resulting packet. F004 awaits three independent zero-finding
+  approved F005's exact clarification under that authority after F004 review
+  found a phase-ordering High plus matrix/effect/gate/audit defects; this is not
+  user review of the resulting packet. F005 awaits three independent zero-finding
   reviews with every write permission closed; A007/A008 remain non-executable.
 - For the user-authorized unattended delegation beginning 2026-08-30, the
   orchestrator may accept an internal attempt or major milestone only after
@@ -166,11 +166,11 @@ engineering and QA each passed C0/H0/M0/L0. The user explicitly approved the
 F002 contract revision on 2026-08-31. Its packet review at `38ca4273` returned
 QA PASS C0/H0/M0/L0, spec FAIL C0/H0/M1/L0, and engineering FAIL C0/H1/M2/L0.
 No implementation started. Under the user's 2026-08-31 delegated clarification
-authority, the orchestrator approved `T202C3-A006-F004` after F003 review failed.
-It preserves complete global validation, closes request-directed pending/private
-lookup and branch ordering, moves tentative-expiry rollback to active-pair fault
-injection, and chooses the exact-scope pure manifest preflight without a core
-change. F004 is `ready_for_f004_packet_review`; all
+authority, the orchestrator approved `T202C3-A006-F005` after F004 review failed.
+It preserves complete global validation, makes cleanup-challenge precedence
+phase-specific, removes unreachable same-origin proposed state, completes
+effect/gate/audit proof, and retains the exact-scope preflight and active-pair
+fault rollback without a core change. F005 is `ready_for_f005_packet_review`; all
 production/test/fixture permissions remain none. A007 claim and A008 delete
 completion remain non-executable just-in-time outlines.
 Priority: P0
@@ -262,19 +262,25 @@ Evidence required:
    common IDs use the closed public pair projection before private step 7;
    replacement proof uses three reachable branches; generic lengths use one
    private numeric helper with numeric-only unit tests and registry-only byte
-   vectors. F002 and F003 packet reviews failed. F004 canonically resolves every finding:
+   vectors. F002, F003, and F004 packet reviews failed. F005 canonically resolves every finding:
    global step-2 validation remains request-independent and may stream all
    private graphs; after the request-independent global validation pass, no
    request-directed pending/private lookup or request-dependent private branch may occur
    before the closed public pair
-   classification; the full public-pair matrix is crossed independently with
+   classification; challenge issuance strictly orders preflight, lock,
+   global/time/public/private/pending phases and never persists expiry before
+   eligibility; the reachable public-pair matrix is crossed independently with
    wrong origin, locator kind, locator digest, tombstone, lifecycle, and descriptor;
-   blocked/recovery classification performs no pending-row lookup-dependent
+   same-origin proposed treated as corruption and unrelated proposed treated as
+   a reachable public conflict; blocked/recovery classification performs no pending-row lookup-dependent
    interaction, while active-pair rollback uses `OldChallengeExpiredState` and
    `OldChallengeExpiredEvent`;
+   every issuance/reuse/replacement/restart/concurrency path proves six-table
+   zero deltas, zero external calls, and unchanged cleanup; core tests, workspace
+   build, and deterministic all-input authority audit join the gate;
    and a pure `authority.rs` manifest preflight rejects `transition_id=None` as
    `authorization_malformed` before apply lock, file, database, or entropy work.
-   No core change is allowed. Only three independent zero-finding F004 reviews
+   No core change is allowed. Only three independent zero-finding F005 reviews
    plus governance follow-up may open the exact scopes.
    A007 owns the unpublished credential crate/opaque locator, store-only direct
    dependency, store-private fake deletion hook, permit, claim, and event 16.

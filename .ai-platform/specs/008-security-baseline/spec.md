@@ -19,13 +19,13 @@
   High and one Medium. The final independent spec, engineering, and QA passes at
   governance HEAD `3533054` returned zero Critical, High, Medium, or Low finding
   and issued `T202C3_A006_PACKET_REVIEW_PASS` for the packet's exact scopes. Its
-  production candidate later failed review; F001, F002, and F003 packet reviews also
+  production candidate later failed review; F001 through F004 packet reviews also
   failed. On 2026-08-31 the user authorized the Delivery Orchestrator to approve
   existing-boundary clarifications. Under that authority, the orchestrator
-  approved F004's request-independent validation ordering, pre-classification
-  pending/private lookup prohibition, active-pair rollback path, and exact-scope
+  approved F005's phase-specific challenge precedence, reachable-state matrix,
+  complete effect/gate/audit proof, active-pair rollback, and exact-scope
   manifest preflight. This records delegated contract approval, not user review
-  of the unseen F004 artifact.
+  of the unseen F005 artifact.
 
 ## Goal
 
@@ -321,13 +321,18 @@ granting mailbox access.
   dependent private branch may occur before the closed public pair
   classification. Absent store, absent account, or a pair mismatch returns
   `credential_cleanup_invalid`; matched recovery store returns
-  `owner_recovery_required`; matched blocked store or blocked/proposed account
-  returns `account_update_conflict`; an unrelated but matched blocked/recovery
-  pair deliberately returns the same public projection. Each of those public
-  classes is crossed independently with wrong origin, locator kind, locator
+  `owner_recovery_required`; matched blocked store or blocked account returns
+  `account_update_conflict`; a finalized-origin account persisted as proposed
+  is step-2 corruption, while an unrelated matched proposed pair returns
+  `account_update_conflict`; an unrelated but matched blocked/recovery
+  pair deliberately returns the same public projection. Every reachable public
+  class is crossed independently with wrong origin, locator kind, locator
   digest, tombstone, lifecycle, and descriptor and may not distinguish the
   private cell. Active store with active or removed account alone proceeds; each
   of the six private-invalid cells then returns `credential_cleanup_invalid`.
+  The same-context later-state matrix contains active/removed origin account,
+  blocked account/store, and recovery-required store only; proposed is tested
+  solely as corruption for that origin.
   A same-context expired pending challenge followed by a later matched blocked/
   recovery public state returns the public result with no pending-row lookup-
   dependent interaction, unchanged predecessor state/event and both clock
@@ -340,6 +345,17 @@ granting mailbox access.
   preflight rejects cleanup `transition_id=None` as `authorization_malformed`
   before apply lock, file, database, or entropy work, with zero I/O, mutation,
   or entropy and no core change.
+  Cleanup challenge issuance strictly orders pure preflight, lock/transaction,
+  request-independent global validation, checked effective time/time shape
+  without pending access, public pair classification, private target validation,
+  pending lookup, reuse/replacement, and successor commit. No request-directed
+  pending/private lookup precedes public classification and no pending expiry is
+  durable before public eligibility. Ordinary claim/delete proof-expiry ordering
+  remains unchanged.
+  First issuance, exact reuse, response loss, valid replacement, both replacement
+  faults, restart reuse, concurrent winner, and every loser each have zero delta
+  across all six effect/external tables, zero external calls, and unchanged
+  cleanup; `grant_uses` is measured from prestate because origin uses may exist.
 - FR-014: The CLI emits one unambiguous, bounded signing payload and a digest of
   that payload together with the exact bounded action manifest an owner signer
   must independently parse and review. The signed representation is specified

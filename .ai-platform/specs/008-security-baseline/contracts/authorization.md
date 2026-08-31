@@ -378,11 +378,13 @@ request-independent global validation pass, no request-directed pending/private
 lookup or request-dependent private branch may occur before the closed public pair
 classification. An absent store, absent account, or persisted account/store pair
 mismatch is `credential_cleanup_invalid`. For an existing matched public pair,
-recovery-required store is `owner_recovery_required`; blocked store or blocked/
-proposed account is `account_update_conflict`. This deliberately applies to an
-unrelated matched blocked/recovery pair and reveals no cleanup validity. Active
+recovery-required store is `owner_recovery_required`; blocked store or blocked
+account is `account_update_conflict`. A finalized-origin account persisted as
+proposed is global corruption; an unrelated matched proposed pair is reachable
+and returns `account_update_conflict`. This deliberately applies to an unrelated
+matched blocked/recovery pair and reveals no cleanup validity. Active
 store plus active or removed account alone proceeds to request-directed private
-cleanup validation. The matrix independently crosses every public class with
+cleanup validation. The matrix independently crosses every reachable public class with
 wrong origin, locator kind, locator digest, tombstone, lifecycle, and descriptor;
 the pre-private classes never distinguish those cells, while active/active and
 active/removed return `credential_cleanup_invalid` for each invalid private
@@ -523,6 +525,18 @@ Challenge creation:
 4. Loads current anchor/journal/key/epoch context.
 5. Generates a random grant ID and 32-byte nonce.
 6. Persists manifest and signing payload before returning review output.
+
+Credential-cleanup challenge issuance is the explicit exception to that generic
+sequence. It performs: pure request/manifest preflight including transition
+presence; lock/transaction acquisition; complete request-independent global
+step-2 validation; checked effective-time/time-shape validation without pending
+access; closed public store/account classification; private cleanup/origin/
+locator/tombstone validation; the first request-directed pending lookup; exact
+reuse or expired replacement; then successor creation/commit. No request-
+directed pending or private lookup/branch occurs before public classification,
+and pending expiry is not durably recorded before public eligibility. Ordinary
+cleanup claim/delete proof verification and its expiry recording retain the
+Verification Transaction ordering below.
 
 The explicit owner-facing challenge export is:
 
