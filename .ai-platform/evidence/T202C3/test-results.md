@@ -332,3 +332,13 @@ branch after global validation. The Mediums are stale unreachable replacement
 text in `data-model.md`, unresolved `transition_id=None` error/preflight
 ownership, and a stale F001 review gate. F002 is blocked, the heartbeat is
 paused, and production, test, and fixture permissions are none.
+
+F003 is governance-only and has no new production RED/GREEN or validation
+result. Under the user's explicit existing-boundary delegated authority, the
+orchestrator approved its contract clarification on 2026-08-31. The packet
+preserves request-independent global validation, requires source/call-order
+proof before public classification, defines only the three reachable replacement
+branches, and requires a pure `authority.rs` preflight for `transition_id=None`
+before apply lock/file/database/entropy with zero I/O/mutation/entropy and no
+core change. Production, test, and fixture permissions remain none pending three
+independent zero-finding F003 packet reviews and governance follow-up.

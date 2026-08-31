@@ -17,11 +17,12 @@
   dependency, migration, CI, and checkpoint-specific gates run once per tag.
 - Future packets are generated just in time after their predecessor clears its
   execution gate. The user explicitly accepted `T202C3-A005` on 2026-08-30.
-- The user explicitly approved the A006 F002 contract revision on 2026-08-31.
-  Its packet review failed at `38ca4273` with engineering C0/H1/M2/L0, spec
-  C0/H0/M1/L0, and QA PASS C0/H0/M0/L0. F002 is blocked for contract
-  clarification with every write permission closed; A007/A008 remain non-
-  executable.
+- F002 packet review failed at `38ca4273` with engineering C0/H1/M2/L0, spec
+  C0/H0/M1/L0, and QA PASS C0/H0/M0/L0. On 2026-08-31 the user authorized the
+  orchestrator to approve existing-boundary clarifications. The orchestrator
+  approved F003's exact clarification under that authority; this is not user
+  review of the resulting packet. F003 awaits three independent zero-finding
+  reviews with every write permission closed; A007/A008 remain non-executable.
 - For the user-authorized unattended delegation beginning 2026-08-30, the
   orchestrator may accept an internal attempt or major milestone only after
   TDD, the packet's full validation loop, required evidence, and all three
@@ -30,9 +31,10 @@
   reviewed unseen work. Missing or failed evidence still blocks progression.
 - The unattended cadence permits bounded subagent management and local commits
   only. It forbids push, merge, tag, publish, GitHub Release, live mailbox or
-  provider effects, and credential input. A Critical/High finding, material
-  scope/schema/dependency change, second same-cause failure, required credential
-  or human decision, disk shortage, or platform limitation stops execution.
+  provider effects, and credential input. Existing-boundary findings and review
+  follow-ups may be revised under delegated authority. Unresolved material
+  safety, scope, schema, dependency, external credential, external-state, disk,
+  or platform issues stop execution.
 - Existing accepted T201-T202C1S commits and evidence remain immutable.
 - The preserved T202C2 implementation is not modified during governance. After
   plan approval, T109 moves directly to review because implementation and
@@ -162,10 +164,13 @@ on 2026-08-31. `T202C3-A006-F001` then failed spec review C0/H1/M2/L0 while
 engineering and QA each passed C0/H0/M0/L0. The user explicitly approved the
 F002 contract revision on 2026-08-31. Its packet review at `38ca4273` returned
 QA PASS C0/H0/M0/L0, spec FAIL C0/H0/M1/L0, and engineering FAIL C0/H1/M2/L0.
-No implementation started. `T202C3-A006-F002` is
-`blocked_needs_contract_clarification`, the heartbeat is paused under the High-
-stop condition, and production/test/fixture permission remains none. A007 claim
-and A008 delete completion remain non-executable just-in-time outlines.
+No implementation started. Under the user's 2026-08-31 delegated clarification
+authority, the orchestrator approved `T202C3-A006-F003`. It preserves complete
+global validation, closes request-directed lookup/branch ordering, defines the
+three reachable replacement branches, and chooses the exact-scope pure manifest
+preflight without a core change. F003 is `ready_for_f003_packet_review`; all
+production/test/fixture permissions remain none. A007 claim and A008 delete
+completion remain non-executable just-in-time outlines.
 Priority: P0
 Depends on: T109 Accepted
 Blocks: T111
@@ -255,14 +260,16 @@ Evidence required:
    common IDs use the closed public pair projection before private step 7;
    replacement proof uses three reachable branches; generic lengths use one
    private numeric helper with numeric-only unit tests and registry-only byte
-   vectors. F002 packet review failed: the no-private-read wording conflicts
-   with mandatory full global graph validation; `data-model.md` retains a stale
-   unreachable invalid-target replacement; the `transition_id=None` error and
-   preflight layer are unresolved; and one gate still referred to F001 rather
-   than three reviews of the revised F002/F003 packet. A successor must preserve
-   step-2 validation and prove no request-directed private lookup or request-
-   dependent private branch after global validation. F002 is blocked, grants no
-   write permission, and may resume only after explicit clarification.
+   vectors. F002 packet review failed. F003 canonically resolves every finding:
+   global step-2 validation remains request-independent and may stream all
+   private graphs; after the request-independent global validation pass, no
+   request-directed private lookup or request-dependent private branch may occur
+   before the closed public pair
+   classification; replacement proof has exactly the three reachable branches;
+   and a pure `authority.rs` manifest preflight rejects `transition_id=None` as
+   `authorization_malformed` before apply lock, file, database, or entropy work.
+   No core change is allowed. Only three independent zero-finding F003 reviews
+   plus governance follow-up may open the exact scopes.
    A007 owns the unpublished credential crate/opaque locator, store-only direct
    dependency, store-private fake deletion hook, permit, claim, and event 16.
    A008 owns the real low-level keyring delete, exact private adapter method,

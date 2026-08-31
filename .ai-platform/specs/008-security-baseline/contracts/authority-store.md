@@ -1265,19 +1265,25 @@ transition and transition digest, origin grant/challenge manifest, descriptor,
 and origin-before account/version graph. No caller supplies a trusted field.
 
 The schema's nullable `credential_cleanup.transition_id` does not create a v1
-legacy branch. A cleanup request with an absent transition is malformed, and a
-persisted NULL transition is `owner_recovery_required`. `legacy_v1` is valid
-only when the exact legacy locator is owned by the same transition-bound origin
-graph. This rule changes no schema and no core transcript bytes.
+legacy branch. Before the apply lock, file access, database access, or entropy,
+one pure cleanup-manifest preflight in `authority.rs` rejects
+`transition_id=None` as `authorization_malformed` with zero I/O, mutation, or
+entropy. A persisted NULL transition is `owner_recovery_required`. `legacy_v1`
+is valid only when the exact legacy locator is owned by the same transition-
+bound origin graph. This rule changes no schema, core type, or core transcript
+bytes.
 
 #### Effect-Free Challenge
 
 Credential-cleanup challenge creation treats the manifest's common store and
-account IDs as bounded untrusted typed request values. After complete global
-schema, anchor, history, transcript, and event integrity validation, an absent
-store, absent account, or account whose persisted `store_id` differs from the
-requested store ID returns `credential_cleanup_invalid` without reading or
-comparing the requested cleanup row, origin transition, locator, or tombstone.
+account IDs as bounded untrusted typed request values. Complete schema, anchor,
+history, transcript, and event integrity validation is request-independent and
+may already have streamed every private cleanup, origin, locator, and tombstone
+graph. After the request-independent global validation pass, no request-directed
+private lookup or request-dependent private branch may occur before the closed
+public pair classification. An absent store, absent account, or account whose
+persisted `store_id` differs from the requested store ID returns
+`credential_cleanup_invalid`.
 
 For an existing matched public store/account pair, a `recovery_required` store
 returns `owner_recovery_required`; a blocked store or a blocked/proposed account
@@ -1307,15 +1313,16 @@ with a fresh grant UUID and nonce, and appends one event 3 after the predecessor
 terminal event. Both events use the transaction's effective time; no cleanup,
 grant-use, effect, or external row is written.
 
-Replacement proof uses only reachable branches. A same-context predecessor has
-the same immutable manifest; if later public state is blocked or recovery-
-required, failed replacement leaves a previously durable expired predecessor
-expired, or rolls tentative expiry back so a previously pending predecessor
-remains pending, with no successor, replacement clock update, or entropy. A
-different-context invalid target has zero interaction with that predecessor.
-Persisted target/history mutation is global step-2 corruption and returns
-`owner_recovery_required`. No test or implementation invents a same-context
-manifest mutation.
+Replacement proof uses only three reachable branches. A same-context expired-
+pending predecessor has the same immutable manifest; later blocked/recovery
+eligibility fails without a successor and rolls back tentative predecessor and
+paired-clock work according to the exact prestate: a previously durable expired
+predecessor stays expired, while tentative expiry of a previously pending row
+rolls back to pending. No successor, new event, committed clock change, or
+entropy remains. A different-context invalid target has zero interaction with
+that predecessor. Persisted target/history corruption is global step 2 and
+returns `owner_recovery_required`. No test or implementation invents a same-
+context manifest mutation.
 
 Concurrent exact issuance has one creator. The winner commits one challenge,
 one grant identity, one nonce, and one event 3. Every loser reopens the winning
@@ -1441,7 +1448,8 @@ additional Rust history memory and never expose locator material.
 Credential cleanup uses this closed failure precedence:
 
 1. Request bounds, canonical encoding, and time shape fail as `invalid_input`
-   or `authorization_malformed`.
+   or `authorization_malformed`. The pure cleanup-manifest preflight rejects
+   `transition_id=None` before apply lock, file, database, or entropy work.
 2. Schema, anchor, history, transcript, event, or row corruption, including a
    persisted NULL transition, fails as `owner_recovery_required`.
 3. An existing grant is checked for exact terminal/recovery identity; changed
@@ -1450,9 +1458,13 @@ Credential cleanup uses this closed failure precedence:
    `authorization_context_stale`.
 5. Clock rollback is checked before authorization expiry; expiry is durably
    recorded before mutable target eligibility.
-6. Common store/account IDs are untrusted request values. Without consulting
-   requested cleanup/origin/locator/tombstone state, absent store, absent
-   account, or store/account pair mismatch is `credential_cleanup_invalid`.
+6. Common store/account IDs are untrusted request values. Complete request-
+   independent global validation may already have streamed every private graph.
+   After the request-independent global validation pass, no request-directed
+   private lookup or request-dependent private branch occurs before the closed
+   public pair classification. Absent
+   store, absent account, or store/account pair mismatch is
+   `credential_cleanup_invalid`.
    For an existing matched pair, a recovery-required store is
    `owner_recovery_required`; blocked store or blocked/proposed account is
    `account_update_conflict`. An unrelated matched blocked/recovery pair returns

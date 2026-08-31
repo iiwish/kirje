@@ -357,7 +357,10 @@ fields must match byte-for-byte.
 Canonical v1 accepts `credential_cleanup` only when `transition_id` is present.
 The existing core optional field and zero-length parser form remain unchanged
 for transcript compatibility, but an absent value is never an authorized v1
-semantic: request construction rejects it as `authorization_malformed`, and a
+semantic. For the A006 exact scope, `authority.rs` runs one pure cleanup-manifest
+preflight before acquiring the apply lock or performing file, database, or
+entropy work. `transition_id=None` returns `authorization_malformed` with zero
+I/O, mutation, or entropy. This requires no core type or transcript change. A
 persisted cleanup with no transition is authority corruption. The common store,
 account, and binding fields bind the finalized origin transition's historical
 before account snapshot, not the current mutable account generation. The
@@ -368,15 +371,19 @@ by the authority-store contract. No raw locator field enters this manifest.
 At cleanup challenge creation, `ActionManifest` is caller-supplied and has not
 yet been signed or proved. Its common store/account IDs are therefore bounded
 untrusted typed request values, even though a later persisted challenge binds
-them into the signing payload. After global authority integrity validation, an
-absent store, absent account, or persisted account/store pair mismatch is
-`credential_cleanup_invalid` without a requested cleanup, origin, locator, or
-tombstone read. For an existing matched public pair, recovery-required store is
-`owner_recovery_required`; blocked store or blocked/proposed account is
-`account_update_conflict`. This deliberately applies to an unrelated matched
-blocked/recovery pair and reveals no cleanup validity. Active store plus active
-or removed account alone proceeds to private cleanup validation. These rules do
-not make caller-supplied IDs signed authority before proof verification.
+them into the signing payload. Complete schema, anchor, history, transcript, and
+event validation is a request-independent global pass and may already have
+streamed every private cleanup, origin, locator, and tombstone graph. After the
+request-independent global validation pass, no request-directed private lookup
+or request-dependent private branch may occur before the closed public pair
+classification. An absent store, absent account, or persisted account/store pair
+mismatch is `credential_cleanup_invalid`. For an existing matched public pair,
+recovery-required store is `owner_recovery_required`; blocked store or blocked/
+proposed account is `account_update_conflict`. This deliberately applies to an
+unrelated matched blocked/recovery pair and reveals no cleanup validity. Active
+store plus active or removed account alone proceeds to request-directed private
+cleanup validation. These rules do not make caller-supplied IDs signed authority
+before proof verification.
 
 ### Send Manifest
 

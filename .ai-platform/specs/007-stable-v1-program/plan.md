@@ -5,7 +5,7 @@
 - Feature ID: `007-stable-v1-program`
 - Status: Confirmed
 - Source spec: `spec.md`
-- Updated: 2026-08-30
+- Updated: 2026-08-31
 - Target release: `v1.0.0`
 
 ## Decision Summary
@@ -271,6 +271,8 @@ The product boundary and checkpoint direction were confirmed by the user on
 and fresh validation are complete at production commit `94f3495`, and the user
 accepted the checkpoint on 2026-08-30. T110 is the next production task.
 Within T110, returned A006 candidate `2241a946` remains unaccepted. The user
-approved the F002 cleanup contract revision on 2026-08-31; F002 is ready for
-three independent packet reviews with all production, test, and fixture
-permissions closed. A007/A008 remain non-executable.
+authorized orchestrator approval of existing-boundary clarifications on
+2026-08-31. The orchestrator approved F003's clarification under that authority;
+this is not a claim of user review of the resulting packet. F003 is ready for
+three independent zero-finding packet reviews with all production, test, and
+fixture permissions closed. A007/A008 remain non-executable.

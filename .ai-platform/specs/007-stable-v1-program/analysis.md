@@ -30,13 +30,15 @@ exhaustive production-store AST allowlist. The A006 challenge candidate
 C0/H1/M1/L0, and QA failed C0/H0/M4/L0. The user explicitly resumed A006 repair
 on 2026-08-31. Fix packet `T202C3-A006-F001` failed spec review C0/H1/M2/L0;
 engineering and QA each passed C0/H0/M0/L0. The user explicitly approved the
-F002 contract revision on 2026-08-31. F002 attempted to close the untrusted
-public-pair projection, reachable replacement branches, and private numeric
-length-proof design. Its packet review returned QA PASS C0/H0/M0/L0, spec FAIL
-C0/H0/M1/L0, and engineering FAIL C0/H1/M2/L0 at `38ca4273`. No implementation
-started, F002 is blocked for contract clarification, the heartbeat is paused,
-and all permissions remain closed. A007 claim and A008 delete completion remain
-non-executable just-in-time outlines. One separate dependency Medium
+F002 contract revision on 2026-08-31. Its packet review returned QA PASS
+C0/H0/M0/L0, spec FAIL C0/H0/M1/L0, and engineering FAIL C0/H1/M2/L0 at
+`38ca4273`. The user then authorized orchestrator approval of existing-boundary
+clarifications. Under that authority, the orchestrator approved F003's exact
+request-independent validation ordering, three reachable replacement branches,
+and pure exact-scope manifest preflight. This is delegated contract approval,
+not user review of the unseen F003 packet. No implementation started; F003
+awaits three independent reviews with all permissions closed. A007 claim and
+A008 delete completion remain non-executable just-in-time outlines. One separate dependency Medium
 implementation finding is assigned: the unchanged branch dependency graph contains yanked
 `chacha20 0.10.1`, which makes `cargo deny check advisories` fail. T111
 owns remediation and Security Alpha cannot be Accepted until the complete
@@ -216,14 +218,19 @@ cleanup remains excluded from that production commit.
 authorized unattended delegation: the orchestrator may accept future artifacts
 only after their required TDD, full validation, evidence, and three-pass review
 succeed. A delegated record never claims the user personally reviewed unseen
-work and never waives a failed gate.
+work and never waives a failed gate. The user's 2026-08-31 clarification
+authority separately permits the orchestrator to approve existing-boundary
+contract clarifications and review follow-ups; material boundary changes still
+stop.
 
 The revised cleanup contract defines the exact canonical private locator
 transcript and digest, the 14-field tombstone transcript, finalized transition's
 historical-before origin, active/removed account eligibility, blocked/recovery
 failure behavior, and transition-bound legacy locators. Canonical v1 rejects
-transition-less requests and treats a persisted NULL origin as corruption
-without changing schema or core transcript bytes.
+transition-less requests through one pure `authority.rs` manifest preflight
+before apply lock/file/database/entropy, returning `authorization_malformed`
+with zero I/O/mutation/entropy. A persisted NULL origin remains corruption. This
+does not change schema, core types, or core transcript bytes.
 
 The contract explicitly overrides the generic current-binding rule only for
 cleanup; removal and credential deletion retain current-before binding. Exact
@@ -251,15 +258,16 @@ changed grant recovery third, signed-context/clock/expiry next, then current
 eligibility and target lifecycle, while existing store/backend codes remain
 stable.
 
-Result: `T202C3_A006_F002_BLOCKED_NEEDS_CONTRACT_CLARIFICATION`. The historical
+Result: `T202C3_A006_F003_READY_FOR_PACKET_REVIEW`. The historical
 packet gate authorized only returned production candidate `2241a946`, whose one
 High and five Medium findings remain open. F001 failed spec review C0/H1/M2/L0;
 the user approved F002's contract resolution, but its packet review failed with
-engineering C0/H1/M2/L0 and spec C0/H0/M1/L0 while QA passed C0/H0/M0/L0. No
-implementation attempt started. Production, test, and fixture permissions are
-none, and explicit resume plus clarified contract and three independent revised
-F002/F003 reviews are required. A007 and A008 remain unpacketized, non-
-executable outlines and are not Ready.
+engineering C0/H1/M2/L0 and spec C0/H0/M1/L0 while QA passed C0/H0/M0/L0. The
+orchestrator approved the existing-boundary F003 clarification under explicit
+delegated authority. No implementation attempt started. Production, test, and
+fixture permissions are none; only three independent zero-finding F003 reviews
+plus governance follow-up can open the exact scopes. A007 and A008 remain
+unpacketized, non-executable outlines and are not Ready.
 
 ## Current Implementation Evidence Check
 
@@ -325,12 +333,11 @@ H-A006-EXEC-001: cleanup checks origin/locator/tombstone before blocked/recovery
 eligibility. Mixed invalid target plus blocked/recovery state therefore returns
 `credential_cleanup_invalid` before `account_update_conflict` or
 `owner_recovery_required`, leaking target validity. This production-review High
-is open in the returned candidate. The approved F002 contract validates global
-integrity first and treats common IDs as untrusted typed request values. Its
-literal no-private-read statement failed packet review because complete global
-history validation already reads all cleanup/origin/locator graphs. A successor
-must preserve that step-2 validation and then prove no request-directed private
-lookup or request-dependent private branch after global validation. A matched
+is open in the returned candidate. F003 preserves complete request-independent
+global step-2 validation, which may already stream all private graphs. After
+that pass, source and call-order proof must show that no request-directed private
+lookup or request-dependent private branch occurs before the closed public pair
+classification. A matched
 recovery store returns
 `owner_recovery_required`; matched blocked store or blocked/proposed account
 returns `account_update_conflict`, including for an unrelated matched pair.
@@ -362,25 +369,23 @@ restart corruption; and zero rows across grant uses plus every effect table,
 including `effect_observations`, with source-level no-external-capability and
 privacy proof.
 
-F001 spec review added two packet Mediums. F002 attempted to resolve them by separating
-same-context later blocked/recovery failure, different-context invalid target
-with zero predecessor interaction, and step-2 persisted corruption. Generic
+F001 spec review added two packet Mediums. F003 defines exactly three reachable
+branches: same-context expired pending plus later blocked/recovery creates no
+successor and rolls back tentative predecessor/paired-clock work according to
+exact prestate; different-context invalid target has zero predecessor
+interaction; persisted corruption is step-2 `owner_recovery_required`. Generic
 service/username/total lengths use one private numeric classifier with
 numeric-only `#[cfg(test)]` unit tests, no public/test-support API, and no new
 locator byte vectors in `authority.rs`; closed-form bytes stay only in
 `authority_registry.rs`.
 
-F002 review leaves three Medium findings across engineering and spec. The
-canonical `data-model.md` still describes an unreachable invalid-target
-replacement and remains unchanged while the High-stop gate is active. The
-authorization contract requires `transition_id=None` to return
-`authorization_malformed` at request construction, but the current core/store
-path permits it and the returned candidate expects `credential_cleanup_invalid`.
-The recommended exact-scope option is an `authority.rs` manifest preflight
-before entropy, file, or database access; the alternative requires explicit
-authorization for a core change. No choice is attributed to the user. The stale
-F001 review gate must become three independent reviews of the revised F002/F003
-packet.
+F003 closes all three F002 review Mediums canonically. `data-model.md` and all
+duplicates define only the three reachable replacement branches. Within the
+exact A006 scope, one pure `authority.rs` manifest preflight rejects
+`transition_id=None` as `authorization_malformed` before apply lock, file,
+database, or entropy work, with zero I/O/mutation/entropy and no core change.
+Only three independent zero-finding F003 reviews plus governance follow-up can
+open the exact scopes; historical F001/F002 reviews are not execution gates.
 
 ### Low
 
@@ -389,8 +394,8 @@ None.
 ## Residual Risks
 
 - T109 and the account-create checkpoint were explicitly accepted by the user
-  on 2026-08-30. The user approved F002 on 2026-08-31, but its packet review
-  failed; it is blocked with no production, test, or fixture permission.
+  on 2026-08-30. F003 clarification is approved under delegated authority but
+  remains packet-review-only with no production, test, or fixture permission.
 - Cross-platform support claims remain Draft until T119 produces platform
   evidence.
 - Real-provider checks depend on dedicated credentials and may produce honest
@@ -399,7 +404,7 @@ None.
 
 ## Gate Result
 
-`T109_ACCEPTED_T202C3_A006_F002_BLOCKED_NEEDS_CONTRACT_CLARIFICATION`
+`T109_ACCEPTED_T202C3_A006_F003_READY_FOR_PACKET_REVIEW`
 
 The user approved `plan.md` and `tasks.md` on 2026-08-30. T109 review and fresh
 validation are complete at `94f3495`; the user explicitly accepted the

@@ -40,12 +40,13 @@
   `kirje-store` as its sole direct dependent and supersedes the flawed shared
   runtime/pluggable deletion formulation identified by repeat review. The
   decision is not implementation evidence. A006's historical packet gate passed
-  only for returned candidate `2241a946`. F001 later failed spec review; the
-  user approved the F002 contract revision, whose packet review failed at
-  `38ca4273` with one High and three Medium findings across engineering and spec
-  while QA passed. F002 is blocked with permissions closed. A007/A008 remain
-  closed, and no execution is accepted before its TDD, validation, evidence,
-  and implementation reviews.
+  only for returned candidate `2241a946`. F001 and F002 packet reviews failed.
+  On 2026-08-31 the user authorized orchestrator approval of existing-boundary
+  clarifications. The orchestrator approved F003's exact clarification under
+  that authority; this is not user review of the unseen artifact. F003 awaits
+  three independent zero-finding reviews with permissions closed. A007/A008
+  remain closed, and no execution is accepted before its TDD, validation,
+  evidence, and implementation reviews.
 - No task may expose credentials, owner private keys, signatures, mailbox
   content, account addresses, endpoints, UIDs, or raw provider responses in
   committed fixtures/evidence.
@@ -765,12 +766,12 @@ on 2026-08-31. F002 attempted to close those choices with the public pair
 algorithm, three reachable replacement branches, and a private numeric-only
 length helper. Its packet review returned QA PASS C0/H0/M0/L0, spec FAIL
 C0/H0/M1/L0, and engineering FAIL C0/H1/M2/L0 at `38ca4273`; no implementation
-started. F002 is blocked for contract clarification, its heartbeat is paused,
-and every code/fixture permission remains none. The blockers are the conflicting
-literal no-private-read claim after mandatory global graph validation; stale
-unreachable invalid-target replacement text in `data-model.md`; the unresolved
-`transition_id=None` error/preflight layer; and a stale F001 gate that must be
-replaced by three reviews of the revised F002/F003 packet. A007
+started. Under the user's delegated existing-boundary clarification authority,
+the orchestrator approved F003. It preserves request-independent global graph
+validation, closes pre-public-classification lookup/branch ordering, defines the
+three reachable replacement branches, and selects an exact-scope pure manifest
+preflight before apply lock/file/database/entropy without a core change. F003 is
+`ready_for_f003_packet_review`; every code/fixture permission remains none. A007
 claim and A008 delete-completion are non-executable just-in-time outlines;
 neither is Ready or packetized.
 Priority: P0
@@ -820,13 +821,18 @@ Test targets:
   replacement and concurrent exact issuance entropy/event/restart matrices
 - Cleanup challenge public projection crosses absent store/account, pair
   mismatch, matched/unrelated blocked/recovery pairs, and active/removed pairs
-  with private target mismatch. A revised packet must preserve complete global
-  step-2 graph validation, then prove no request-directed private lookup or
-  request-dependent private branch after global validation, no target
-  distinction, and zero mutation/entropy
-- Replacement proof separates same-context later blocked/recovery failure,
-  different-context invalid target with zero predecessor interaction, and
-  persisted target corruption at step 2; no same-context manifest mutation
+  with private target mismatch. Complete request-independent global validation
+  may already stream every private graph; source/call-order proof shows that
+  after the request-independent global validation pass, no request-directed
+  private lookup or request-dependent private branch occurs before closed public
+  pair classification, with no target distinction or mutation/entropy
+- Pure `authority.rs` manifest preflight rejects cleanup `transition_id=None` as
+  `authorization_malformed` before apply lock, file, database, or entropy work,
+  with zero I/O/mutation/entropy and no core change
+- Replacement proof covers exactly three reachable branches: same-context
+  expired pending plus later blocked/recovery with exact-prestate rollback and
+  no successor; different-context invalid target with zero predecessor
+  interaction; and persisted target corruption at step 2
 - Private numeric service/username/total-length classifier unit boundaries in
   authority.rs with no public/test-support API or locator byte vectors; closed-
   form locator bytes remain only in authority_registry.rs
@@ -869,11 +875,11 @@ there is no separate `008-security-baseline/packets/T202C3.yaml`.
 Attempt ownership is serial: A006 owns canonical locator validation at
 reservation/prepare plus effect-free cleanup challenge issuance, without
 changing transition state-machine behavior. Its candidate is Returned/Needs Fix
-and blocks all later outlines. The user resumed repair, but F001 failed spec
-review. The user approved the F002 revision, whose packet review also failed.
-F002 is `blocked_needs_contract_clarification`; after explicit resume, a revised
-F002/F003 packet requires three independent zero-finding PASS reviews plus
-explicit exact-scope authorization before execution.
+and blocks all later outlines. F001 and F002 packet reviews failed. Under the
+user's delegated existing-boundary clarification authority, the orchestrator
+approved F003. F003 is `ready_for_f003_packet_review` and requires three
+independent zero-finding PASS reviews plus a governance follow-up before any
+exact production/test/fixture scope opens.
 A007 owns the new unpublished
 `kirje-credential` workspace crate, root/store-only dependency entries, opaque
 locator, store-private fake deletion hook, store-owned permit and combined

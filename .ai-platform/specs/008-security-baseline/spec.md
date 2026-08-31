@@ -19,9 +19,12 @@
   High and one Medium. The final independent spec, engineering, and QA passes at
   governance HEAD `3533054` returned zero Critical, High, Medium, or Low finding
   and issued `T202C3_A006_PACKET_REVIEW_PASS` for the packet's exact scopes. Its
-  production candidate later failed review, and F001 packet review failed spec
-  C0/H1/M2/L0. The user explicitly approved the F002 contract algorithm on
-  2026-08-31; F002 implementation and packet review remain unclaimed.
+  production candidate later failed review; F001 and F002 packet reviews also
+  failed. On 2026-08-31 the user authorized the Delivery Orchestrator to approve
+  existing-boundary clarifications. Under that authority, the orchestrator
+  approved F003's request-independent validation ordering, three reachable
+  replacement branches, and exact-scope manifest preflight. This records
+  delegated contract approval, not user review of the unseen F003 artifact.
 
 ## Goal
 
@@ -310,11 +313,18 @@ granting mailbox access.
   Credential cleanup is the closed historical exception and uses its finalized
   origin transition's immutable before binding; later account state cannot
   rebind it. Before a cleanup challenge is persisted and signed, its caller-
-  supplied common store/account IDs are untrusted typed request values. After
-  global authority integrity validation, absent or pair-mismatched public IDs
-  fail closed without reading private cleanup target state; a matched public
-  blocked/recovery projection returns its stable conflict/recovery result before
-  private cleanup validation, including for an unrelated matched pair.
+  supplied common store/account IDs are untrusted typed request values. Complete
+  request-independent global authority validation may already stream all private
+  cleanup, origin, locator, and tombstone graphs. After the request-independent
+  global validation pass, no request-directed private lookup or request-dependent
+  private branch may occur before the closed public pair classification. Absent or pair-mismatched public IDs
+  fail as `credential_cleanup_invalid`; a matched public blocked/recovery
+  projection returns its stable conflict/recovery result, including for an
+  unrelated matched pair. Active plus active/removed alone proceeds to request-
+  directed private cleanup validation. One pure `authority.rs` manifest
+  preflight rejects cleanup `transition_id=None` as `authorization_malformed`
+  before apply lock, file, database, or entropy work, with zero I/O, mutation,
+  or entropy and no core change.
 - FR-014: The CLI emits one unambiguous, bounded signing payload and a digest of
   that payload together with the exact bounded action manifest an owner signer
   must independently parse and review. The signed representation is specified

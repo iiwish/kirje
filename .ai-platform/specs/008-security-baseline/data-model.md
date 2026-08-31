@@ -1185,6 +1185,11 @@ This application invariant preserves the canonical schema bytes and the core
 manifest transcript while requiring `legacy_v1` locators to use the same
 transition-bound historical origin as `active_v2` locators.
 
+Before the apply lock, file access, database access, or entropy, the A006
+`authority.rs` cleanup-manifest preflight rejects `transition_id=None` as
+`authorization_malformed` with zero I/O, mutation, or entropy. The optional core
+shape and transcript remain unchanged.
+
 `locator_material` is exactly the bounded canonical
 `KIRJE-DELETE-ONLY-LOCATOR-V1\0` transcript. `locator_sha256` hashes that
 complete transcript. The immutable tombstone digest is rederived from the
@@ -1204,8 +1209,14 @@ authority corruption.
 Exact pending challenge reuse and exact claimed recovery append no event and
 change no challenge, cleanup, grant, lifecycle, or event timestamp. They may
 advance only the paired `authority_meta` clock high-water. Expired-pending
-replacement records one predecessor event 5 before one successor event 3; an
-invalid-target replacement rolls the entire transaction back.
+replacement records one predecessor event 5 before one successor event 3 only
+when valid. Failure has exactly three reachable branches. Same-context expired
+pending plus later blocked/recovery eligibility creates no successor and rolls
+back tentative predecessor and paired-clock work according to exact prestate: a
+durably expired predecessor stays expired, while tentative expiry of a pending
+predecessor rolls back to pending. Different-context invalid target has zero
+predecessor interaction. Persisted target/history corruption is global step 2
+and returns `owner_recovery_required`.
 
 ## Credential Locator V2
 

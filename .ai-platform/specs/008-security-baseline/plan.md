@@ -349,18 +349,26 @@ runtime `SecretStore` paths, wires runtime/CLI only to the high-level store API,
 and proves end-to-end crash recovery. No schema or core transcript changes are
 part of this architecture decision.
 
-Cleanup challenge creation validates global authority integrity before using
-common store/account IDs as untrusted typed request values. Absent store,
-absent account, or persisted pair mismatch returns
-`credential_cleanup_invalid` without a private cleanup-graph read. A matched
-recovery store returns `owner_recovery_required`; matched blocked store or
-blocked/proposed account returns `account_update_conflict`, including for an
-unrelated matched pair. Active store plus active/removed account proceeds to
-private target validation. Replacement tests distinguish same-context later
-blocked/recovery failure, different-context invalid target with no predecessor
-interaction, and persisted step-2 corruption. Generic locator length gates use
-one private numeric classifier with numeric-only `#[cfg(test)]` unit tests;
-closed-form bytes remain in the registry integration test.
+Cleanup challenge creation begins with a pure `authority.rs` manifest preflight:
+`transition_id=None` is `authorization_malformed` before apply lock, file,
+database, or entropy work, with zero I/O, mutation, or entropy and no core
+change. Complete request-independent global authority validation then may stream
+all private cleanup, origin, locator, and tombstone graphs. After the request-
+independent global validation pass, no request-directed private lookup or
+request-dependent private branch may occur before the closed public pair
+classification. Absent store/account or persisted
+pair mismatch returns `credential_cleanup_invalid`; a matched recovery store
+returns `owner_recovery_required`; matched blocked store or blocked/proposed
+account returns `account_update_conflict`, including for an unrelated matched
+pair. Active store plus active/removed account proceeds to request-directed
+private target validation. Replacement tests cover exactly three reachable
+branches: same-context expired pending plus later blocked/recovery fails with no
+successor and rolls back tentative predecessor/paired-clock work according to
+exact prestate; different-context invalid target has zero predecessor
+interaction; persisted corruption is step-2 `owner_recovery_required`. Generic
+locator length gates use one private numeric classifier with numeric-only
+`#[cfg(test)]` unit tests; closed-form bytes remain in the registry integration
+test.
 
 ### D-009 Unified Same-Handle Bounded Input
 
@@ -664,9 +672,10 @@ implementation claim and not a claim that the user personally reviewed the
 resulting artifact. `T202C3_A006_PACKET_REVIEW_PASS` authorized only A006's exact
 candidate scopes at governance HEAD `3533054`. Candidate `2241a946` later failed
 spec and QA review and is Returned/Needs Fix with no current write permission.
-The user explicitly resumed A006 repair on 2026-08-31. F001 packet review failed
-spec compliance C0/H1/M2/L0 while engineering and QA passed C0/H0/M0/L0. F001
-is superseded for contract purposes by the user's explicit approval of the F002
-revision on 2026-08-31. F002 is ready for three independent packet reviews with
-no implementation or production, test, or fixture permission; later A007/A008
-attempts remain closed.
+The user explicitly resumed A006 repair on 2026-08-31. F001 and F002 packet
+reviews failed. The user then authorized the orchestrator to approve existing-
+boundary clarifications without requesting approval at each node. Under that
+authority, the orchestrator approved F003's exact clarification; this does not
+claim user review of the resulting artifact. Only three independent zero-
+finding F003 packet reviews plus a governance follow-up can open the exact
+production/test/fixture scopes. Later A007/A008 attempts remain closed.

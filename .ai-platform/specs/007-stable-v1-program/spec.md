@@ -99,9 +99,15 @@ its checksum, provenance, dependency inventory, and release notes.
   an agent-controlled session; later rotation requires the current owner key or
   the documented offline recovery procedure. Before a challenge is persisted,
   caller-supplied common subject IDs remain untrusted typed request values.
-  Public registry eligibility is classified without consulting private cleanup
-  target state, so absent/mismatched or blocked/recovery public subjects cannot
-  reveal whether a private target exists or is valid.
+  Complete request-independent global authority validation may already stream
+  all private graphs. After the request-independent global validation pass, no
+  request-directed private lookup or request-dependent private branch may occur
+  before the closed public pair
+  classification, so absent/mismatched or blocked/recovery public subjects
+  cannot reveal whether a private target exists or is valid. Credential cleanup
+  with `transition_id=None` fails a pure `authority.rs` manifest preflight as
+  `authorization_malformed` before apply lock, file, database, or entropy work,
+  with no core type or transcript change.
 - SFR-004: Local attachment and JSON file import opens one bounded regular-file
   handle without following a symlink, reads no more than the declared maximum
   plus one byte, and validates metadata on that same handle. A path replacement
