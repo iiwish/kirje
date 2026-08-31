@@ -1457,6 +1457,12 @@ impl AuthorityStore {
             OwnerKeyRole::Recovery => loaded.snapshot.recovery_key_id,
         };
         let manifest_snapshot = request.manifest.context();
+        let cleanup_action = request.manifest.action() == SensitiveAction::CredentialCleanup;
+        if cleanup_action {
+            validate_credential_cleanup_public_pair(&transaction, &request.manifest)?;
+            validate_fresh_manifest_context(&transaction, &loaded.snapshot, &request.manifest)?;
+        }
+
         let context_sha256 = authorization_context_digest(
             request.manifest.action(),
             request.manifest.context().target.kind(),
@@ -1470,11 +1476,6 @@ impl AuthorityStore {
             loaded.snapshot.minimum_epoch,
             loaded.snapshot.trust_bundle_sha256,
         );
-
-        let cleanup_action = request.manifest.action() == SensitiveAction::CredentialCleanup;
-        if cleanup_action {
-            validate_fresh_manifest_context(&transaction, &loaded.snapshot, &request.manifest)?;
-        }
 
         if let Some(existing) = load_pending_challenge(&transaction, context_sha256)? {
             if effective_time <= existing.expires_at {
@@ -3187,8 +3188,7 @@ fn locator_kind_code(kind: LocatorKind) -> u8 {
 }
 
 fn parse_delete_only_locator(material: &[u8]) -> Option<(LocatorKind, &[u8], &[u8])> {
-    if material.is_empty()
-        || material.len() > 4_096
+    if !private_material_length_is_bounded(material.len())
         || !material.starts_with(DELETE_ONLY_LOCATOR_DOMAIN)
     {
         return None;
@@ -3218,6 +3218,10 @@ fn parse_delete_only_locator(material: &[u8]) -> Option<(LocatorKind, &[u8], &[u
         _ => return None,
     };
     Some((kind, fields[1], fields[2]))
+}
+
+const fn private_material_length_is_bounded(length: usize) -> bool {
+    length >= 1 && length <= 4_096
 }
 
 fn locator_read_u16(bytes: &[u8], cursor: &mut usize) -> Option<u16> {
@@ -4365,6 +4369,14 @@ fn validate_challenge_request(request: &CreateChallengeRequest) -> Result<(), Ma
     }
     input_utc_millis(request.observed_at_unix_ms)?;
     input_utc_millis(request.expires_at_unix_ms)?;
+    if let ManifestPayload::CredentialCleanup(cleanup) = request.manifest.payload()
+        && cleanup.transition_id.is_none()
+    {
+        return Err(MailError::stable(
+            MailErrorCode::AuthorizationMalformed,
+            "credential cleanup authorization is malformed",
+        ));
+    }
     Ok(())
 }
 
@@ -4635,31 +4647,60 @@ fn validate_credential_cleanup_context(
         return Err(credential_cleanup_invalid_error());
     }
 
-    if require_ready_eligibility {
-        if cleanup_state != "ready" || claim_grant_id.is_some() || deleted_at.is_some() {
-            return Err(credential_cleanup_invalid_error());
-        }
-        let store = load_registered_store_by_id(connection, transition.store_id)?
-            .ok_or_else(credential_cleanup_invalid_error)?;
-        match store.state.as_str() {
-            "active" => {}
-            "recovery_required" => return Err(recovery_error()),
-            "blocked" => return Err(account_update_conflict_error()),
-            _ => return Err(credential_cleanup_invalid_error()),
-        }
-        let account = load_registered_account(connection, transition.account_id)?
-            .ok_or_else(credential_cleanup_invalid_error)?;
-        match account.state {
-            RegisteredAccountState::Active | RegisteredAccountState::Removed => {}
-            RegisteredAccountState::Blocked | RegisteredAccountState::Proposed => {
-                return Err(account_update_conflict_error());
-            }
-        }
-        if account.store_id != transition.store_id {
-            return Err(credential_cleanup_invalid_error());
-        }
+    if require_ready_eligibility
+        && (cleanup_state != "ready" || claim_grant_id.is_some() || deleted_at.is_some())
+    {
+        return Err(credential_cleanup_invalid_error());
     }
     Ok(())
+}
+
+fn validate_credential_cleanup_public_pair(
+    connection: &Connection,
+    manifest: &ActionManifest,
+) -> Result<(), MailError> {
+    let store_id = manifest
+        .context()
+        .store_id
+        .ok_or_else(credential_cleanup_invalid_error)?;
+    let account_id = manifest
+        .context()
+        .account_id
+        .ok_or_else(credential_cleanup_invalid_error)?;
+    record_validation_query(ValidationQueryKind::BoundedKeyed);
+    let (store_state, account_store, account_state): (
+        Option<String>,
+        Option<Vec<u8>>,
+        Option<String>,
+    ) = connection
+        .query_row(
+            "SELECT
+                (SELECT state FROM registered_stores WHERE store_id=?1),
+                (SELECT store_id FROM registered_accounts WHERE account_id=?2),
+                (SELECT state FROM registered_accounts WHERE account_id=?2)",
+            params![store_id.as_bytes(), account_id.as_bytes()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(|_| store_read_error())?;
+    let (Some(store_state), Some(account_store), Some(account_state)) =
+        (store_state, account_store, account_state)
+    else {
+        return Err(credential_cleanup_invalid_error());
+    };
+    if account_store.as_slice() != store_id.as_bytes() {
+        return Err(credential_cleanup_invalid_error());
+    }
+    match store_state.as_str() {
+        "recovery_required" => return Err(recovery_error()),
+        "blocked" => return Err(account_update_conflict_error()),
+        "active" => {}
+        _ => return Err(credential_cleanup_invalid_error()),
+    }
+    match account_state.as_str() {
+        "active" | "removed" => Ok(()),
+        "blocked" | "proposed" => Err(account_update_conflict_error()),
+        _ => Err(credential_cleanup_invalid_error()),
+    }
 }
 
 fn validate_fresh_account_mutation_context(
@@ -9831,4 +9872,19 @@ fn credential_cleanup_invalid_error() -> MailError {
         MailErrorCode::CredentialCleanupInvalid,
         "credential cleanup is invalid",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::private_material_length_is_bounded;
+
+    #[test]
+    fn private_material_numeric_boundaries_are_closed() {
+        assert!(!private_material_length_is_bounded(0));
+        assert!(private_material_length_is_bounded(1));
+        assert!(private_material_length_is_bounded(4_095));
+        assert!(private_material_length_is_bounded(4_096));
+        assert!(!private_material_length_is_bounded(4_097));
+        assert!(!private_material_length_is_bounded(usize::MAX));
+    }
 }

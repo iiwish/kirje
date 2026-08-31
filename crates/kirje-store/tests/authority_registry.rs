@@ -2018,6 +2018,19 @@ fn issuance_fingerprint(connection: &Connection) -> (i64, i64, i64, i64, i64, (i
     )
 }
 
+fn cleanup_authorization_effect_fingerprint(
+    connection: &Connection,
+) -> (i64, i64, i64, i64, i64, i64) {
+    (
+        scalar(connection, "SELECT COUNT(*) FROM grant_uses"),
+        scalar(connection, "SELECT COUNT(*) FROM challenge_effects"),
+        scalar(connection, "SELECT COUNT(*) FROM remote_effects"),
+        scalar(connection, "SELECT COUNT(*) FROM effect_claims"),
+        scalar(connection, "SELECT COUNT(*) FROM effect_invocations"),
+        scalar(connection, "SELECT COUNT(*) FROM effect_observations"),
+    )
+}
+
 #[allow(clippy::type_complexity)]
 fn account_registry_fingerprint(
     connection: &Connection,
@@ -4144,6 +4157,7 @@ fn credential_cleanup_challenge_is_exact() {
     let manifest = credential_cleanup_manifest(&fixture);
     let connection = Connection::open(fixture.home.database_path()).unwrap();
     let before = issuance_fingerprint(&connection);
+    let effects_before = cleanup_authorization_effect_fingerprint(&connection);
     assert_eq!(
         scalar(
             &connection,
@@ -4152,6 +4166,201 @@ fn credential_cleanup_challenge_is_exact() {
         1
     );
     drop(connection);
+
+    let ManifestPayload::CredentialCleanup(cleanup) = manifest.payload() else {
+        unreachable!();
+    };
+    let missing_transition = ActionManifest::new(
+        manifest.context().clone(),
+        ManifestPayload::CredentialCleanup(CredentialCleanupManifest {
+            transition_id: None,
+            ..cleanup.clone()
+        }),
+    )
+    .unwrap();
+    let missing_transition_entropy = deterministic(vec![0x94; 48]);
+    let missing_transition_store = open_ready(&fixture, missing_transition_entropy.clone());
+    reset_authority_validation_query_counts();
+    let missing_transition_error = exact_error(missing_transition_store.create_challenge(
+        CreateChallengeRequest {
+            manifest: missing_transition,
+            observed_at_unix_ms: 509_800,
+            expires_at_unix_ms: 510_700,
+        },
+    ));
+    assert_eq!(
+        missing_transition_error.code,
+        MailErrorCode::AuthorizationMalformed
+    );
+    assert_eq!(missing_transition_entropy.consumed_bytes(), 0);
+    let AuthorityValidationQueryCounts {
+        challenge_preflight,
+        receipt_preflight,
+        nonce_preflight,
+        grant_preflight,
+        store_preflight,
+        event_preflight,
+        registry_parent_preflight,
+        registry_stream,
+        bounded_keyed,
+    } = take_authority_validation_query_counts();
+    assert_eq!(
+        (
+            challenge_preflight,
+            receipt_preflight,
+            nonce_preflight,
+            grant_preflight,
+            store_preflight,
+            event_preflight,
+            registry_parent_preflight,
+            registry_stream,
+            bounded_keyed,
+        ),
+        (0, 0, 0, 0, 0, 0, 0, 0, 0)
+    );
+    assert_eq!(
+        issuance_fingerprint(&Connection::open(fixture.home.database_path()).unwrap()),
+        before
+    );
+
+    let precedence_fixture = a003_updated_account_fixture();
+    let precedence_manifest = credential_cleanup_manifest(&precedence_fixture);
+    open_ready(&precedence_fixture, deterministic(vec![0x93; 48]))
+        .create_challenge(CreateChallengeRequest {
+            manifest: precedence_manifest.clone(),
+            observed_at_unix_ms: 504_000,
+            expires_at_unix_ms: 504_900,
+        })
+        .unwrap();
+    let remove = authorize_account_remove_after_update(&precedence_fixture);
+    open_ready(&precedence_fixture, deterministic(Vec::new()))
+        .prepare_account_transition(prepare_account_remove_request(&remove, 505_200))
+        .unwrap();
+
+    let private_invalid_manifests = |valid: &ActionManifest| {
+        let ManifestPayload::CredentialCleanup(cleanup) = valid.payload() else {
+            unreachable!();
+        };
+        let mut values = vec![
+            CredentialCleanupManifest {
+                transition_id: Some(t202c3_uuid::<TransitionId>(0x5300_0000, 990)),
+                ..cleanup.clone()
+            },
+            CredentialCleanupManifest {
+                locator_kind: LocatorKind::LegacyV1,
+                ..cleanup.clone()
+            },
+            CredentialCleanupManifest {
+                locator_sha256: Sha256Digest::digest(b"synthetic-private-wrong-locator"),
+                ..cleanup.clone()
+            },
+            CredentialCleanupManifest {
+                tombstone_sha256: Sha256Digest::digest(b"synthetic-private-wrong-tombstone"),
+                ..cleanup.clone()
+            },
+            CredentialCleanupManifest {
+                expected_state: CleanupState::Provisional,
+                ..cleanup.clone()
+            },
+        ]
+        .into_iter()
+        .map(|value| {
+            ActionManifest::new(
+                valid.context().clone(),
+                ManifestPayload::CredentialCleanup(value),
+            )
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+        let missing_cleanup_id = t202c3_uuid::<CleanupId>(0x5400_0000, 990);
+        values.push(
+            ActionManifest::new(
+                ManifestContext {
+                    target: ManifestTarget::Cleanup(missing_cleanup_id),
+                    ..valid.context().clone()
+                },
+                ManifestPayload::CredentialCleanup(CredentialCleanupManifest {
+                    cleanup_id: missing_cleanup_id,
+                    ..cleanup.clone()
+                }),
+            )
+            .unwrap(),
+        );
+        values
+    };
+
+    let blocked_before = (
+        issuance_fingerprint(&Connection::open(precedence_fixture.home.database_path()).unwrap()),
+        cleanup_authorization_effect_fingerprint(
+            &Connection::open(precedence_fixture.home.database_path()).unwrap(),
+        ),
+    );
+    for invalid_manifest in private_invalid_manifests(&precedence_manifest) {
+        let entropy = deterministic(vec![0x92; 48]);
+        let error = exact_error(
+            open_ready(&precedence_fixture, entropy.clone()).create_challenge(
+                CreateChallengeRequest {
+                    manifest: invalid_manifest,
+                    observed_at_unix_ms: 506_000,
+                    expires_at_unix_ms: 506_900,
+                },
+            ),
+        );
+        assert_eq!(error.code, MailErrorCode::AccountUpdateConflict);
+        assert_eq!(entropy.consumed_bytes(), 0);
+        assert_eq!(
+            (
+                issuance_fingerprint(
+                    &Connection::open(precedence_fixture.home.database_path()).unwrap(),
+                ),
+                cleanup_authorization_effect_fingerprint(
+                    &Connection::open(precedence_fixture.home.database_path()).unwrap(),
+                ),
+            ),
+            blocked_before
+        );
+    }
+
+    open_ready(&precedence_fixture, deterministic(Vec::new()))
+        .mark_transition_recovery_required(observe_account_remove_transition(
+            71,
+            AccountTransitionState::Prepared,
+            5,
+            Sha256Digest::digest(b"synthetic-a006-precedence-recovery"),
+            506_100,
+        ))
+        .unwrap();
+    let recovery_before = (
+        issuance_fingerprint(&Connection::open(precedence_fixture.home.database_path()).unwrap()),
+        cleanup_authorization_effect_fingerprint(
+            &Connection::open(precedence_fixture.home.database_path()).unwrap(),
+        ),
+    );
+    for invalid_manifest in private_invalid_manifests(&precedence_manifest) {
+        let entropy = deterministic(vec![0x91; 48]);
+        let error = exact_error(
+            open_ready(&precedence_fixture, entropy.clone()).create_challenge(
+                CreateChallengeRequest {
+                    manifest: invalid_manifest,
+                    observed_at_unix_ms: 506_200,
+                    expires_at_unix_ms: 507_100,
+                },
+            ),
+        );
+        assert_eq!(error.code, MailErrorCode::OwnerRecoveryRequired);
+        assert_eq!(entropy.consumed_bytes(), 0);
+        assert_eq!(
+            (
+                issuance_fingerprint(
+                    &Connection::open(precedence_fixture.home.database_path()).unwrap(),
+                ),
+                cleanup_authorization_effect_fingerprint(
+                    &Connection::open(precedence_fixture.home.database_path()).unwrap(),
+                ),
+            ),
+            recovery_before
+        );
+    }
 
     let origin = account_control_manifest(SensitiveAction::AccountUpdate, 60);
     let tombstone = cleanup_tombstone_bytes(&fixture, &origin, 503_200);
@@ -4230,6 +4439,12 @@ fn credential_cleanup_challenge_is_exact() {
         (after.0, after.1, after.2, after.3, after.4)
     );
     assert_eq!(retry_fingerprint.5, (510_100, 510_100));
+    assert_eq!(
+        cleanup_authorization_effect_fingerprint(
+            &Connection::open(fixture.home.database_path()).unwrap()
+        ),
+        effects_before
+    );
 
     let restart_entropy = deterministic(Vec::new());
     let restart = open_ready(&fixture, restart_entropy.clone())
@@ -4509,7 +4724,7 @@ fn credential_cleanup_manifest_state_and_origin_are_closed() {
         tombstone_sha256: Sha256Digest::digest(b"synthetic-wrong-tombstone-digest"),
         ..cleanup.clone()
     });
-    for malformed_value in malformed_values {
+    for (index, malformed_value) in malformed_values.into_iter().enumerate() {
         let malformed = ActionManifest::new(
             valid.context().clone(),
             ManifestPayload::CredentialCleanup(malformed_value),
@@ -4523,7 +4738,14 @@ fn credential_cleanup_manifest_state_and_origin_are_closed() {
                 expires_at_unix_ms: 510_900,
             },
         ));
-        assert_eq!(error.code, MailErrorCode::CredentialCleanupInvalid);
+        assert_eq!(
+            error.code,
+            if index == 0 {
+                MailErrorCode::AuthorizationMalformed
+            } else {
+                MailErrorCode::CredentialCleanupInvalid
+            }
+        );
         assert_eq!(entropy.consumed_bytes(), 0);
     }
 
