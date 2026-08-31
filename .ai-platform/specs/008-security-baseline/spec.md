@@ -19,13 +19,14 @@
   High and one Medium. The final independent spec, engineering, and QA passes at
   governance HEAD `3533054` returned zero Critical, High, Medium, or Low finding
   and issued `T202C3_A006_PACKET_REVIEW_PASS` for the packet's exact scopes. Its
-  production candidate later failed review; F001 through F005 packet reviews also
+  production candidate later failed review; F001 through F006 packet reviews also
   failed. On 2026-08-31 the user authorized the Delivery Orchestrator to approve
   existing-boundary clarifications. Under that authority, the orchestrator
-  approved F006's exact split public rows, three-stage authority audit, complete
-  workspace gates, phase-specific challenge precedence, and exact-scope
-  manifest preflight. This records delegated contract approval, not user review
-  of the unseen F006 artifact.
+  approved F007's independent strict authority audit after F006 audit review
+  failed. The substantive F006 public rows, workspace gates, phase-specific
+  challenge precedence, and exact-scope manifest preflight remain unchanged.
+  This records delegated contract approval, not user review of the unseen F007
+  artifact.
 
 ## Goal
 

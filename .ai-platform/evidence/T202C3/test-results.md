@@ -346,7 +346,7 @@ F005 was governance-only and had no production RED/GREEN result. Its review
 failed on public-row ambiguity, audit lifecycle/enumeration/parsing, workspace
 handoff gates, and plan grammar. No aggregate counts are inferred.
 
-F006 is governance-only and has no production RED/GREEN result. It gives
+F006 was governance-only and had no production RED/GREEN result. It gives
 unrelated existing matched blocked and recovery-store pairs independent
 `account_update_conflict` and `owner_recovery_required` results, with each
 crossed against all six private-invalid cells. The pre-review audit requires the
@@ -356,3 +356,15 @@ attempt/summary/test linkage, including execution authorization and governance
 follow-up. Workspace test/Clippy/build join the gate. Cargo
 deny remains the T111 baseline blocker and is not reported as passing. Existing
 phase, preflight, numeric, fault, effect, privacy, and scope contracts remain.
+
+F006 audit review failed on independently sourced path truth, exact-token self-
+trapping, strict duplicate/contradiction parsing, phase permission/linkage, and
+deterministic negative controls. No aggregate severity counts are inferred and
+no production attempt started.
+
+F007 is governance-only and has no production RED/GREEN result. It leaves every
+substantive F006 contract and workspace gate unchanged. Its audit script owns
+the exact 21/22-path allowlists, scans complete active/historical contents,
+strictly joins visible and structured status/permissions/tokens, requires exact
+attempt status/commit/hashes/linkage, and runs 17 deterministic self-test cases
+before each phase audit. Permissions remain none pending three reviews.

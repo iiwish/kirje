@@ -272,12 +272,13 @@ and fresh validation are complete at production commit `94f3495`, and the user
 accepted the checkpoint on 2026-08-30. T110 is the next production task.
 Within T110, returned A006 candidate `2241a946` remains unaccepted. The user
 authorized orchestrator approval of existing-boundary clarifications on
-2026-08-31. F003-F005 packet reviews failed; F005 exposed public-row and audit-
-lifecycle plus workspace-gate defects. The orchestrator approved F006's
-existing-boundary clarification under delegated authority; this is not a claim
-of user review of the resulting packet. F006 is ready for
+2026-08-31. F003-F006 packet reviews failed. F006 preserves the substantive
+cleanup contract but exposed authority-source, strict-parsing, phase-lifecycle,
+and negative-control defects. The orchestrator approved F007's audit-only
+clarification under delegated authority; this is not a claim of user review of
+the resulting packet. F007 is ready for
 three independent zero-finding packet reviews with all production, test, and
 fixture permissions closed. A007/A008 remain non-executable.
-The F006 pre-review audit is governance-only at 21 active paths. Worker execution
+The F007 pre-review audit is governance-only at 21 active paths. Worker execution
 requires a separate final post-authorization audit; attempt evidence is required
 only by the 22-path post-integration orchestrator audit.

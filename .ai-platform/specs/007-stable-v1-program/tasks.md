@@ -19,10 +19,11 @@
   execution gate. The user explicitly accepted `T202C3-A005` on 2026-08-30.
 - F002 packet review failed at `38ca4273` with engineering C0/H1/M2/L0, spec
   C0/H0/M1/L0, and QA PASS C0/H0/M0/L0. On 2026-08-31 the user authorized the
-  orchestrator to approve existing-boundary clarifications. The orchestrator
-  approved F006's exact clarification under that authority after F005 review
-  found public-row, audit-lifecycle, workspace-gate, and grammar defects; this is
-  not user review of the resulting packet. F006 awaits three independent zero-finding
+  orchestrator to approve existing-boundary clarifications. F006 then failed
+  review on authority-source, strict-parsing, phase-lifecycle, and negative-
+  control defects without changing its substantive cleanup contract. The
+  orchestrator approved F007's audit-only clarification under that authority;
+  this is not user review of the resulting packet. F007 awaits three independent zero-finding
   reviews with every write permission closed; A007/A008 remain non-executable.
 - For the user-authorized unattended delegation beginning 2026-08-30, the
   orchestrator may accept an internal attempt or major milestone only after
@@ -166,11 +167,12 @@ engineering and QA each passed C0/H0/M0/L0. The user explicitly approved the
 F002 contract revision on 2026-08-31. Its packet review at `38ca4273` returned
 QA PASS C0/H0/M0/L0, spec FAIL C0/H0/M1/L0, and engineering FAIL C0/H1/M2/L0.
 No implementation started. Under the user's 2026-08-31 delegated clarification
-authority, the orchestrator approved `T202C3-A006-F006` after F005 review failed.
-It splits unrelated blocked/recovery rows, defines three authority-audit phases
-with exact path counts and structured state/token parsing, adds workspace test/
-Clippy handoff gates, and retains every prior exact-scope repair without a core
-change. F006 is `ready_for_f006_packet_review`; all
+authority, the orchestrator approved `T202C3-A006-F007` after F006 review failed.
+F007 changes only the authority audit: independent hard-coded path truth, strict
+visible/structured parsing, exact phase permissions and token placement, and
+deterministic negative self-tests. The substantive F006 cleanup contract,
+workspace gates, and exact scope are unchanged. F007 is
+`ready_for_f007_packet_review`; all
 production/test/fixture permissions remain none. A007 claim and A008 delete
 completion remain non-executable just-in-time outlines.
 Priority: P0
@@ -262,7 +264,8 @@ Evidence required:
    common IDs use the closed public pair projection before private step 7;
    replacement proof uses three reachable branches; generic lengths use one
    private numeric helper with numeric-only unit tests and registry-only byte
-   vectors. F002-F005 packet reviews failed. F006 canonically resolves every finding:
+   vectors. F002-F005 packet reviews failed. F006 canonically resolves every
+   substantive cleanup-contract finding:
    global step-2 validation remains request-independent and may stream all
    private graphs; after the request-independent global validation pass, no
    request-directed pending/private lookup or request-dependent private branch may occur
@@ -284,7 +287,9 @@ Evidence required:
    crossed with all six private-invalid cells; pre-review, post-authorization,
    and post-integration audits have exact path counts and structured state/token
    contracts; workspace test/Clippy/build are explicit while cargo-deny remains
-   the T111 baseline blocker. No core change is allowed. Only three independent zero-finding F006 reviews
+   the T111 baseline blocker. F007 adds only the independently sourced strict
+   authority audit and deterministic negative self-tests. No core change is
+   allowed. Only three independent zero-finding F007 reviews
    plus governance follow-up may open the exact scopes.
    A007 owns the unpublished credential crate/opaque locator, store-only direct
    dependency, store-private fake deletion hook, permit, claim, and event 16.

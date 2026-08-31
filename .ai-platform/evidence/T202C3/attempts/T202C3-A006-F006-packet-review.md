@@ -2,7 +2,7 @@
 
 ## Status
 
-`PENDING_THREE_INDEPENDENT_REVIEWS`
+`FAILED_NO_EXECUTION_AUTHORIZATION`
 
 - Packet: `.ai-platform/specs/007-stable-v1-program/packets/T110-A006.yaml`
 - Baseline governance HEAD: `c42e10d75cea45829cd0225aec661e7583653e0b`
@@ -10,64 +10,22 @@
   existing-boundary delegated authority
 - Execution authorization: none
 - Review token: none
+- Governance follow-up: none
 - Implementation attempt: not started
 
 This is delegated clarification approval, not user review of unseen work.
 
-<!-- A006_AUTHORITY_GATE_START
-authority_gate:
-  state: PENDING_REVIEW
-  execution_authorization: none
-  governance_followup: none
-  reviews:
-    spec_compliance:
-      status: PENDING
-      token: none
-      findings: null
-    engineering_security:
-      status: PENDING
-      token: none
-      findings: null
-    qa_evidence:
-      status: PENDING
-      token: none
-      findings: null
-A006_AUTHORITY_GATE_END -->
-
-## Review Contract
-
-1. Unrelated existing matched blocked and unrelated existing matched recovery
-   are independent public rows. The former returns `AccountUpdateConflict`; the
-   latter returns `OwnerRecoveryRequired`. Each is independently crossed with
-   wrong origin, locator kind, locator digest, tombstone, lifecycle, and
-   descriptor, as are every other exact public row. Every row states its own
-   exact result without shorthand.
-2. Cleanup-challenge phase order, transition absence, numeric helper, active-pair
-   fault rollback, same-origin proposed corruption, six-table effect paths,
-   privacy matrices, and exact three-file future scope remain unchanged.
-3. `ruby .ai-platform/scripts/audit_a006_authority.rb pre-review` validates this
-   PENDING/none placeholder and all governance inputs before review. After three
-   zero-finding reviews and governance follow-up, the orchestrator replaces the
-   structured block with exact final review tokens and execution authorization;
-   only then may the worker run the `post-authorization` audit. Attempt evidence
-   is not required by that worker audit.
-4. After attempt evidence and summary/test-results integration, the orchestrator
-   runs the separate `post-integration` audit, which requires the integration
-   linkage block in the attempt and rechecks final authority/evidence linkage.
-5. Full handoff validation includes store/core focused gates, workspace test,
-   workspace Clippy, workspace build, and fmt. `cargo deny` remains the recorded
-   T111 baseline blocker and is not claimed as passed by A006.
-
-## Review Placeholders
+## Review Result
 
 | Pass | Status | Findings |
 | --- | --- | --- |
-| Spec compliance | PENDING | Not assessed |
-| Engineering/security | PENDING | Not assessed |
-| QA/evidence | PENDING | Not assessed |
+| Spec compliance | FAIL | The audit authority source and phase lifecycle were not independently closed. |
+| Engineering/security | FAIL | Packet-derived paths, exact token literals, and permissive field parsing allowed substitution, self-token, duplicate, and contradiction bypasses. |
+| QA/evidence | FAIL | Missing deterministic negative controls left path, permission, review, stale-token, and integration failures unproved. |
 
-All three independent reviews must return zero findings. Production, test, and
-fixture permissions remain none pending governance follow-up.
+No aggregate severity counts were supplied and none are inferred. No pass token,
+execution authorization, governance follow-up, or implementation attempt exists.
+Production, test, and fixture permissions remain none.
 
 ## Governance Preparation Validation
 

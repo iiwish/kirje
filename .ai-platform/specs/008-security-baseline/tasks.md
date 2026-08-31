@@ -40,11 +40,12 @@
   `kirje-store` as its sole direct dependent and supersedes the flawed shared
   runtime/pluggable deletion formulation identified by repeat review. The
   decision is not implementation evidence. A006's historical packet gate passed
-  only for returned candidate `2241a946`. F001 through F005 packet reviews failed.
+  only for returned candidate `2241a946`. F001 through F006 packet reviews failed.
   On 2026-08-31 the user authorized orchestrator approval of existing-boundary
-  clarifications. The orchestrator approved F006's exact clarification under
-  that authority after F005 review found public-row, audit-lifecycle, workspace-
-  gate, and grammar defects; this is not user review of the unseen artifact. F006
+  clarifications. The orchestrator approved F007's audit-only clarification
+  under that authority after F006 review found authority-source, strict-parsing,
+  phase-lifecycle, and negative-control defects. F007 leaves the substantive F006
+  cleanup contract unchanged; this is not user review of the unseen artifact. F007
   awaits three independent zero-finding reviews with permissions closed. A007/A008
   remain closed, and no execution is accepted before its TDD, validation,
   evidence, and implementation reviews.
@@ -768,12 +769,12 @@ algorithm, three reachable replacement branches, and a private numeric-only
 length helper. Its packet review returned QA PASS C0/H0/M0/L0, spec FAIL
 C0/H0/M1/L0, and engineering FAIL C0/H1/M2/L0 at `38ca4273`; no implementation
 started. Under the user's delegated existing-boundary clarification authority,
-the orchestrator approved F006 after F005 review failed. F006 independently
-crosses unrelated blocked and recovery rows, defines pre-review/post-
-authorization/post-integration audits with exact path counts and structured
-states/tokens, adds workspace handoff gates, and retains phase order, fault/
-effect/privacy matrices, and exact scope without a core change. F006 is
-`ready_for_f006_packet_review`; every code/fixture permission remains none. A007
+the orchestrator approved F007 after F006 audit review failed. F007 changes only
+the authority audit: independent hard-coded active/historical path allowlists,
+strict visible/structured parsing, exact phase permission/token placement, and
+deterministic negative self-tests. The substantive F006 rows, phase order,
+fault/effect/privacy matrices, workspace gates, and exact scope remain unchanged.
+F007 is `ready_for_f007_packet_review`; every code/fixture permission remains none. A007
 claim and A008 delete-completion are non-executable just-in-time outlines;
 neither is Ready or packetized.
 Priority: P0
@@ -878,11 +879,13 @@ Test targets:
   change is reviewed and the production Cargo tree remains unchanged
 - Opaque-type compile negatives and deterministic store-private fake deletion
   call log
-- A006 pre-review audit reads exactly 21 active governance paths and requires
-  F006 PENDING/none; post-authorization reads the same exact set, requires three
-  zero-finding tokens plus aggregate execution authority/follow-up, and does not
-  require attempt evidence; post-integration reads exactly 22 paths including
-  attempt evidence and validates structured packet/review/summary/test linkage
+- A006 F007 audit owns independent exact key/path truth. Syntax and deterministic
+  negative self-tests precede every phase. Pre-review reads exactly 21 active
+  paths and requires F007 PENDING/none; post-authorization reads the same exact
+  set, requires strict packet/aggregate status, exact permissions and token
+  placement, three zero-finding reviews, and no attempt evidence; post-integration
+  reads exactly 22 paths and validates attempt status/commit, packet/aggregate
+  hashes, and structured packet/review/summary/test linkage
 
 Validation commands:
 ```bash
@@ -915,9 +918,10 @@ there is no separate `008-security-baseline/packets/T202C3.yaml`.
 Attempt ownership is serial: A006 owns canonical locator validation at
 reservation/prepare plus effect-free cleanup challenge issuance, without
 changing transition state-machine behavior. Its candidate is Returned/Needs Fix
-and blocks all later outlines. F001 through F005 packet reviews failed. Under the
+and blocks all later outlines. F001 through F006 packet reviews failed. Under the
 user's delegated existing-boundary clarification authority, the orchestrator
-approved F006. F006 is `ready_for_f006_packet_review` and requires three
+approved F007's audit-only clarification without changing the substantive F006
+contract. F007 is `ready_for_f007_packet_review` and requires three
 independent zero-finding PASS reviews plus a governance follow-up before any
 exact production/test/fixture scope opens.
 A007 owns the new unpublished

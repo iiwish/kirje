@@ -392,14 +392,17 @@ winner/every-loser paths each prove zero delta in all six effect/external tables
 zero external calls, and unchanged cleanup; origin grant uses may preexist, so
 `grant_uses` is asserted by delta.
 
-The A006 authority audit has three separate gates. Governance preparation runs
-`pre-review` against the exact 21 active inputs and a PENDING/none F006 record;
-it is not worker authority. After three zero-finding reviews and governance
-follow-up, the worker runs `post-authorization`, which requires normalized final
-review/token/count state and exact execution authority but no attempt evidence.
-After the orchestrator writes attempt/summary/test-results, `post-integration`
-requires 22 active paths and exact structured evidence linkage. Failed F001-F005
-reviews and the historical packet PASS are separate allowlists, never active authority.
+The A006 F007 authority audit has three separate gates and leaves the substantive
+F006 cleanup contract unchanged. Governance preparation runs syntax, self-test,
+and `pre-review` against an independent hard-coded exact 21-path allowlist and a
+PENDING/none F007 record; it is not worker authority. After three zero-finding
+reviews and governance follow-up, the worker runs syntax, self-test, and `post-
+authorization`, which requires strict matching visible/structured status, exact
+permissions/token placement, and no attempt evidence. After the orchestrator
+writes attempt/summary/test-results, syntax, self-test, and `post-integration`
+require 22 exact active paths, packet/aggregate hashes, candidate commit/status,
+and strict evidence linkage. Failed F001-F006 reviews are a separate hard-coded
+allowlist, never active authority.
 
 ### D-009 Unified Same-Handle Bounded Input
 
@@ -703,11 +706,12 @@ implementation claim and not a claim that the user personally reviewed the
 resulting artifact. `T202C3_A006_PACKET_REVIEW_PASS` authorized only A006's exact
 candidate scopes at governance HEAD `3533054`. Candidate `2241a946` later failed
 spec and QA review and is Returned/Needs Fix with no current write permission.
-The user explicitly resumed A006 repair on 2026-08-31. F001 through F005 packet
+The user explicitly resumed A006 repair on 2026-08-31. F001 through F006 packet
 reviews failed. The user then authorized the orchestrator to approve existing-
 boundary clarifications without requesting approval at each node. Under that
-authority, the orchestrator approved F006's exact clarification; this does not
-claim user review of the resulting artifact. Only three independent zero-
-finding F006 packet reviews plus a governance follow-up and successful post-
+authority, the orchestrator approved F007's audit-only clarification; this does not
+claim user review of the resulting artifact. F007 leaves F006's substantive
+cleanup contract unchanged. Only three independent zero-
+finding F007 packet reviews plus a governance follow-up and successful post-
 authorization authority audit can open the exact
 production/test/fixture scopes. Later A007/A008 attempts remain closed.

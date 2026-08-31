@@ -3,7 +3,7 @@
 ## Metadata
 
 - Feature ID: `008-security-baseline`
-- Status: T202C3_A006_F006_Ready_For_Packet_Review_No_Execution_Permission
+- Status: T202C3_A006_F007_Ready_For_Packet_Review_No_Execution_Permission
 - Updated: 2026-08-31
 - Inputs: `spec.md`, `checklists/requirements.md`, `plan.md`, `research.md`,
   `data-model.md`, `contracts/**`, `tasks.md`, project constitution and AGENTS
@@ -26,8 +26,9 @@
   approved the F002 contract revision on 2026-08-31. Its packet review failed
   because a literal no-private-read claim contradicted mandatory global graph
   validation. Under the user's delegated existing-boundary clarification
-  authority, the orchestrator approved F006 after F005 review found public-row,
-  audit-lifecycle, workspace-gate, and grammar defects. Complete request-independent step-2
+  authority, the orchestrator approved F007 after F006 audit review found
+  authority-source, strict-parsing, phase-lifecycle, and negative-control defects.
+  F007 leaves the substantive F006 cleanup contract unchanged. Complete request-independent step-2
   validation remains intact and may stream all private graphs. After the request-
   independent global validation pass, source/call-order proof must show no
   request-directed pending/private lookup or request-dependent private branch
@@ -47,7 +48,7 @@
   no pending expiry is durable before eligibility. Claim/delete proof-expiry
   ordering remains unchanged. Same-origin proposed is corruption; only an
   unrelated matched proposed pair is a reachable public projection.
-  No implementation started; F006 awaits three reviews with permissions closed. The first A006 packet
+  No implementation started; F007 awaits three reviews with permissions closed. The first A006 packet
   review rejected the current-binding contradiction, incomplete clock-only
   recovery rule, and non-implementable cross-crate delete capability. The
   revised amendment makes cleanup the explicit historical-before exception,
@@ -151,7 +152,7 @@ must preserve that placement or add an explicit counter before loop expansion.
   user approved F002 on 2026-08-31. F002 packet review returned QA PASS
   C0/H0/M0/L0, spec FAIL C0/H0/M1/L0, and engineering FAIL C0/H1/M2/L0 at
   `38ca4273`. Under the user's delegated existing-boundary clarification
-  authority, the orchestrator approved F006 after the failed F005 review. It is ready for three independent
+  authority, the orchestrator approved F007 after the failed F006 audit review. It is ready for three independent
   zero-finding packet reviews; production/test/fixture permissions remain none,
   and A007/A008 remain closed.
   T202C4, T202D-T202E, and T203-T212 remain dependency-gated Draft work. T204
@@ -644,7 +645,7 @@ permission to merge child evidence or relax the strict serial gates.
 
 ## Execution Gate
 
-`T202C3_A006_F006_READY_FOR_PACKET_REVIEW_NO_EXECUTION_PERMISSION`
+`T202C3_A006_F007_READY_FOR_PACKET_REVIEW_NO_EXECUTION_PERMISSION`
 
 T202A is accepted from four test-first attempts, independent security and QA
 review, its bootstrap-schema digest, and fresh packet/workspace gates. A003
@@ -698,6 +699,9 @@ complete request-independent step-2 validation, prohibiting request-directed
 pending/private lookup and durable expiry before public eligibility, separating
 same-origin proposed corruption from unrelated proposed public conflict,
 retaining active-pair fault rollback, and completing effect/gate/audit proof.
-No implementation started. F006 requires three
+F006 audit review then failed without reopening that substantive contract. F007
+adds independent hard-coded path truth, strict visible/structured authority
+parsing, exact phase permissions/token placement, and deterministic negative
+self-tests. No implementation started. F007 requires three
 independent zero-finding reviews plus governance follow-up; the T202C and T202
 umbrellas remain non-Accepted.
