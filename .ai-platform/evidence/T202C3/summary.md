@@ -9,9 +9,11 @@ execution stopped and the heartbeat was paused under the user's High-stop
 condition. The user explicitly resumed A006 repair on 2026-08-31. Fix candidate
 packet `T202C3-A006-F001` then failed spec review C0/H1/M2/L0 while engineering
 and QA passed C0/H0/M0/L0. No implementation started. The user explicitly
-approved the F002 contract revision
-on 2026-08-31. F002 is ready for three independent packet reviews with all
-permissions closed. A006, T202C3, and T110 remain unaccepted. `T202C3-A001` challenge issuance is reviewed
+approved the F002 contract revision on 2026-08-31. F002 packet review at
+`38ca4273` returned QA PASS C0/H0/M0/L0, spec FAIL C0/H0/M1/L0, and engineering
+FAIL C0/H1/M2/L0. No implementation started. F002 is blocked for contract
+clarification, the heartbeat is paused, and all permissions remain closed.
+A006, T202C3, and T110 remain unaccepted. `T202C3-A001` challenge issuance is reviewed
 at production commit
 `daf22a0`. `T202C3-A002` account-update transition execution is accepted at
 production commit `2c00f32` by explicit user decision on 2026-08-30.
@@ -104,7 +106,7 @@ e5613c2fef5f0181dfe06ededec939b4e132fc4bbf1cd656dbdfbfe26f076608  crates/kirje-s
 - Attempt: `.ai-platform/evidence/T202C3/attempts/T202C3-A005.md`
 - Returned attempt: `.ai-platform/evidence/T202C3/attempts/T202C3-A006.md`
 - Failed fix-packet review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F001-packet-review.md`
-- Pending F002 packet review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F002-packet-review.md`
+- Failed F002 packet review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F002-packet-review.md`
 - Contract amendment: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract.md`
 - Contract fix: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract-A002.md`
 - Contract fix: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract-A003.md`
@@ -131,8 +133,14 @@ runtime compile-fail controls; no AST test exists yet. Returned candidate
 `T202C3-A006` retains one High and five Medium findings. The user resumed repair,
 and F001 failed because it treated caller-supplied common IDs as signed and left
 absent/pair-mismatch/unrelated-row public classification undefined. The user
-approved F002's exact public-pair algorithm, reachable replacement split, and
-private numeric-only length-classifier proof. F002 awaits three packet PASS
-reviews and no implementation started. A007 claim and A008 delete completion remain non-
+approved F002's public-pair algorithm, reachable replacement split, and private
+numeric-only length-classifier proof. F002 review failed because literal no-
+private-read wording conflicts with mandatory full global graph validation.
+The successor must prove no request-directed private lookup or request-dependent
+private branch after global validation without weakening step 2. Open Mediums
+are stale unreachable replacement text in `data-model.md`, unresolved
+`transition_id=None` preflight/error ownership, and a stale F001 gate that must
+become three revised F002/F003 reviews. No implementation started, and explicit
+resume plus contract clarification is required. A007 claim and A008 delete completion remain non-
 executable just-in-time outlines. T202C3 and T110 are not Accepted; the authority
 umbrella remains Draft.

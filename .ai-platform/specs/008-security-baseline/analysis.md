@@ -13,7 +13,8 @@
 ## Gate Result
 
 - Critical findings: 0 unresolved.
-- High findings: 1 unresolved in A006 production review. Cleanup validates
+- High findings: the A006 production-review High remains open, and F002 packet
+  review adds one blocking High. Cleanup validates
   origin/locator/tombstone before blocked/recovery eligibility, so mixed invalid
   target plus blocked/recovery state returns `credential_cleanup_invalid`
   instead of `account_update_conflict` or `owner_recovery_required` and leaks
@@ -22,13 +23,13 @@
   C0/H1/M2/L0 while engineering and QA each passed C0/H0/M0/L0. The packet
   wrongly treated caller-supplied common IDs as signed and did not close absent,
   pair-mismatched, or unrelated-row classification. The user explicitly
-  approved the F002 contract revision on 2026-08-31. F002 closes the public-pair
-  algorithm, reachable replacement branches, and private numeric length proof
-  and is ready for three independent packet reviews. Absent or pair-mismatched
-  IDs fail `credential_cleanup_invalid` without private reads; matched recovery
-  or blocked/proposed projections return the stable public recovery/conflict
-  result, including for unrelated pairs; active plus active/removed proceeds to
-  private step 7. No implementation started and permissions remain closed. The first A006 packet
+  approved the F002 contract revision on 2026-08-31. Its packet review failed
+  because a literal no-private-read claim contradicts mandatory global graph
+  validation. A successor must keep full step-2 validation, then prove no
+  request-directed private lookup or request-dependent private branch after
+  global validation through call-order and source evidence. No implementation
+  started; F002 is blocked, the heartbeat is paused, and permissions remain
+  closed. The first A006 packet
   review rejected the current-binding contradiction, incomplete clock-only
   recovery rule, and non-implementable cross-crate delete capability. The
   revised amendment makes cleanup the explicit historical-before exception,
@@ -114,9 +115,10 @@ must preserve that placement or add an explicit counter before loop expansion.
   T202C3-A006 candidate `2241a946` is Returned/Needs Fix. The user explicitly
   resumed A006 repair on 2026-08-31 and fixed the path as A006 repair/re-review,
   A007 claim, A008 delete, then T202C3/T110 closure. F001 failed spec review; the
-  user approved F002 on 2026-08-31. F002 awaits three independent packet PASS
-  reviews; production, test, and fixture permissions remain none, and A007/A008
-  remain closed.
+  user approved F002 on 2026-08-31. F002 packet review returned QA PASS
+  C0/H0/M0/L0, spec FAIL C0/H0/M1/L0, and engineering FAIL C0/H1/M2/L0 at
+  `38ca4273`. It is blocked for contract clarification, the heartbeat is paused,
+  production/test/fixture permissions remain none, and A007/A008 remain closed.
   T202C4, T202D-T202E, and T203-T212 remain dependency-gated Draft work. T204
   and every later task directly require the T202 umbrella to be Accepted.
 
@@ -654,5 +656,12 @@ prior findings, reported zero Critical, High, Medium, or Low, and issued
 `T202C2_A006_PACKET_REVIEW_PASS`. T202C2 is Accepted. Returned candidate
 `T202C3-A006` retains one High and five Medium findings. The user resumed repair,
 F001 failed spec review C0/H1/M2/L0, and the user approved the F002 contract
-revision. F002 has no execution permission until three independent packet
-reviews pass; the T202C and T202 umbrellas remain non-Accepted.
+revision. F002 then failed packet review: mandatory global graph validation
+conflicts with its literal no-private-read claim; `data-model.md` retains an
+unreachable invalid-target replacement; `transition_id=None` error/preflight
+ownership is unresolved; and a stale F001 gate must become three revised
+F002/F003 reviews. No implementation started. F002 is blocked with no execution
+permission; the T202C and T202 umbrellas remain non-Accepted. A successor must
+keep complete step-2 validation and prove through call-order and source
+inspection that there is no request-directed private lookup or request-
+dependent private branch after global validation.

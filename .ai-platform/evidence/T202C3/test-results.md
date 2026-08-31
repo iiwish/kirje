@@ -322,6 +322,13 @@ attempt or production test followed; F001 is blocked for contract clarification
 and the heartbeat is paused.
 
 The user approved the F002 contract revision on 2026-08-31. F002 has no new
-production RED/GREEN or validation result because its three independent packet
-reviews and execution authorization remain pending. Production, test, and
-fixture permissions are none.
+production RED/GREEN or validation result. Its packet review at `38ca4273`
+returned QA PASS C0/H0/M0/L0, spec FAIL C0/H0/M1/L0, and engineering FAIL
+C0/H1/M2/L0. The High is an internal call-order contradiction: complete global
+history validation reads every cleanup/origin/locator graph, so a literal no-
+private-read promise cannot follow that validation. A successor must preserve
+step 2 and prove no request-directed private lookup or request-dependent private
+branch after global validation. The Mediums are stale unreachable replacement
+text in `data-model.md`, unresolved `transition_id=None` error/preflight
+ownership, and a stale F001 review gate. F002 is blocked, the heartbeat is
+paused, and production, test, and fixture permissions are none.

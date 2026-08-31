@@ -18,8 +18,10 @@
 - Future packets are generated just in time after their predecessor clears its
   execution gate. The user explicitly accepted `T202C3-A005` on 2026-08-30.
 - The user explicitly approved the A006 F002 contract revision on 2026-08-31.
-  F002 requires three independent packet PASS reviews before any write
-  permission opens; A007/A008 remain non-executable.
+  Its packet review failed at `38ca4273` with engineering C0/H1/M2/L0, spec
+  C0/H0/M1/L0, and QA PASS C0/H0/M0/L0. F002 is blocked for contract
+  clarification with every write permission closed; A007/A008 remain non-
+  executable.
 - For the user-authorized unattended delegation beginning 2026-08-30, the
   orchestrator may accept an internal attempt or major milestone only after
   TDD, the packet's full validation loop, required evidence, and all three
@@ -158,10 +160,12 @@ findings. Candidate `2241a946` is Returned/Needs Fix. Autonomous work stopped
 and the heartbeat was paused. The user explicitly resumed A006 repair
 on 2026-08-31. `T202C3-A006-F001` then failed spec review C0/H1/M2/L0 while
 engineering and QA each passed C0/H0/M0/L0. The user explicitly approved the
-F002 contract revision on 2026-08-31. `T202C3-A006-F002` is ready for three
-independent packet reviews with no implementation attempt or production/test/
-fixture permission. A007 claim and A008 delete completion remain non-executable
-just-in-time outlines.
+F002 contract revision on 2026-08-31. Its packet review at `38ca4273` returned
+QA PASS C0/H0/M0/L0, spec FAIL C0/H0/M1/L0, and engineering FAIL C0/H1/M2/L0.
+No implementation started. `T202C3-A006-F002` is
+`blocked_needs_contract_clarification`, the heartbeat is paused under the High-
+stop condition, and production/test/fixture permission remains none. A007 claim
+and A008 delete completion remain non-executable just-in-time outlines.
 Priority: P0
 Depends on: T109 Accepted
 Blocks: T111
@@ -251,8 +255,14 @@ Evidence required:
    common IDs use the closed public pair projection before private step 7;
    replacement proof uses three reachable branches; generic lengths use one
    private numeric helper with numeric-only unit tests and registry-only byte
-   vectors. F002 awaits three independent PASS reviews and grants no write
-   permission.
+   vectors. F002 packet review failed: the no-private-read wording conflicts
+   with mandatory full global graph validation; `data-model.md` retains a stale
+   unreachable invalid-target replacement; the `transition_id=None` error and
+   preflight layer are unresolved; and one gate still referred to F001 rather
+   than three reviews of the revised F002/F003 packet. A successor must preserve
+   step-2 validation and prove no request-directed private lookup or request-
+   dependent private branch after global validation. F002 is blocked, grants no
+   write permission, and may resume only after explicit clarification.
    A007 owns the unpublished credential crate/opaque locator, store-only direct
    dependency, store-private fake deletion hook, permit, claim, and event 16.
    A008 owns the real low-level keyring delete, exact private adapter method,
