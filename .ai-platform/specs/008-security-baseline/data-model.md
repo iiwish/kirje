@@ -1215,8 +1215,9 @@ transaction, complete request-independent global validation, checked effective
 time/time shape without pending access, public pair classification, private
 target validation, pending lookup, reuse/replacement, and successor commit. No
 request-directed pending/private lookup precedes public classification, and no
-pending expiry is durably recorded before public eligibility. A same-context expired pending row followed by matched blocked/recovery
-public state returns that public error without pending-row lookup-dependent
+pending expiry is durably recorded before public eligibility. A same-context expired pending row followed by matched blocked
+returns `account_update_conflict`; matched recovery store returns
+`owner_recovery_required`. Each returns without pending-row lookup-dependent
 interaction: predecessor state/event/clock is unchanged and entropy, successor,
 grant, nonce, and cleanup deltas are zero. For an active eligible public pair and
 valid private target, deterministic failures after `OldChallengeExpiredState`
@@ -1229,6 +1230,14 @@ proposed is such corruption; the same-context later-state matrix is only active/
 removed origin account, blocked account/store, or recovery-required store. An unrelated matched proposed pair is reachable
 and returns `account_update_conflict` without target distinction. Ordinary
 cleanup claim/delete proof-expiry ordering is unchanged.
+
+The public matrix has independent absent-store, absent-account, pair-mismatch,
+matched-recovery, matched-blocked-store/account, unrelated-proposed, unrelated-
+blocked, unrelated-recovery, active/active, and active/removed rows. The
+unrelated blocked row returns `account_update_conflict`; the unrelated recovery-
+store row returns `owner_recovery_required`. Every row is independently crossed
+with wrong origin, locator kind, locator digest, tombstone, lifecycle, and
+descriptor. Every row states its own closed result.
 
 Every first/reuse/response-loss/valid-replacement/both-fault/restart/concurrent-
 winner/concurrent-loser challenge path has zero delta in `challenge_effects`,

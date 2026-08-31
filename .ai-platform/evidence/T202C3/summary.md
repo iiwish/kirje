@@ -12,12 +12,14 @@ and QA passed C0/H0/M0/L0. No implementation started. The user explicitly
 approved the F002 contract revision on 2026-08-31. F002 packet review at
 `38ca4273` returned QA PASS C0/H0/M0/L0, spec FAIL C0/H0/M1/L0, and engineering
 FAIL C0/H1/M2/L0. No implementation started. Under the user's explicit delegated
-existing-boundary clarification authority, the orchestrator approved F005 after
-F004 review found the phase-ordering High plus matrix/effect/gate/audit defects.
-F005 makes cleanup-challenge precedence phase-specific, separates same-origin
-proposed corruption from unrelated proposed conflict, completes per-path effect
-and validation/audit proof, and retains prior exact-scope repairs. This is not
-user review of the unseen F005 packet. F005 awaits three independent zero-finding reviews with all permissions
+existing-boundary clarification authority, the orchestrator approved F006 after
+F005 review found public-row, audit-lifecycle, workspace-gate, and grammar
+defects. F006 makes unrelated existing matched blocked and recovery-store rows
+independent with exact `account_update_conflict` and `owner_recovery_required`
+results, crosses each with all six private-invalid cells, and defines 21-path pre-
+review/post-authorization and 22-path post-integration audits, completes handoff
+gates, and retains prior exact-scope repairs. This is not user review of the
+unseen F006 packet. F006 awaits three independent zero-finding reviews with all permissions
 closed. A006, T202C3, and T110 remain unaccepted. `T202C3-A001` challenge issuance is reviewed
 at production commit
 `daf22a0`. `T202C3-A002` account-update transition execution is accepted at
@@ -114,7 +116,8 @@ e5613c2fef5f0181dfe06ededec939b4e132fc4bbf1cd656dbdfbfe26f076608  crates/kirje-s
 - Failed F002 packet review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F002-packet-review.md`
 - Failed F003 packet review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F003-packet-review.md`
 - Failed F004 packet review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F004-packet-review.md`
-- Pending F005 packet review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F005-packet-review.md`
+- Failed F005 packet review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F005-packet-review.md`
+- Pending F006 packet review: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-F006-packet-review.md`
 - Contract amendment: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract.md`
 - Contract fix: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract-A002.md`
 - Contract fix: `.ai-platform/evidence/T202C3/attempts/T202C3-A006-contract-A003.md`
@@ -144,16 +147,16 @@ absent/pair-mismatch/unrelated-row public classification undefined. The user
 approved F002's public-pair algorithm, reachable replacement split, and private
 numeric-only length-classifier proof. F002 review failed because literal no-
 private-read wording conflicts with mandatory full global graph validation.
-F003 and F004 reviews found further contract defects. F005 resolves them
+F003-F005 reviews found further contract defects. F006 resolves them
 canonically: step 2 remains request-independent; challenge issuance has an exact
 phase order with no pending/private lookup before public classification and no
 durable expiry before eligibility; claim/delete proof expiry remains separate;
 same-origin proposed is corruption while unrelated proposed is public conflict;
-active-pair rollback uses the existing hooks; per-path six-table deltas, core
-tests, workspace build, and deterministic stale-authority audit are mandatory;
+active-pair rollback uses the existing hooks; per-path six-table deltas, core/
+workspace tests, workspace Clippy/build, and three-stage authority audits are mandatory;
 and a pure exact-scope manifest preflight rejects
 `transition_id=None` before lock/I/O/entropy without a core change. No
-implementation started. Three independent zero-finding F005 reviews plus
+implementation started. Three independent zero-finding F006 reviews plus
 governance follow-up are required. A007 claim and A008 delete completion remain non-
 executable just-in-time outlines. T202C3 and T110 are not Accepted; the authority
 umbrella remains Draft.

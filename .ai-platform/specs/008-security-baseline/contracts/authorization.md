@@ -381,15 +381,18 @@ mismatch is `credential_cleanup_invalid`. For an existing matched public pair,
 recovery-required store is `owner_recovery_required`; blocked store or blocked
 account is `account_update_conflict`. A finalized-origin account persisted as
 proposed is global corruption; an unrelated matched proposed pair is reachable
-and returns `account_update_conflict`. This deliberately applies to an unrelated
-matched blocked/recovery pair and reveals no cleanup validity. Active
+and returns `account_update_conflict`. An unrelated existing matched blocked
+pair independently returns `account_update_conflict`; an unrelated existing
+matched recovery-store pair independently returns `owner_recovery_required`.
+Neither reveals cleanup validity. Active
 store plus active or removed account alone proceeds to request-directed private
 cleanup validation. The matrix independently crosses every reachable public class with
 wrong origin, locator kind, locator digest, tombstone, lifecycle, and descriptor;
 the pre-private classes never distinguish those cells, while active/active and
 active/removed return `credential_cleanup_invalid` for each invalid private
-cell. A same-context expired pending row plus later matched blocked/recovery
-returns the public result with zero pending-row lookup-dependent interaction and
+cell. A same-context expired pending row plus later matched blocked returns
+`account_update_conflict`; later matched recovery store returns
+`owner_recovery_required`. Each has zero pending-row lookup-dependent interaction and
 unchanged predecessor/event/clocks; active eligible valid-target rollback uses
 `OldChallengeExpiredState` and `OldChallengeExpiredEvent`. These rules do not
 make caller-supplied IDs signed authority before proof verification.

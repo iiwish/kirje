@@ -40,11 +40,11 @@
   `kirje-store` as its sole direct dependent and supersedes the flawed shared
   runtime/pluggable deletion formulation identified by repeat review. The
   decision is not implementation evidence. A006's historical packet gate passed
-  only for returned candidate `2241a946`. F001 through F004 packet reviews failed.
+  only for returned candidate `2241a946`. F001 through F005 packet reviews failed.
   On 2026-08-31 the user authorized orchestrator approval of existing-boundary
-  clarifications. The orchestrator approved F005's exact clarification under
-  that authority after F004 review found a phase-ordering High plus matrix/
-  effect/gate/audit defects; this is not user review of the unseen artifact. F005
+  clarifications. The orchestrator approved F006's exact clarification under
+  that authority after F005 review found public-row, audit-lifecycle, workspace-
+  gate, and grammar defects; this is not user review of the unseen artifact. F006
   awaits three independent zero-finding reviews with permissions closed. A007/A008
   remain closed, and no execution is accepted before its TDD, validation,
   evidence, and implementation reviews.
@@ -768,13 +768,12 @@ algorithm, three reachable replacement branches, and a private numeric-only
 length helper. Its packet review returned QA PASS C0/H0/M0/L0, spec FAIL
 C0/H0/M1/L0, and engineering FAIL C0/H1/M2/L0 at `38ca4273`; no implementation
 started. Under the user's delegated existing-boundary clarification authority,
-the orchestrator approved F005 after F004 review failed. F005 preserves request-
-independent global validation, makes challenge precedence phase-specific,
-prohibits pending/private lookup or durable expiry before public eligibility,
-separates same-origin proposed corruption from unrelated proposed conflict,
-retains active-pair rollback and exact-scope preflight, and completes effect/
-gate/audit proof without a core change. F005 is
-`ready_for_f005_packet_review`; every code/fixture permission remains none. A007
+the orchestrator approved F006 after F005 review failed. F006 independently
+crosses unrelated blocked and recovery rows, defines pre-review/post-
+authorization/post-integration audits with exact path counts and structured
+states/tokens, adds workspace handoff gates, and retains phase order, fault/
+effect/privacy matrices, and exact scope without a core change. F006 is
+`ready_for_f006_packet_review`; every code/fixture permission remains none. A007
 claim and A008 delete-completion are non-executable just-in-time outlines;
 neither is Ready or packetized.
 Priority: P0
@@ -830,7 +829,9 @@ Test targets:
   delta from the prestate so immutable origin-transition uses may already exist
 - Cleanup challenge public projection crosses absent store, absent account, pair
   mismatch, matched recovery store, matched blocked store/account, unrelated
-  matched proposed pair, unrelated matched blocked/recovery pair, active/active, and
+  matched proposed pair, unrelated existing matched blocked pair returning
+  `account_update_conflict`, unrelated existing matched recovery-store pair
+  returning `owner_recovery_required`, active/active, and
   active/removed independently with wrong origin, locator kind, locator digest,
   tombstone, lifecycle, and descriptor. Every public-ineligible class returns the
   closed public result without request-directed pending/private lookup or target
@@ -848,8 +849,9 @@ Test targets:
 - Pure `authority.rs` manifest preflight rejects cleanup `transition_id=None` as
   `authorization_malformed` before apply lock, file, database, or entropy work,
   with zero I/O/mutation/entropy and no core change
-- Same-context expired pending plus later matched blocked/recovery returns the
-  public result with zero pending-row lookup-dependent interaction, unchanged
+- Same-context expired pending plus later matched blocked returns
+  `account_update_conflict`; later matched recovery store returns
+  `owner_recovery_required`. Each has zero pending-row lookup-dependent interaction, unchanged
   predecessor state/event and both clocks, and zero entropy/successor/grant/
   nonce/cleanup. Active eligible pair plus valid target uses deterministic
   `OldChallengeExpiredState` and `OldChallengeExpiredEvent` faults to prove full
@@ -876,6 +878,11 @@ Test targets:
   change is reviewed and the production Cargo tree remains unchanged
 - Opaque-type compile negatives and deterministic store-private fake deletion
   call log
+- A006 pre-review audit reads exactly 21 active governance paths and requires
+  F006 PENDING/none; post-authorization reads the same exact set, requires three
+  zero-finding tokens plus aggregate execution authority/follow-up, and does not
+  require attempt evidence; post-integration reads exactly 22 paths including
+  attempt evidence and validates structured packet/review/summary/test linkage
 
 Validation commands:
 ```bash
@@ -883,11 +890,16 @@ cargo test -p kirje-store --test authority_registry --all-features --locked
 cargo test -p kirje-credential -p kirje-store --all-features --locked
 cargo test -p kirje-store --all-features --locked
 cargo test -p kirje-core --all-features --locked
+cargo test --workspace --all-features --locked
 cargo clippy -p kirje-credential -p kirje-store --all-targets --all-features --locked -- -D warnings
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo build --workspace --all-features --locked
 cargo metadata --no-deps --format-version 1
 cargo tree -p kirje-store -e normal --locked
 ```
+
+`cargo deny` remains the T111-owned yanked `chacha20`/`io-imap` baseline blocker;
+A006 does not claim that gate passes and does not change dependency state.
 
 Definition of Done:
 - Every remaining control lifecycle is exact, immutable, crash-safe, delete-only
@@ -903,9 +915,9 @@ there is no separate `008-security-baseline/packets/T202C3.yaml`.
 Attempt ownership is serial: A006 owns canonical locator validation at
 reservation/prepare plus effect-free cleanup challenge issuance, without
 changing transition state-machine behavior. Its candidate is Returned/Needs Fix
-and blocks all later outlines. F001, F002, F003, and F004 packet reviews failed. Under the
+and blocks all later outlines. F001 through F005 packet reviews failed. Under the
 user's delegated existing-boundary clarification authority, the orchestrator
-approved F005. F005 is `ready_for_f005_packet_review` and requires three
+approved F006. F006 is `ready_for_f006_packet_review` and requires three
 independent zero-finding PASS reviews plus a governance follow-up before any
 exact production/test/fixture scope opens.
 A007 owns the new unpublished

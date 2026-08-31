@@ -1300,9 +1300,10 @@ recorded before public eligibility succeeds.
 For an existing matched public store/account pair, a `recovery_required` store
 returns `owner_recovery_required`; a blocked store or a blocked account
 returns `account_update_conflict`. These public results occur before any private
-target-validity result. An unrelated but existing matched blocked/recovery pair
-deliberately returns that pair's public projection result and never reveals
-whether the requested cleanup target is valid. Only an active store plus an
+target-validity result. An unrelated existing matched blocked pair returns
+`account_update_conflict`; an unrelated existing matched recovery-store pair
+returns `owner_recovery_required`. Neither reveals whether the requested cleanup
+target is valid. Only an active store plus an
 active or removed account proceeds to private validation of the exact cleanup
 manifest with expected state `ready`, rederived locator/tombstone digests, one
 finalized origin transition, and the historical-before binding. A removed
@@ -1316,7 +1317,9 @@ Matched recovery store returns `owner_recovery_required`. Matched blocked store
 or blocked account returns `account_update_conflict`. A finalized-origin account
 persisted as `proposed` is global step-2 corruption. An unrelated but matched
 proposed pair is reachable and returns `account_update_conflict`; an unrelated
-matched blocked/recovery pair returns its same public result.
+existing matched blocked pair independently returns `account_update_conflict`;
+and an unrelated existing matched recovery-store pair independently returns
+`owner_recovery_required`.
 Every one of those public-ineligible cells is crossed independently with wrong
 origin, wrong locator kind, wrong locator digest, wrong tombstone, wrong
 lifecycle, and wrong descriptor target cells; none performs request-directed
@@ -1344,8 +1347,10 @@ Replacement proof separates public classification from pending-row work. A test
 may arrange a same-context expired pending row and then make its matched store
 recovery-required, its matched store blocked, or its matched account blocked.
 The same finalized-origin account may otherwise remain active or become removed;
-persisting it as proposed is corruption. Each blocked/recovery call returns the closed public recovery/conflict error with zero
-request-directed pending-row lookup-dependent interaction: predecessor state,
+persisting it as proposed is corruption. A blocked call returns
+`account_update_conflict`; a recovery-store call returns
+`owner_recovery_required`. Each returns with zero request-directed pending-row
+lookup-dependent interaction: predecessor state,
 events, and both authority clock fields are unchanged; entropy, successor,
 grant, nonce, and cleanup deltas are zero.
 

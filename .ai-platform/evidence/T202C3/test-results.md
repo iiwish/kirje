@@ -342,12 +342,17 @@ review failed on the cleanup-challenge phase-ordering High and supporting matrix
 effect, complete-gate, stale-authority-audit, and wording defects. No aggregate
 severity counts were supplied and none are inferred. No implementation started.
 
-F005 is governance-only and has no production RED/GREEN result. Under delegated
-existing-boundary authority, the orchestrator approved its clarification on
-2026-08-31. It defines the exact challenge phases, prohibits pre-public pending/
-private lookup and pre-eligibility durable expiry, preserves ordinary claim/
-delete proof expiry, closes same-origin versus unrelated-proposed reachability,
-and requires per-path zero deltas across all six effect/external tables. Core
-tests, workspace build, and the deterministic all-input authority audit join the
-gate. Prior preflight, numeric helper, matrices, fault hooks, and exact scope
-remain. Permissions are none pending three zero-finding F005 packet reviews.
+F005 was governance-only and had no production RED/GREEN result. Its review
+failed on public-row ambiguity, audit lifecycle/enumeration/parsing, workspace
+handoff gates, and plan grammar. No aggregate counts are inferred.
+
+F006 is governance-only and has no production RED/GREEN result. It gives
+unrelated existing matched blocked and recovery-store pairs independent
+`account_update_conflict` and `owner_recovery_required` results, with each
+crossed against all six private-invalid cells. The pre-review audit requires the
+21-path PENDING/none state; post-authorization requires normalized final tokens
+without attempt evidence; post-integration requires 22 paths and structured
+attempt/summary/test linkage, including execution authorization and governance
+follow-up. Workspace test/Clippy/build join the gate. Cargo
+deny remains the T111 baseline blocker and is not reported as passing. Existing
+phase, preflight, numeric, fault, effect, privacy, and scope contracts remain.

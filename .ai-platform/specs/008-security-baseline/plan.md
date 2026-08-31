@@ -359,18 +359,21 @@ or request-dependent private branch may occur before the closed public pair
 classification. Absent store/account or persisted
 pair mismatch returns `credential_cleanup_invalid`; a matched recovery store
 returns `owner_recovery_required`; matched blocked store or blocked account
-returns `account_update_conflict`, including for an unrelated matched blocked/
-recovery pair. A finalized-origin proposed account is corruption; an unrelated
-matched proposed pair returns `account_update_conflict`. Active store plus active/removed account proceeds to request-directed
-private target validation. The public-pair matrix crosses absent store, absent
-account, pair mismatch, matched recovery store, matched blocked store/account,
-unrelated matched proposed pair, unrelated matched blocked/recovery pair, and active
-store with active/removed account independently with wrong origin, locator kind,
-locator digest, tombstone, lifecycle, and descriptor; every public-ineligible
+returns `account_update_conflict`. An unrelated existing matched blocked pair
+independently returns `account_update_conflict`. An unrelated existing matched
+recovery-store pair independently returns `owner_recovery_required`. A finalized-origin proposed account is corruption;
+an unrelated matched proposed pair returns `account_update_conflict`. Active
+store plus active/removed account proceeds to request-directed private target
+validation. The public-pair matrix contains independent absent-store, absent-
+account, pair-mismatch, matched-recovery, matched-blocked, unrelated-proposed,
+unrelated-blocked, unrelated-recovery, active/active, and active/removed rows.
+Each row is crossed independently with wrong origin, locator kind, locator
+digest, tombstone, lifecycle, and descriptor. Every public-ineligible
 class returns its closed public result without target distinction, while the
 two active classes proceed and return `credential_cleanup_invalid` for each
 private-invalid cell. A same-context expired pending challenge followed by a
-later matched blocked/recovery public state returns that public result without a
+later matched blocked state returns `account_update_conflict`; a later matched
+recovery-store state returns `owner_recovery_required`. Both return without a
 pending-row lookup-dependent interaction: predecessor state/event and both
 clock fields remain unchanged, and entropy/successor/grant/nonce/cleanup deltas
 are zero. For an active eligible pair and valid private target, deterministic
@@ -388,6 +391,15 @@ test. First/reuse/response-loss/valid-replacement/both-fault/restart/concurrent-
 winner/every-loser paths each prove zero delta in all six effect/external tables,
 zero external calls, and unchanged cleanup; origin grant uses may preexist, so
 `grant_uses` is asserted by delta.
+
+The A006 authority audit has three separate gates. Governance preparation runs
+`pre-review` against the exact 21 active inputs and a PENDING/none F006 record;
+it is not worker authority. After three zero-finding reviews and governance
+follow-up, the worker runs `post-authorization`, which requires normalized final
+review/token/count state and exact execution authority but no attempt evidence.
+After the orchestrator writes attempt/summary/test-results, `post-integration`
+requires 22 active paths and exact structured evidence linkage. Failed F001-F005
+reviews and the historical packet PASS are separate allowlists, never active authority.
 
 ### D-009 Unified Same-Handle Bounded Input
 
@@ -691,10 +703,11 @@ implementation claim and not a claim that the user personally reviewed the
 resulting artifact. `T202C3_A006_PACKET_REVIEW_PASS` authorized only A006's exact
 candidate scopes at governance HEAD `3533054`. Candidate `2241a946` later failed
 spec and QA review and is Returned/Needs Fix with no current write permission.
-The user explicitly resumed A006 repair on 2026-08-31. F001 through F004 packet
+The user explicitly resumed A006 repair on 2026-08-31. F001 through F005 packet
 reviews failed. The user then authorized the orchestrator to approve existing-
 boundary clarifications without requesting approval at each node. Under that
-authority, the orchestrator approved F005's exact clarification; this does not
+authority, the orchestrator approved F006's exact clarification; this does not
 claim user review of the resulting artifact. Only three independent zero-
-finding F005 packet reviews plus a governance follow-up can open the exact
+finding F006 packet reviews plus a governance follow-up and successful post-
+authorization authority audit can open the exact
 production/test/fixture scopes. Later A007/A008 attempts remain closed.

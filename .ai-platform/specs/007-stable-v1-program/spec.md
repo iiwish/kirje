@@ -107,10 +107,13 @@ its checksum, provenance, dependency inventory, and release notes.
   cannot reveal whether a private target exists or is valid. Credential cleanup
   tests cross absent store, absent account, pair mismatch, matched recovery,
   matched blocked store/account, unrelated matched proposed pair, unrelated
-  matched blocked/recovery pair, and active store with active/removed account independently
+  existing matched blocked pair returning `account_update_conflict`, unrelated
+  existing matched recovery-store pair returning `owner_recovery_required`, and
+  active store with active/removed account independently
   with wrong origin, locator kind, locator digest, tombstone, lifecycle, and
-  descriptor. Same-context expired pending plus later matched blocked/recovery
-  performs no pending lookup-dependent interaction and changes no predecessor,
+  descriptor. Same-context expired pending plus later matched blocked returns
+  `account_update_conflict`; later matched recovery store returns
+  `owner_recovery_required`. Each performs no pending lookup-dependent interaction and changes no predecessor,
   event, clock, entropy, successor, grant, nonce, or cleanup state. Active-pair
   rollback uses `OldChallengeExpiredState` and `OldChallengeExpiredEvent`.
   Different-context invalid targets do not interact with predecessors, and

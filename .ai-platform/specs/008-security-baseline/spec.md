@@ -19,13 +19,13 @@
   High and one Medium. The final independent spec, engineering, and QA passes at
   governance HEAD `3533054` returned zero Critical, High, Medium, or Low finding
   and issued `T202C3_A006_PACKET_REVIEW_PASS` for the packet's exact scopes. Its
-  production candidate later failed review; F001 through F004 packet reviews also
+  production candidate later failed review; F001 through F005 packet reviews also
   failed. On 2026-08-31 the user authorized the Delivery Orchestrator to approve
   existing-boundary clarifications. Under that authority, the orchestrator
-  approved F005's phase-specific challenge precedence, reachable-state matrix,
-  complete effect/gate/audit proof, active-pair rollback, and exact-scope
+  approved F006's exact split public rows, three-stage authority audit, complete
+  workspace gates, phase-specific challenge precedence, and exact-scope
   manifest preflight. This records delegated contract approval, not user review
-  of the unseen F005 artifact.
+  of the unseen F006 artifact.
 
 ## Goal
 
@@ -324,8 +324,9 @@ granting mailbox access.
   `owner_recovery_required`; matched blocked store or blocked account returns
   `account_update_conflict`; a finalized-origin account persisted as proposed
   is step-2 corruption, while an unrelated matched proposed pair returns
-  `account_update_conflict`; an unrelated but matched blocked/recovery
-  pair deliberately returns the same public projection. Every reachable public
+  `account_update_conflict`; an unrelated existing matched blocked pair returns
+  `account_update_conflict`, while an unrelated existing matched recovery-store
+  pair returns `owner_recovery_required`. Every reachable public
   class is crossed independently with wrong origin, locator kind, locator
   digest, tombstone, lifecycle, and descriptor and may not distinguish the
   private cell. Active store with active or removed account alone proceeds; each
@@ -333,8 +334,9 @@ granting mailbox access.
   The same-context later-state matrix contains active/removed origin account,
   blocked account/store, and recovery-required store only; proposed is tested
   solely as corruption for that origin.
-  A same-context expired pending challenge followed by a later matched blocked/
-  recovery public state returns the public result with no pending-row lookup-
+  A same-context expired pending challenge followed by a later matched blocked
+  state returns `account_update_conflict`; a later matched recovery-store state
+  returns `owner_recovery_required`. Each returns with no pending-row lookup-
   dependent interaction, unchanged predecessor state/event and both clock
   fields, and zero entropy/successor/grant/nonce/cleanup change. With an active
   eligible pair and valid private target, deterministic faults
