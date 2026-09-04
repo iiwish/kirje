@@ -56,7 +56,8 @@ read at most the limit plus one byte. They are bounded to 1 MiB and summarized
 with a SHA-256 digest and bounded UTF-8 preview. CLI JSON/stdin and configuration
 inputs use the same bounded reader; configuration replacement is private,
 atomic, serialized across Kirje writers, and guarded by the previously opened
-file identity. Message and
+file identity. File contents are synchronized on every platform and the parent
+directory is synchronized on Unix. Message and
 attachment output is always marked `untrusted: true`; Kirje never executes
 attachment content.
 

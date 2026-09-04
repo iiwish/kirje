@@ -254,10 +254,10 @@ pub fn read_stream_bounded<R: Read>(
 
 /// Atomically replace a private regular file relative to one opened parent.
 ///
-/// The temporary file is mode `0600` on Unix and both the file and parent
-/// directory are synchronized before success is returned. Kirje writers sharing
-/// that parent are serialized through a private advisory lock before the
-/// compare-and-swap identity is checked.
+/// The temporary file is mode `0600` on Unix and synchronized before success is
+/// returned. The parent directory is also synchronized on Unix. Kirje writers
+/// sharing that parent are serialized through a private advisory lock before
+/// the compare-and-swap identity is checked.
 ///
 /// # Errors
 ///
@@ -291,11 +291,7 @@ fn replace_private_inner(
             .dir
             .rename(&temporary_name, &parent.dir, &parent.final_component)
             .map_err(BoundaryError::Io)?;
-        parent
-            .dir
-            .try_clone()
-            .and_then(|dir| dir.into_std_file().sync_all())
-            .map_err(BoundaryError::Io)?;
+        sync_parent(parent)?;
         open_existing_regular(parent).map(|opened| opened.identity())
     })();
 
@@ -334,6 +330,31 @@ fn acquire_replace_lock(parent: &OpenedParent) -> Result<std::fs::File, Boundary
     let file = file.into_std();
     fs4::FileExt::lock(&file).map_err(BoundaryError::Io)?;
     Ok(file)
+}
+
+#[cfg(unix)]
+fn sync_parent(parent: &OpenedParent) -> Result<(), BoundaryError> {
+    // cap-std directory capabilities use O_PATH on Linux, which cannot be
+    // fsynced. Reopen the already-held directory capability with read access.
+    let mut options = OpenOptions::new();
+    options.read(true).follow(FollowSymlinks::No);
+    let directory = parent
+        .dir
+        .open_with(".", &options)
+        .map_err(BoundaryError::Io)?;
+    if !directory.metadata().map_err(BoundaryError::Io)?.is_dir() {
+        return Err(BoundaryError::Io(io::Error::other(
+            "opened parent is not a directory",
+        )));
+    }
+    directory.into_std().sync_all().map_err(BoundaryError::Io)
+}
+
+#[cfg(not(unix))]
+const fn sync_parent(_parent: &OpenedParent) -> Result<(), BoundaryError> {
+    // Windows does not provide a portable directory fsync operation. The
+    // temporary file itself is durable before the atomic replacement.
+    Ok(())
 }
 
 fn opened_regular(file: cap_std::fs::File) -> Result<OpenedRegularFile, BoundaryError> {
