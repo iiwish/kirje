@@ -35,13 +35,22 @@ leaves `claimed` state for exact recovery; success records one terminal event.
 - `cargo fmt --all --check`
 - `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`
 - `cargo test --workspace --all-features --locked` (246 tests)
+- `cargo test --workspace --all-features --release --locked` (246 tests)
+- `cargo test --workspace --no-default-features --locked`
+- `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps --locked`
 - `cargo build --workspace --all-features --locked`
 - `cargo build --release --locked -p kirje-cli`
 - `cargo deny check`
+- Gitleaks scans the complete release branch history with only the exact
+  deterministic public-signature fixture allowlisted.
+- Actionlint validates both GitHub Actions workflows.
 - `kirje --version` reports `kirje 1.0.0-alpha.1`.
 - The release binary's `schema` and isolated `doctor` commands return contract
   `2026-09-04.1`; a local macOS arm64 archive contains only the binary and the
   five declared documents, and its SHA-256 checksum verifies.
+- A clean `cargo install --path crates/kirje-cli --locked` smoke validates the
+  installed binary, schema, isolated doctor, create-only duplicate rejection,
+  private `0600` account config, archive manifest, and checksum.
 - CLI contract tests cover create-only account behavior, protocol-clean MCP
   startup, local attachment import, redirected secret/approval rejection, and
   the versioned JSON envelope.

@@ -1,0 +1,16 @@
+title = "Kirje secret scanning"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Deterministic public Ed25519 signatures used by authority tests"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = [
+  '''^crates/kirje-store/tests/fixtures/authority/registry/account_credential_cleanup/signatures\.txt$''',
+]
+regexes = [
+  '''^credential_(?:set|delete)_signature=[0-9a-f]{128}$''',
+]
