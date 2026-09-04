@@ -65,10 +65,11 @@ leaves `claimed` state for exact recovery; success records one terminal event.
   recovery without exposing locator material.
 
 The local gate runs on macOS arm64. CI is configured to run locked tests on
-Linux, macOS, and Windows. Tagged release automation builds Linux and macOS
-x86_64/arm64 plus Windows x86_64 archives and publishes `SHA256SUMS`. Remote CI,
-tag creation, and GitHub release publication remain external handoff actions and
-are not represented as completed local evidence.
+Linux, macOS, and Windows and to build the release binary for every distribution
+target. Tagged release automation builds Linux and macOS x86_64/arm64 plus
+Windows x86_64 archives and publishes `SHA256SUMS`. Remote CI, tag creation, and
+GitHub release publication remain external handoff actions and are not
+represented as completed local evidence.
 
 ## Prerelease Boundaries
 
