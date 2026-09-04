@@ -33,6 +33,8 @@ completed.
   Unix and avoids unsupported directory flushes on Windows.
 - Directory inputs produce the same stable non-regular-file rejection on Unix
   and Windows, including when the platform refuses the initial open.
+- Repository text is checked out with LF endings so embedded schema and fixture
+  bytes remain deterministic on Windows.
 - Credential cleanup does not expose credential presence or locator material.
 
 [1.0.0-alpha.1]: https://github.com/iiwish/kirje/releases/tag/v1.0.0-alpha.1
