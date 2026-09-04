@@ -1,0 +1,462 @@
+schema_version: 1
+packet_id: 008-T202C1-A002
+task_id: T202C1
+feature_id: 008-security-baseline
+mode: execute_one_task
+adapter: codex_worker
+status: accepted
+
+governance_inputs:
+  constitution: .ai-platform/memory/constitution.md
+  product_contract: .ai-platform/docs/product-design.md
+  program_spec: .ai-platform/specs/007-stable-v1-program/spec.md
+  program_plan: .ai-platform/specs/007-stable-v1-program/plan.md
+  feature_spec: .ai-platform/specs/008-security-baseline/spec.md
+  requirements_checklist: .ai-platform/specs/008-security-baseline/checklists/requirements.md
+  feature_plan: .ai-platform/specs/008-security-baseline/plan.md
+  research: .ai-platform/specs/008-security-baseline/research.md
+  data_model: .ai-platform/specs/008-security-baseline/data-model.md
+  contracts:
+    - .ai-platform/specs/008-security-baseline/contracts/authorization.md
+    - .ai-platform/specs/008-security-baseline/contracts/authority-store.md
+  work_graph: .ai-platform/specs/008-security-baseline/tasks.md
+  analysis: .ai-platform/specs/008-security-baseline/analysis.md
+  predecessor_packet: .ai-platform/specs/008-security-baseline/packets/T202B.yaml
+  predecessor_evidence: .ai-platform/evidence/T202B/summary.md
+  approval_gates:
+    constitution: confirmed project contract
+    program_spec_plan_work_graph: confirmed under delegated project-owner authority
+    feature_spec_and_plan: confirmed after independent security reviews
+    requirements_checklist: complete
+    predecessor: T202B Accepted at production commit 43f0788 and evidence commit 9241fe4
+    decomposition: T202C remains an acceptance umbrella; T202C1 through T202C4 are strict serial production tasks
+    analysis: T202C1_A002_PACKET_REVIEW_PASS with zero Critical, High, Medium, or Low finding after A002 closed the first review's three High and one Medium contract gap
+    execution_authority: explicit standing user instruction to continue without per-step approval; failed or missing gates still stop execution
+
+work_unit:
+  title: Grant use and exact config-store enrollment
+  goal: >-
+    Implement one canonical grant-use substrate and owner-authorized store
+    enrollment transaction over the unchanged Authority SQLite v1 schema. The
+    transaction consumes an existing T202B store_enroll receipt, validates the
+    sealed manifest and exact current authority context, binds one StoreId to
+    one bounded private platform location and exact config generation/digest,
+    appends immutable grant/store events, and supports exact crash/restart
+    recovery. It expands the restart validator only for T202C1 rows and events.
+  epic: T101
+  story:
+    - US-003
+  requirements:
+    - FR-003
+    - FR-016
+    - FR-018
+    - NFR-001
+    - NFR-002
+    - NFR-003
+    - NFR-006
+    - NFR-007
+  priority: P0
+  depends_on:
+    - T202B Accepted at production commit 43f0788
+    - T201 Accepted at commit 89cc706
+    - canonical Authority SQLite v1 DDL SHA-256 572a73ba5fa83c763188d804ce9767a3c21373410d8b170f6d97b49be0a86454
+    - confirmed T202C1 lifecycle and event amendments in authority-store.md and data-model.md
+  blocks:
+    - T202C2
+    - T202C umbrella acceptance
+    - T202D
+  parallel: false
+  conflicts_with:
+    - any concurrent authority.rs, grant-use, store-registry, authority-event, clock, or restart-validator change
+    - T202C2 through T202E
+
+stage_boundary:
+  supported_new_operation:
+    - enroll_store using an existing immutable store_enroll receipt
+  challenge_issuance_delta:
+    - supported actions remain exactly T202B's store_enroll, owner_rotate, recovery_rotate, and owner_recover
+    - store_enroll fresh issuance additionally rejects an existing target store ID or existing sealed location digest with config_store_identity_conflict; historical validation never applies this current-state check
+    - no account, credential, cleanup, send, mailbox, or ambiguous_close challenge becomes supported in T202C1
+    - no challenge_effects row is inserted
+  forbidden_stage_operations:
+    - no registered account, account transition, credential cleanup, remote effect, effect claim, invocation, observation, rotation, recovery, invalidation, or audit API
+    - no config file, credential/keyring, runtime, protocol, CLI, MCP, or network access
+    - no grant-use operation that is independently callable without one packet-owned mutation path
+    - no schema, application ID, user version, index, table, trigger, or migration change
+
+governance_amendment:
+  trigger: first independent T202C1 packet feasibility and security review
+  resolved_findings:
+    - historical store-enroll challenges incorrectly depended on current store absence and would reject legal authorized/pending siblings after one enrollment
+    - authorized-to-expired final state was incorrectly conflated with the earlier replacement terminal used for same-context successor ordering
+    - caller used_at conflicted with effective authority time and made no-grant expiry response-loss identity unprovable
+    - O(1) restart validation lacked a high-cardinality legal-history and EXPLAIN QUERY PLAN RED
+  decision:
+    - historical challenge validation is intrinsic only; store/location absence is fresh issuance or first-use context
+    - authorization closes the pending replacement interval; later authorized-to-expired is a separate final-state event
+    - GrantUseRequest has no time; store derives durable used_at and every success timestamp from effective authority time
+    - KIRJE-STORE-ENROLLMENT-INTENT-V1 binds the time-independent exact no-grant request and is the authorized-to-expired event context
+    - add 128-or-more complete legal enrollment history plus indexed-query-plan RED and bounded-memory code review
+  required_review: satisfied by T202C1_A002_PACKET_REVIEW_PASS with zero Critical, High, Medium, or Low finding
+
+codebase_context:
+  local_instructions:
+    - AGENTS.md
+  relevant_files:
+    - crates/kirje-core/src/account.rs
+    - crates/kirje-core/src/authorization.rs
+    - crates/kirje-core/src/mail.rs
+    - crates/kirje-store/src/lib.rs
+    - crates/kirje-store/src/authority.rs
+    - crates/kirje-store/src/authority/schema_v1.sql
+    - crates/kirje-store/tests/authority_authorization.rs
+    - crates/kirje-store/tests/authority_schema.rs
+  existing_patterns:
+    - core owns StoreId, PlatformLocationMaterial, ConfigCas, sealed StoreEnrollManifest, ActionManifest, AuthorizationPayload snapshots, target/action codes, and SHA-256 values
+    - T202B owns immutable challenge/receipt/nonce rows, exact proof replay, effective authority time, paired clock updates, fixed apply lock, BEGIN IMMEDIATE, deterministic test entropy, fault hooks, event transcripts, and streaming restart validation
+    - AuthorityStore opens an existing fixed database without CREATE for every post-bootstrap mutation and repeats classification, schema, anchor, and ready-snapshot validation inside the write transaction
+    - authority errors are stable bounded MailError values and ordinary projections omit private authorization and location material
+    - the workspace uses Rust 1.88, edition 2024, unsafe_code forbid, rusqlite bundled, and locked dependencies
+  interfaces_or_contracts:
+    - .ai-platform/specs/008-security-baseline/contracts/authorization.md#grant-use-and-effect-apply
+    - .ai-platform/specs/008-security-baseline/contracts/authority-store.md#grant-use
+    - .ai-platform/specs/008-security-baseline/contracts/authority-store.md#registry-and-account-transitions
+    - .ai-platform/specs/008-security-baseline/data-model.md#authority-sqlite-v1
+    - .ai-platform/specs/008-security-baseline/data-model.md#authority-events
+
+required_store_api:
+  input_ownership:
+    - define a typed GrantUseRequest carrying only grant_id, receipt_id, action, target_kind, canonical target bytes, and manifest_sha256; it contains no caller time
+    - define a typed EnrollStoreRequest carrying one GrantUseRequest, store_id, PlatformLocationMaterial, location_sha256, config_generation, config_sha256, and observed_at_unix_ms
+    - request construction validates target length/shape, nonnegative UTC-millisecond times, positive generation, bounded canonical location bytes, and location digest before database access
+    - the location digest must equal SHA-256 of PlatformLocationMaterial.canonical_bytes and the sealed manifest ConfigCas location digest
+    - request store ID, location digest, generation, config digest, and unregistered expectation must equal the exact StoreEnrollManifest that produced the immutable challenge manifest digest
+    - outer observed time is a raw clock sample only; the store derives durable use/store/event time from checked effective authority time on first success and never persists raw observed time
+    - config generation is representable in SQLite's signed positive 1..=i64::MAX range; wider core u64 values fail before a write
+    - request types do not implement Debug, Display, Serialize, JsonSchema, or logging helpers
+  projection:
+    - return a closed enrolled-store projection containing only store_id, state active, config_generation, created_at, and updated_at
+    - projection omits location material and digest, config digest, grant and receipt IDs, manifest/signing/proof/signature/nonce/public-key/realm bytes, event detail, SQL, and path
+    - projection does not expose an accessor that recovers any omitted value
+    - projection does not implement Debug, Display, Serialize, JsonSchema, or logging helpers
+  operation:
+    - enroll_store consumes the request under the fixed apply lock and one fresh BEGIN IMMEDIATE transaction
+    - exact committed recovery returns the same store projection and no fresh authority object
+    - store enrollment consumes no entropy and performs no external callback
+
+grant_use_contract:
+  error_precedence:
+    - pure request bounds, typed UUID/action/target/observed-time/generation, canonical location length, and material/digest validation run before database mutation
+    - transaction schema, anchor, accepted-history, event, or atomic-graph corruption returns owner_recovery_required before replay/business errors
+    - a present grant row is next: changed six-field identity returns grant_already_used; exact grant plus missing/mismatched store or event graph is corruption; exact graph then passes the checked clock and recovers
+    - with no grant, exact receipt/challenge and enrollment-intent identity is next; mismatch returns authorization_context_stale with no write
+    - immutable expiry is evaluated and durably recorded before fresh current-authority or store/location occupancy checks, preventing expired authority from probing registry aliases
+    - fresh authority mismatch returns authorization_context_stale; only a current valid first use can return config_store_identity_conflict for a store/location alias
+    - two distinct valid receipts racing the same store/location are not exact retries; the loser returns config_store_identity_conflict with no loser grant/event and never replaces enrolled_receipt_id
+  enrollment_intent:
+    domain: "KIRJE-STORE-ENROLLMENT-INTENT-V1\\0"
+    tags:
+      - "0x0001 grant UUID16"
+      - "0x0002 receipt UUID16"
+      - "0x0003 action u16be"
+      - "0x0004 target-kind u16be"
+      - "0x0005 canonical target bytes"
+      - "0x0006 manifest SHA-256 BLOB32"
+      - "0x0007 store UUID16"
+      - "0x0008 location SHA-256 BLOB32"
+      - "0x0009 config generation u64be"
+      - "0x000a config SHA-256 BLOB32"
+    identity: SHA-256 of the exact transcript; canonical material is represented by its recomputed location digest and raw observed time is absent
+    recovery: immutable challenge, receipt, sealed manifest, and a bounded request can recompute the exact digest even when expiry committed no grant/store row
+  canonical_transcript:
+    domain: "KIRJE-GRANT-USE-V1\\0"
+    tags:
+      - "0x0001 grant UUID16"
+      - "0x0002 receipt UUID16"
+      - "0x0003 action u16be"
+      - "0x0004 target-kind u16be"
+      - "0x0005 canonical target bytes"
+      - "0x0006 manifest SHA-256 BLOB32"
+      - "0x0007 use-time i64be"
+    digest: use_sha256 is SHA-256 of the exact transcript; use_receipt stores those exact bytes
+    parser_rule: recompute or strictly parse every persisted row without serializer-dependent bytes or a duplicate core action/target policy table
+  first_use_checks:
+    - exact receipt_id/grant_id relationship and exact challenge action, target kind/bytes, manifest digest, receipt expiry, challenge state, and no existing grant use
+    - exact ready anchor/journal, active owner key and permission, trust epoch and bundle, challenge key/epoch/bundle, and authority clock
+    - exact sealed StoreEnrollManifest, enrollment-intent digest, and request registry context
+    - derive durable used_at from checked effective authority time; require receipt.verified_at <= used_at <= receipt.expires_at for success
+    - checks are performed in the same transaction before grant/store rows and without entropy
+  exact_recovery:
+    - look up grant_id before fresh expiry/current-context validation
+    - exact match of the six-field grant identity, enrollment intent, stored use transcript, and store graph returns the same enrolled store after later expiry; T202E owns proof that the order remains valid after a finalized invalidation
+    - exact recovery appends no event, changes no identity row, cannot refresh expiry/use time/receipt/store timestamps, and may advance only authority_meta.last_observed_at and updated_at under the checked clock rule
+    - any changed field for an existing grant returns grant_already_used with retryable false and no write
+    - receipt projection state is Used before expiry whenever this exact durable grant exists; exact proof replay after enrollment returns Used even after expiry and never refreshes authority
+  first_use_expiry:
+    - effective_time greater than immutable receipt expires_at changes authorized unclaimed challenge to expired in the same transaction
+    - update only challenge state, paired authority clock, and one exact authorized-to-expired challenge event whose context is enrollment-intent SHA-256; insert no grant or store row
+    - commit before returning authorization_expired
+    - exact restart/concurrent/response-loss retry recomputes the intent from immutable rows plus the request, returns the same error with no second event, and may advance only the paired authority clock
+    - a changed intent after committed expiry returns authorization_context_stale and writes nothing; a changed raw observed time alone is not identity
+    - exact proof replay after this transition still returns the immutable receipt projection in Expired state
+    - tolerated clock rollback never extends expiry or regresses Expired to Unclaimed
+
+store_enrollment_contract:
+  uniqueness:
+    - store_id is globally one-to-one with location_sha256 and both identities are immutable
+    - an existing store ID with different location or an existing location with different store ID returns config_store_identity_conflict
+    - an existing exact store registration must also match the canonical location material bytes, config generation/digest, and enrolled receipt or fail closed
+    - request/sealed-manifest or material/digest disagreement returns authorization_context_stale before mutation
+    - grant replay mismatch takes precedence as grant_already_used once that grant row exists
+  row_shape:
+    - state is active, removed_at is NULL, created_at equals updated_at equals store-derived effective authority time
+    - enrolled_receipt_id is the exact immutable receipt consumed by the grant use
+    - location_material is the exact canonical PlatformLocationMaterial bytes, length 1..4096, and hashes to location_sha256
+    - config generation/digest equal the exact sealed ConfigCas
+  atomicity:
+    - grant row, grant event, store row, store event, paired clock update, and commit are one transaction
+    - any error/fault before commit rolls back all T202C1 rows/events/clock changes
+    - a post-commit response fault leaves a fully recoverable exact enrollment
+
+event_contract:
+  fixed_maps:
+    entity_kind: "4 store, 8 challenge, 9 receipt, 10 grant"
+    event_code: "5 challenge_expired, 7 grant_used, 8 store_enrolled"
+    source: "1 authority_store, 4 runtime"
+    state: "0401 store_active, 0802 challenge_authorized, 0803 challenge_expired, 0901 grant_unclaimed, 0902 grant_used"
+  authorized_unclaimed_expiry:
+    - entity kind 8, code 5, source 1, entity challenge BLOB32
+    - related kind 9 and receipt UUID16; prior 0x0802; next 0x0803
+    - context enrollment-intent SHA-256; receipt field same receipt UUID; occurred_at effective authority time
+  grant_used:
+    - entity kind 10, code 7, source 1, entity grant UUID16
+    - related kind 9 and receipt UUID16; prior 0x0901; next 0x0902
+    - context use_sha256; receipt field same receipt UUID; occurred_at store-derived effective used_at
+  store_enrolled:
+    - immediately follows grant_used with no interleaved event in the transaction
+    - entity kind 4, code 8, source 4, entity store UUID16
+    - related kind 10 and grant UUID16; prior 0x0000; next 0x0401
+    - context use_sha256; receipt field same receipt UUID; occurred_at the same store-derived effective used_at
+  replay:
+    - exact committed enrollment recovery appends neither event
+    - exact no-use expiry recovery appends no second expiry event
+  privacy:
+    - detail contains no location material/digest, config digest, manifest, proof, signature, nonce, public key, credential, mailbox content, endpoint, provider response, or path
+
+restart_validator:
+  intrinsic_history:
+    - stream and preflight every grant_uses and registered_stores row in deterministic indexed or primary-key order with O(1) additional memory beyond one bounded row/transcript
+    - verify SQL storage class/length/range/enum, strict transcript reparse/recompute, canonical material digest, composite FKs, exact receipt/challenge context, and immutable timestamps
+    - historical challenge validation is purely intrinsic and never checks current store/location presence for pending, authorized, expired, used, same-context sibling, or different-context sibling rows
+    - fresh create_challenge issuance and no-grant first use check both store ID and sealed location digest absence; a conflict returns config_store_identity_conflict without entropy or write
+    - in the T202C1 stage only, empty transition/account tables imply current store config equals the initial enrollment manifest; factor this check so T202C2 can replace it with exact transition-chain validation without rewriting enrollment history
+  causal_graph:
+    - a successful store row has exactly one exact grant use and one enrollment receipt; its challenge is authorized/historically used and immutable store/location/enrollment context matches while the T202C1 current config equals the initial manifest
+    - a grant use has exactly one grant_used event; an enrolled store has exactly one immediately following store_enrolled event; details and digests recompute exactly
+    - an expired challenge with a receipt and no grant has exact created, authorized, and authorized-to-expired events in causal sequence
+    - same-context replacement ordering uses authorization as the terminal when a receipt exists and pending-to-expired otherwise; later authorized-to-expired final state may follow an already-created legal successor but must follow authorization
+    - event sequence remains contiguous and sqlite_sequence equals COUNT equals MAX
+  complexity:
+    - a 128-or-more complete legal enrollment-history fixture opens and validates successfully after restart
+    - EXPLAIN QUERY PLAN proves grant/store streams use primary or declared unique indexes and per-entity event lookup uses authority_events_entity_sequence with no temporary sort or correlated full-table scan
+    - implementation retains no history-proportional Vec, map, or set; code review and bounded allocator/RSS evidence are recorded
+  stage_fence:
+    - registered_accounts, challenge_effects, account_transitions, credential_cleanup, remote_effects, effect_claims, effect_invocations, and effect_observations remain exactly empty
+    - trust keys/epochs remain the accepted two-active-key/one-active-epoch root and invalidated/rotated history remains T202E-owned
+  corruption:
+    - malformed, oversized, cross-linked, duplicate-event, orphan-event, wrong-order, wrong-source/state/context/receipt, digest-mismatch, or impossible challenge/grant/store graph returns owner_recovery_required without repair
+    - preflight SQL type/length checks occur before loading bounded blobs into Rust
+
+fault_and_concurrency:
+  deterministic_fault_points:
+    - after grant row insert
+    - after grant event append
+    - after store row insert
+    - after store event append
+    - after paired clock update
+    - before commit
+    - after commit
+    - after authorized-to-expired state update
+    - after expiry clock update
+    - after authorized-to-expired event append
+  required_proofs:
+    - every pre-commit fault leaves no partial grant/store/event/clock mutation
+    - after-commit response loss exact retry returns the same projection with no new event
+    - concurrent exact requests have one durable first writer and one exact recovery result
+    - concurrent store-ID or location contenders have one winner and one stable identity-conflict loser
+    - concurrent distinct receipts over the otherwise same store/location/config have one winner; the loser is config_store_identity_conflict and does not consume its grant
+    - authorized and pending same/different-context sibling challenges remain valid historical rows after one sibling enrolls; restart/proof replay succeeds and every unconsumed loser apply resolves by current expiry/context/identity rules
+    - a stale pre-opened AuthorityStore handle cannot bypass the in-transaction ready snapshot, uniqueness, expiry, or exact-retry checks
+    - enrollment consumes zero deterministic entropy on success, retry, failure, crash, and concurrency paths
+
+test_fixture_contract:
+  - repository tests contain only clearly marked deterministic synthetic public keys, detached signatures, proofs, nonces, IDs, location values, and bounded fixture data; no signing seed or signing API enters Kirje source, Cargo manifests, fixtures, evidence, or commits
+  - when new signatures are required for the 128-or-more legal-history fixture, the worker may use a disposable out-of-repository process with the public RFC8032 synthetic vector solely to precompute detached signatures; the seed and signer source are never copied into the repository or evidence and the disposable files are removed after fixture verification
+  - the committed fixture is bounded, contains no real material, has an evidence-recorded SHA-256, and is independently reverified by AuthorityStore verify_strict while the test builds the exact challenge transcript
+  - fixture generation is not a Kirje product, test-support API, dependency, command, signer surface, or exception to the no-private-key product contract
+
+execution_constraints:
+  branch_or_worktree: codex/v1-roadmap-governance in the current workspace
+  allowed_files:
+    - crates/kirje-store/src/lib.rs
+    - crates/kirje-store/src/authority.rs
+    - crates/kirje-store/tests/authority_registry.rs
+    - crates/kirje-store/tests/fixtures/authority/registry/store_enrollment/**
+  test_targets:
+    - crates/kirje-store/tests/authority_registry.rs
+    - crates/kirje-store/tests/fixtures/authority/registry/store_enrollment/**
+  baseline_hashes:
+    crates/kirje-store/src/lib.rs: 80673cbb8a2975c5ee0729a365cb8f49483d3db135879bafc9d792036bd6c3a2
+    crates/kirje-store/src/authority.rs: 9b6ac9f2370924cb7e3176e6555727836151925c0c1582a806ce243a5f42885f
+    crates/kirje-store/src/authority/schema_v1.sql: 572a73ba5fa83c763188d804ce9767a3c21373410d8b170f6d97b49be0a86454
+  ownership_notes:
+    - governance, packet, evidence, existing accepted tests, schema, Cargo files, core, runtime, CLI, MCP, protocol, skills, and docs are orchestrator-owned or outside scope
+    - worker must not edit governance/evidence, create a commit, accept the task, or delegate further
+    - worker must first verify baseline hashes and stop on mismatch
+    - preserve accepted T201/T202A/T202B behavior and all user work
+    - stop if any allowed production file changes concurrently after RED begins
+  dependency_constraints:
+    - no Cargo.toml, Cargo.lock, feature, dependency, schema, application ID, or user-version change
+    - use existing core typed IDs, PlatformLocationMaterial, ActionManifest projection, SHA-256, rusqlite, fixed lock, transaction, error, and test-support facilities
+    - do not add an ORM, migration framework, async runtime, signer, keyring, network client, serialization package, or unsafe code
+    - tests may contain clearly marked deterministic synthetic public keys, detached signatures, proofs, nonces, IDs, and platform-location values required by accepted T202B-style fixtures; the test_fixture_contract is the only permitted out-of-repository precomputation path, while private signing seeds in the repository/evidence and every real account, endpoint, UID, mailbox, credential, key, authorization artifact, or location identity remain prohibited
+  forbidden_changes:
+    - any file outside execution_constraints.allowed_files
+    - any DDL, core, runtime, CLI, MCP, protocol, Agent Skill, documentation, CI, or release change
+    - any T202C2-T202E operation, newly supported challenge action, challenge effect, account, transition, cleanup, claim, invocation, observation, rotation, recovery, invalidation, or audit API; the exact store_enroll store/location current-state issuance check is the declared exception
+    - any independently callable grant-use mutation that can consume a receipt without atomically performing its packet-owned mutation
+    - caller-controlled production path, entropy, current-context boolean, signer role/key/epoch/bundle, or authority override
+    - serializer-dependent durable bytes, silent repair, unbounded load/allocation, randomness use, external callback, or unsafe Kirje code
+    - private location/config/authorization/event material in ordinary projection, Debug, Display, serialization, log, error, fixture name, or committed output; bounded clearly synthetic test-only fixtures are the sole exception and never enter a normal projection or diagnostic
+
+tdd_plan:
+  required: true
+  exception: null
+  red:
+    preparation:
+      - verify baseline hashes and a clean/explainable worktree
+      - add authority_registry.rs fixtures/helpers only inside allowed scope
+    targets:
+      - missing typed request/projection/enroll_store API and exact grant transcript golden
+      - store-derived effective used_at under raw rollback, first use, exact retry with later raw observation, changed six-field/intent retry, authorized-unclaimed expiry, exact expired retry, proof replay after expiry, and rollback-tolerance matrix
+      - receipt projection priority: Unclaimed before use, Used after enrollment, Used after later expiry, and Expired only for an expired receipt with no durable use
+      - request/manifest/material mismatch and both-direction store/location/config/receipt uniqueness matrix
+      - every declared pre/post-commit fault, response-loss recovery, exact concurrency, conflicting concurrency, stale-handle, and zero-entropy matrix
+      - same-context authorized sibling and different-context pending sibling survive another receipt's enrollment; restart/proof replay succeeds and loser apply is deterministic
+      - authorize A then create successor B then expire A, including equal effective timestamps; replacement-terminal/final-state event order, swaps, omissions, and duplicates
+      - 128-or-more complete legal enrollment histories plus EXPLAIN QUERY PLAN for PK/UNIQUE streams and authority_events_entity_sequence with no temp sort/correlated scan
+      - event detail/order/cardinality and restart corruption/oversize/orphan/cross-link/stage-fence/current-config matrix
+      - request and projection negative trait/API privacy review plus bounded output/error scan
+    command: cargo test -p kirje-store --test authority_registry --all-features --locked
+    expected_failure: >-
+      The new target fails only because the T202C1 API, grant transcript,
+      enrollment transaction, event shapes, or incremental restart validator is
+      absent. Existing-test, syntax, dependency, schema, toolchain, or
+      environment failures are not valid RED evidence.
+  green:
+    command: cargo test -p kirje-store --test authority_registry --all-features --locked
+    expected_signal: all T202C1 first/retry/expiry/uniqueness/fault/concurrency/event/restart/privacy targets pass
+  refactor:
+    command: cargo test -p kirje-store --all-features --locked
+    expected_signal: T202A/T202B and T202C1 remain green without duplicate core policy/parser or schema drift
+
+validation_loop:
+  commands:
+    - cargo fmt --all --check
+    - cargo test -p kirje-store --test authority_registry --all-features --locked
+    - cargo test -p kirje-store --test authority_authorization --all-features --locked
+    - cargo test -p kirje-store --test authority_schema --all-features --locked
+    - cargo test -p kirje-store --all-features --locked
+    - cargo test -p kirje-store --no-default-features --locked
+    - cargo clippy -p kirje-store --all-targets --all-features --locked -- -D warnings
+    - cargo +1.88 check -p kirje-store --all-features --locked
+    - cargo test --workspace --all-features --locked
+    - cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+    - cargo build --workspace --all-features --locked
+    - cargo deny check licenses bans sources
+    - sh -c 'test "$(shasum -a 256 crates/kirje-store/src/authority/schema_v1.sql | cut -d " " -f1)" = "572a73ba5fa83c763188d804ce9767a3c21373410d8b170f6d97b49be0a86454"'
+    - python3 /Users/iiwish/.codex/skills/ai-delivery-governor/scripts/validate_delivery_artifacts.py --root /Users/iiwish/self/kirje --feature-id 008-security-baseline
+  retry_budget: 2
+  failure_policy:
+    first_failure: fix only a T202C1 contract or implementation defect within allowed files and rerun the narrowest failing command
+    second_failure: classify scope, spec, dependency, MSRV, concurrency, or environment blocker and stop if the packet must change
+    beyond_budget: return blocked attempt output without weakening receipt, expiry, exact-replay, transaction, event, restart, privacy, or schema guarantees
+  no_downgrade:
+    - do not delete, ignore, serialize around, or relax a failing security assertion
+    - do not add caller authority overrides or duplicate core manifest/action/target parsing
+    - do not make grant use independently callable or perform config/keyring/network work
+    - do not silently repair malformed rows, event gaps, cross-links, or partial state
+    - do not skip Rust 1.88, no-default-features, accepted authority tests, or canonical DDL checks
+  known_external_advisory:
+    command: cargo deny check advisories
+    expected_signal: only the pre-existing yanked chacha20 0.10.1 chain through io-imap; any additional advisory or dependency drift blocks acceptance
+
+definition_of_done:
+  - typed nonlogging requests bind exact grant, receipt, target, manifest, store, location material/digest, and config context while raw observed time remains clock input only; request and projection expose none of the prohibited traits
+  - first use derives durable time from effective authority time and requires an unexpired immutable receipt plus exact current context; exact durable use recovery precedes fresh context, changed retry returns grant_already_used, and receipt state remains Used after later expiry
+  - authorized-unclaimed expiry commits exact enrollment-intent-bound final state, paired clock, and one causal event before returning authorization_expired; exact retry and proof replay are historical and nonrefreshing
+  - one transaction and fixed lock commit exact grant/use event/store/enrollment event/clock state; pre-commit faults roll back and post-commit response loss is exactly recoverable
+  - store ID and location digest are immutable one-to-one identities; manifest/material/config/receipt mismatches fail with the declared stable code and no partial state
+  - restart validation is intrinsic for historical sibling challenges, distinguishes replacement terminals from later final-state expiry, streams 128-or-more complete histories with indexed plans and O(1) memory, proves exact grant/store/challenge/receipt/event causality, and rejects later-stage or malformed graphs without repair
+  - normal projections/errors/logs expose no location, config, grant/receipt, authorization, event-detail, SQL, path, or real mailbox/account material
+  - T202A/T202B, no-default-features, format, package/workspace test/Clippy/build, Rust 1.88, cargo-deny license/ban/source, artifact, and canonical schema gates pass with no Cargo/core/schema drift; advisory output is unchanged and separately recorded
+
+evidence_contract:
+  owner: delivery_orchestrator
+  worker_output_only: true
+  summary: .ai-platform/evidence/T202C1/summary.md
+  diff: .ai-platform/evidence/T202C1/diff.patch
+  test_results: .ai-platform/evidence/T202C1/test-results.md
+  attempt: .ai-platform/evidence/T202C1/attempts/T202C1-A001.md
+  required:
+    - exact changed-file scope, baseline hashes, and diff summary
+    - RED command/exit and contract-relevant failure before production edits
+    - GREEN, refactor, and every validation command result
+    - full workspace test/Clippy/build, cargo-deny license/ban/source, known advisory inventory, and artifact-validator result
+    - grant transcript byte golden, strict row reparse/recompute, request-shape, and exact/changed replay evidence
+    - enrollment-intent byte golden plus expiry, effective-time/raw-rollback, committed error, exact/changed intent retry, proof replay, and clock-only high-water matrix
+    - store/location/config/receipt uniqueness, mismatch precedence, fault, response-loss, concurrency, stale-handle, and zero-entropy matrices
+    - sibling-history and replacement-terminal/final-state event numeric/detail/digest/order/cardinality plus restart causal/corruption/stage-fence/current-config matrix
+    - 128-or-more complete history, EXPLAIN indexed plan, O(1) streaming, SQL preflight/bounded-load, request/projection trait/API, ordinary-output, error/log, path/SQL, private-material, and secret scans
+    - canonical DDL digest, no schema/Cargo/core change proof, residual risks, and exact T202C2/T202D follow-up ownership
+
+review_contract:
+  required_passes:
+    - spec compliance against FR-003, FR-016, FR-018, mapped NFRs, and the T202C1 contract amendment
+    - authorization/grant transcript, expiry, replay-order, authority-context, and stable-error review
+    - SQLite transaction, uniqueness, crash, concurrency, event, causal restart, bounded-load, and corruption review
+    - API ownership, nonlogging private inputs, projection/privacy, and stage-fence review
+    - bug and code-quality review
+    - QA acceptance of first/retry/expiry/alias/fault/concurrency/restart matrices
+  blocking_findings:
+    - independently callable grant use, caller authority boolean/override, duplicate core action/manifest/target parser, or entropy/external side effect
+    - caller-supplied durable use time, raw observed time persisted as identity/event time, fresh expiry/current-context checks before exact durable grant recovery, authority refresh on retry, changed retry not returning grant_already_used, or expired authority revived
+    - request does not bind exact sealed manifest/material/store/config context or location material does not recompute its digest
+    - store/location alias, changed enrollment replacement, partial transaction, multiple concurrency winners, stale-handle bypass, or nondeterministic error precedence
+    - incorrect enrollment-intent or event code/source/state/detail/receipt/context/order/cardinality, authorized-to-expired treated as the replacement terminal, or event graph not causally linked to exact rows
+    - current registry presence invalidates an intrinsic historical sibling, successful enrollment invalidates its own challenge, restart validation lacks the 128-row indexed proof or is proportional-memory/unbounded, or later-stage rows become accepted
+    - schema/Cargo/core/predecessor drift, missing valid RED, or scope outside allowed files
+    - private location/config/authorization/event/path/SQL/real mailbox/account/provider material in ordinary API/output/log/error/fixture/commit
+  acceptance_rule: >-
+    The worker never accepts the task. After independent spec, security,
+    engineering, and QA passes plus fresh required gates, the orchestrator may
+    record evidence-based acceptance under the user's explicit standing
+    project-owner delegation.
+
+handoff:
+  external_issue: null
+  pull_request: null
+  finish_options:
+    - packetize T202C2 after T202C1 acceptance
+    - create a bounded review-fix attempt within the same allowed files
+    - stop on a governance, dependency, environment, or security blocker
+
+stop_conditions:
+  - current branch does not contain production commit 43f0788 and evidence commit 9241fe4
+  - T202B accepted behavior, packet/evidence, canonical schema, fixed event map, or T202C1 contract amendment is missing, stale, or internally inconsistent
+  - any Critical, High, or Medium packet review finding remains unresolved
+  - baseline production hash differs before RED, or any allowed production file changes concurrently after RED begins
+  - RED is not contract-relevant, or production code changes before RED
+  - implementation requires any file, dependency, schema, core API, action issuance, or operation outside allowed scope
+  - worker cannot prove exact durable recovery-before-current-context order, committed expiry error, one-to-one store/location identity, transaction atomicity, event causality, bounded restart validation, or zero entropy
+  - any secret, real account, credential, endpoint, UID, mailbox content, private signing seed/artifact, real proof/signature/nonce, or real platform location enters repository source, fixture, evidence, log, output, or commit; clearly marked bounded synthetic public/signature/proof/nonce/location test vectors and the disposable out-of-repository precomputation in test_fixture_contract are the only exceptions

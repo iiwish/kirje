@@ -3,7 +3,7 @@
 ## Metadata
 
 - Status: Confirmed
-- Updated: 2026-08-27
+- Updated: 2026-08-30
 
 ## Decisions
 
@@ -86,3 +86,24 @@ the SMTP library.
 The archived desktop repository is a source of protocol knowledge and sanitized
 tests, not an architecture to preserve. React, Tauri, and desktop lifecycle code
 are not migrated.
+
+### Incremental V1 Checkpoints
+
+Kirje uses one confirmed 1.0 product contract and one program work graph.
+Security, mailbox convergence, delivery reconciliation, policy, stable
+contracts, distribution, hardening, and stable publication are incremental
+checkpoints under that program rather than independent release-governance
+stacks.
+
+Implementation batches run focused RED/GREEN and changed-crate validation.
+Complete workspace, dependency, migration, CI, conformance, platform, and
+artifact gates run at their checkpoint boundary. Every batch produces a
+reviewed commit; every tagged checkpoint produces usable artifacts and an
+evidence summary. Same-attempt validation can be reused only while exact
+content hashes prove that relevant code, tests, fixtures, schema, dependencies,
+toolchain, and configuration are unchanged.
+
+The current account-create diff is preserved as review input. It is not
+discarded or expanded during governance. The unchanged yanked transitive
+`chacha20 0.10.1` dependency is a named Security Alpha remediation and cannot
+be hidden by the checkpoint model.

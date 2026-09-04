@@ -2,7 +2,6 @@
 
 use std::{
     fs,
-    io::Write,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -19,6 +18,10 @@ use kirje_core::{
     SendAttemptError, SendPlan, SendPlanSummary, SendReceipt, SendRequest, SyncCursor, digest_json,
     operation_record,
 };
+use kirje_local_io::{
+    BoundaryError, FileObjectIdentity, ReplaceExpectation, open_existing_regular, open_parent,
+    read_bounded, replace_private,
+};
 use schemars::JsonSchema;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
@@ -27,6 +30,7 @@ use uuid::Uuid;
 const CONFIG_VERSION: u16 = 1;
 const KEYRING_SERVICE: &str = "dev.kirje.mail";
 const MAX_ACCOUNTS: usize = 100;
+const MAX_CONFIG_BYTES: usize = 1024 * 1024;
 
 /// Storage contract for non-secret account configuration.
 pub trait AccountRepository: Send + Sync {
@@ -44,12 +48,12 @@ pub trait AccountRepository: Send + Sync {
     /// Returns a stable configuration error when storage cannot be read.
     fn get(&self, account_id: &str) -> Result<Option<MailAccountConfig>, MailError>;
 
-    /// Insert or replace one validated account using an atomic write.
+    /// Insert one validated account using an atomic write.
     ///
     /// # Errors
     ///
     /// Returns a stable validation or configuration error.
-    fn upsert(&self, account: MailAccountConfig) -> Result<(), MailError>;
+    fn create(&self, account: MailAccountConfig) -> Result<(), MailError>;
 }
 
 /// Storage contract for credentials. Implementations must never expose values
@@ -86,6 +90,7 @@ pub trait SecretStore: Send + Sync {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 struct ConfigDocument {
     version: u16,
     #[serde(default)]
@@ -136,9 +141,40 @@ impl TomlAccountRepository {
     }
 
     fn load(&self) -> Result<ConfigDocument, MailError> {
-        match fs::read_to_string(&self.path) {
-            Ok(source) => {
-                let document: ConfigDocument = toml::from_str(&source).map_err(|_| {
+        self.load_with_identity().map(|(document, _)| document)
+    }
+
+    fn load_with_identity(
+        &self,
+    ) -> Result<(ConfigDocument, Option<FileObjectIdentity>), MailError> {
+        let parent = match open_parent(&self.path) {
+            Ok(parent) => parent,
+            Err(BoundaryError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok((ConfigDocument::default(), None));
+            }
+            Err(_) => {
+                return Err(config_read_error(
+                    "cannot open account configuration parent",
+                ));
+            }
+        };
+        match open_existing_regular(&parent) {
+            Ok(mut opened) => {
+                let identity = opened.identity();
+                let bytes = read_bounded(&mut opened, MAX_CONFIG_BYTES).map_err(|error| {
+                    if matches!(error, BoundaryError::ResourceLimit { .. }) {
+                        MailError::new(
+                            MailErrorCode::ResourceLimit,
+                            "account configuration exceeds the 1 MiB limit",
+                            false,
+                        )
+                    } else {
+                        config_read_error("cannot read account configuration")
+                    }
+                })?;
+                let source = std::str::from_utf8(&bytes)
+                    .map_err(|_| config_read_error("account configuration must be valid UTF-8"))?;
+                let document: ConfigDocument = toml::from_str(source).map_err(|_| {
                     MailError::new(
                         MailErrorCode::ConfigRead,
                         "account configuration is invalid TOML",
@@ -162,20 +198,23 @@ impl TomlAccountRepository {
                 for account in &document.accounts {
                     account.validate()?;
                 }
-                Ok(document)
+                Ok((document, Some(identity)))
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                Ok(ConfigDocument::default())
+            Err(BoundaryError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+                Ok((ConfigDocument::default(), None))
             }
-            Err(_) => Err(MailError::new(
-                MailErrorCode::ConfigRead,
-                "cannot read account configuration",
-                false,
-            )),
+            Err(BoundaryError::LinkRejected | BoundaryError::NotRegularFile) => Err(
+                config_read_error("account configuration must be a regular file, not a link"),
+            ),
+            Err(_) => Err(config_read_error("cannot read account configuration")),
         }
     }
 
-    fn save(&self, document: &ConfigDocument) -> Result<(), MailError> {
+    fn save(
+        &self,
+        document: &ConfigDocument,
+        identity: Option<FileObjectIdentity>,
+    ) -> Result<(), MailError> {
         let parent = self
             .path
             .parent()
@@ -183,25 +222,19 @@ impl TomlAccountRepository {
             .unwrap_or_else(|| Path::new("."));
         fs::create_dir_all(parent).map_err(|_| config_write_error())?;
         let serialized = toml::to_string_pretty(document).map_err(|_| config_write_error())?;
-        let mut temporary =
-            tempfile::NamedTempFile::new_in(parent).map_err(|_| config_write_error())?;
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt as _;
-            temporary
-                .as_file()
-                .set_permissions(fs::Permissions::from_mode(0o600))
-                .map_err(|_| config_write_error())?;
-        }
-
-        temporary
-            .write_all(serialized.as_bytes())
-            .and_then(|()| temporary.as_file().sync_all())
-            .map_err(|_| config_write_error())?;
-        temporary
-            .persist(&self.path)
-            .map_err(|_| config_write_error())?;
+        let opened_parent = open_parent(&self.path).map_err(|_| config_write_error())?;
+        let expected = identity.map_or(ReplaceExpectation::Missing, ReplaceExpectation::Matches);
+        replace_private(&opened_parent, expected, serialized.as_bytes()).map_err(|error| {
+            if matches!(error, BoundaryError::IdentityMismatch) {
+                MailError::new(
+                    MailErrorCode::ConfigStoreIdentityConflict,
+                    "account configuration changed during mutation",
+                    false,
+                )
+            } else {
+                config_write_error()
+            }
+        })?;
         Ok(())
     }
 }
@@ -221,29 +254,32 @@ impl AccountRepository for TomlAccountRepository {
             .find(|account| account.id == account_id))
     }
 
-    fn upsert(&self, account: MailAccountConfig) -> Result<(), MailError> {
+    fn create(&self, account: MailAccountConfig) -> Result<(), MailError> {
         account.validate()?;
-        let mut document = self.load()?;
-        if let Some(existing) = document
+        let (mut document, identity) = self.load_with_identity()?;
+        if document
             .accounts
-            .iter_mut()
-            .find(|candidate| candidate.id == account.id)
+            .iter()
+            .any(|candidate| candidate.id == account.id)
         {
-            *existing = account;
-        } else {
-            if document.accounts.len() >= MAX_ACCOUNTS {
-                return Err(MailError::new(
-                    MailErrorCode::ResourceLimit,
-                    "account configuration cannot exceed 100 accounts",
-                    false,
-                ));
-            }
-            document.accounts.push(account);
+            return Err(MailError::new(
+                MailErrorCode::AccountAlreadyExists,
+                "account id is already configured",
+                false,
+            ));
         }
+        if document.accounts.len() >= MAX_ACCOUNTS {
+            return Err(MailError::new(
+                MailErrorCode::ResourceLimit,
+                "account configuration cannot exceed 100 accounts",
+                false,
+            ));
+        }
+        document.accounts.push(account);
         document
             .accounts
             .sort_by(|left, right| left.id.cmp(&right.id));
-        self.save(&document)
+        self.save(&document, identity)
     }
 }
 
@@ -446,16 +482,16 @@ impl KirjeRuntime {
         }
     }
 
-    /// Save a validated non-secret account configuration.
+    /// Create a validated non-secret account configuration without replacement.
     ///
     /// # Errors
     ///
     /// Returns validation or configuration persistence errors.
-    pub fn upsert_account(
+    pub fn create_account(
         &self,
         account: MailAccountConfig,
     ) -> Result<MailAccountConfig, MailError> {
-        self.accounts.upsert(account.clone())?;
+        self.accounts.create(account.clone())?;
         Ok(account)
     }
 
@@ -1297,6 +1333,10 @@ fn config_write_error() -> MailError {
     )
 }
 
+fn config_read_error(message: &'static str) -> MailError {
+    MailError::new(MailErrorCode::ConfigRead, message, false)
+}
+
 fn secret_store_error() -> MailError {
     MailError::new(
         MailErrorCode::SecretStoreUnavailable,
@@ -1600,7 +1640,7 @@ mod tests {
         let accounts = Arc::new(TomlAccountRepository::new(
             directory.path().join("accounts.toml"),
         ));
-        accounts.upsert(account()).expect("account");
+        accounts.create(account()).expect("account");
         KirjeRuntime::with_services(
             accounts,
             secrets,
@@ -1625,7 +1665,7 @@ mod tests {
         let accounts = Arc::new(TomlAccountRepository::new(
             directory.path().join("accounts.toml"),
         ));
-        accounts.upsert(account()).expect("account");
+        accounts.create(account()).expect("account");
         KirjeRuntime::with_services_and_mutator(
             accounts,
             secrets,
@@ -1825,14 +1865,18 @@ mod tests {
         let repository = TomlAccountRepository::new(path.clone());
         let mut second = account();
         second.id = "zeta".to_owned();
-        repository.upsert(second).expect("save zeta");
-        repository.upsert(account()).expect("save work");
+        repository.create(second).expect("save zeta");
+        repository.create(account()).expect("save work");
 
         let accounts = repository.list().expect("load accounts");
         assert_eq!(accounts[0].id, "work");
         let source = fs::read_to_string(path).expect("read config");
         assert!(!source.contains("very-secret"));
         assert!(!source.contains("credential_value"));
+        assert_eq!(
+            repository.create(account()).expect_err("duplicate").code,
+            MailErrorCode::AccountAlreadyExists
+        );
     }
 
     #[test]
@@ -1843,7 +1887,7 @@ mod tests {
         ));
         let secrets = Arc::new(MemorySecrets::default());
         let runtime = KirjeRuntime::new(repository, secrets, Arc::new(NoopReader));
-        runtime.upsert_account(account()).expect("save account");
+        runtime.create_account(account()).expect("save account");
         runtime
             .set_secret("work", &SecretString::from("very-secret".to_owned()))
             .expect("save secret");
@@ -1884,7 +1928,7 @@ mod tests {
         let repository = Arc::new(TomlAccountRepository::new(
             directory.path().join("accounts.toml"),
         ));
-        repository.upsert(account()).expect("account");
+        repository.create(account()).expect("account");
         let index = Arc::new(
             kirje_store::SqliteMessageIndex::open(directory.path().join("index.sqlite3"))
                 .expect("index"),
@@ -1915,7 +1959,7 @@ mod tests {
         let repository = Arc::new(TomlAccountRepository::new(
             directory.path().join("accounts.toml"),
         ));
-        repository.upsert(account()).expect("account");
+        repository.create(account()).expect("account");
         let secrets = Arc::new(MemorySecrets::default());
         secrets
             .set("work", &SecretString::from("secret".to_owned()))

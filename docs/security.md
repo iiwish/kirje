@@ -50,10 +50,24 @@ with provider state before taking further action.
 
 Attachment reads require an exact server-returned part id, return at most 1 MiB
 of decoded content as base64, never write a file, and use the same `BODY.PEEK`
-path. Local attachment imports are regular files only, bounded to 1 MiB, and
-summarized with a SHA-256 digest and bounded UTF-8 preview. Message and
+path. Local attachment imports use a capability anchored to one opened parent,
+reject a linked or non-regular final component, validate the open handle, and
+read at most the limit plus one byte. They are bounded to 1 MiB and summarized
+with a SHA-256 digest and bounded UTF-8 preview. CLI JSON/stdin and configuration
+inputs use the same bounded reader; configuration replacement is private,
+atomic, serialized across Kirje writers, and guarded by the previously opened
+file identity. File contents are synchronized on every platform and the parent
+directory is synchronized on Unix. Message and
 attachment output is always marked `untrusted: true`; Kirje never executes
 attachment content.
+
+The authority store contains a closed credential-cleanup lifecycle. A signed
+cleanup grant and the `ready -> claimed` transition commit atomically. Only the
+winner receives a non-cloneable, non-serializable delete permit. The permit can
+invoke the unpublished delete-only keyring adapter once and then record
+`claimed -> deleted`; a backend failure remains `claimed` for exact recovery.
+No public cleanup API exposes the service, username, locator bytes, or a
+credential-presence result.
 
 MCP tools are task-level, narrowly scoped, and annotated with read-only,
 destructive, idempotency, and open-world hints. `mailbox_sync` and draft tools

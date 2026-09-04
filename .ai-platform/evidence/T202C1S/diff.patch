@@ -1,0 +1,1407 @@
+diff --git a/crates/kirje-store/src/authority.rs b/crates/kirje-store/src/authority.rs
+index 0731e43..b0e71b0 100644
+--- a/crates/kirje-store/src/authority.rs
++++ b/crates/kirje-store/src/authority.rs
+@@ -38,7 +38,7 @@ const GRANT_USE_DOMAIN: &[u8] = b"KIRJE-GRANT-USE-V1\0";
+ const STORE_ENROLLMENT_INTENT_DOMAIN: &[u8] = b"KIRJE-STORE-ENROLLMENT-INTENT-V1\0";
+ const AUTHORIZATION_LIFETIME_MS: i64 = 900_000;
+ 
+-const TABLES: [&str; 17] = [
++const TABLES: [&str; 20] = [
+     "account_transitions",
+     "authority_events",
+     "authority_keys",
+@@ -52,7 +52,10 @@ const TABLES: [&str; 17] = [
+     "effect_observations",
+     "grant_uses",
+     "nonce_uses",
++    "registered_account_versions",
+     "registered_accounts",
++    "registered_credentials",
++    "registered_store_versions",
+     "registered_stores",
+     "remote_effects",
+     "trust_epochs",
+@@ -493,6 +496,7 @@ pub enum AuthorityFaultPoint {
+     GrantUseInserted,
+     GrantUsedEvent,
+     RegisteredStoreInserted,
++    RegisteredStoreVersionInserted,
+     StoreEnrolledEvent,
+     EnrollmentClockUpdated,
+     EnrollmentBeforeCommit,
+@@ -655,6 +659,7 @@ enum TestFaultPoint {
+     GrantUseInserted,
+     GrantUsedEvent,
+     RegisteredStoreInserted,
++    RegisteredStoreVersionInserted,
+     StoreEnrolledEvent,
+     EnrollmentClockUpdated,
+     EnrollmentBeforeCommit,
+@@ -693,6 +698,7 @@ impl From<TestFaultPoint> for AuthorityFaultPoint {
+             TestFaultPoint::GrantUseInserted => Self::GrantUseInserted,
+             TestFaultPoint::GrantUsedEvent => Self::GrantUsedEvent,
+             TestFaultPoint::RegisteredStoreInserted => Self::RegisteredStoreInserted,
++            TestFaultPoint::RegisteredStoreVersionInserted => Self::RegisteredStoreVersionInserted,
+             TestFaultPoint::StoreEnrolledEvent => Self::StoreEnrolledEvent,
+             TestFaultPoint::EnrollmentClockUpdated => Self::EnrollmentClockUpdated,
+             TestFaultPoint::EnrollmentBeforeCommit => Self::EnrollmentBeforeCommit,
+@@ -1389,13 +1395,16 @@ impl AuthorityStore {
+             if !store.matches_request(&request, &enrollment) {
+                 return Err(authorization_context_stale_error());
+             }
++            let version = load_store_version_by_receipt(&transaction, receipt.receipt_id)?
++                .ok_or_else(recovery_error)?;
++            validate_initial_store_version(&version, &store, &enrollment, &receipt)?;
+             let effective_time =
+                 checked_clock(loaded.last_observed_at, request.observed_at_unix_ms)?;
+             utc_millis(effective_time)?;
+             observe_clock_pair(&transaction, effective_time)?;
+             transaction.commit().map_err(|_| store_write_error())?;
+             secure_authority_files(&self.home.database)?;
+-            return enrolled_store_projection(&store);
++            return enrolled_store_projection(&version);
+         }
+ 
+         let receipt = load_receipt_by_id(&transaction, request.grant_use.receipt_id)?
+@@ -1511,6 +1520,28 @@ impl AuthorityStore {
+         }
+         self.test_hooks
+             .fault(TestFaultPoint::RegisteredStoreInserted)?;
++        let inserted = transaction
++            .execute(
++                "INSERT INTO registered_store_versions
++                 (store_id,location_sha256,config_generation,config_sha256,
++                  enrolled_receipt_id,committed_transition_id,created_at)
++                 VALUES(?1,?2,?3,?4,?5,NULL,?6)",
++                params![
++                    request.store_id.as_bytes(),
++                    request.location_sha256.as_bytes(),
++                    i64::try_from(request.config_generation.get())
++                        .map_err(|_| authorization_context_stale_error())?,
++                    request.config_sha256.as_bytes(),
++                    receipt.receipt_id.as_bytes(),
++                    effective_time,
++                ],
++            )
++            .map_err(|_| store_write_error())?;
++        if inserted != 1 {
++            return Err(store_write_error());
++        }
++        self.test_hooks
++            .fault(TestFaultPoint::RegisteredStoreVersionInserted)?;
+         insert_store_enrolled_event(
+             &transaction,
+             request.store_id,
+@@ -1529,17 +1560,14 @@ impl AuthorityStore {
+         secure_authority_files(&self.home.database)?;
+         self.test_hooks
+             .fault(TestFaultPoint::EnrollmentAfterCommit)?;
+-        enrolled_store_projection(&StoredRegisteredStore {
++        enrolled_store_projection(&StoredRegisteredStoreVersion {
+             store_id: request.store_id,
+-            location_material: request.location_bytes,
+             location_sha256: request.location_sha256,
+             config_generation: request.config_generation,
+             config_sha256: request.config_sha256,
+-            state: "active".to_owned(),
+-            enrolled_receipt_id: receipt.receipt_id,
++            enrolled_receipt_id: Some(receipt.receipt_id),
++            committed_transition_id: None,
+             created_at: effective_time,
+-            updated_at: effective_time,
+-            removed_at: None,
+         })
+     }
+ 
+@@ -1715,6 +1743,16 @@ struct StoredRegisteredStore {
+     removed_at: Option<i64>,
+ }
+ 
++struct StoredRegisteredStoreVersion {
++    store_id: StoreId,
++    location_sha256: Sha256Digest,
++    config_generation: NonZeroU64,
++    config_sha256: Sha256Digest,
++    enrolled_receipt_id: Option<AuthorizationReceiptId>,
++    committed_transition_id: Option<Vec<u8>>,
++    created_at: i64,
++}
++
+ impl StoredRegisteredStore {
+     fn matches_request(
+         &self,
+@@ -1734,6 +1772,28 @@ impl StoredRegisteredStore {
+     }
+ }
+ 
++fn validate_initial_store_version(
++    version: &StoredRegisteredStoreVersion,
++    store: &StoredRegisteredStore,
++    enrollment: &StoreEnrollmentContext,
++    receipt: &StoredReceipt,
++) -> Result<(), MailError> {
++    utc_millis(version.created_at)?;
++    if version.store_id != store.store_id
++        || version.store_id != enrollment.store_id
++        || version.location_sha256 != store.location_sha256
++        || version.location_sha256 != enrollment.location_sha256
++        || version.config_generation != enrollment.config_generation
++        || version.config_sha256 != enrollment.config_sha256
++        || version.enrolled_receipt_id != Some(receipt.receipt_id)
++        || version.committed_transition_id.is_some()
++        || version.created_at != store.created_at
++    {
++        return Err(recovery_error());
++    }
++    Ok(())
++}
++
+ #[derive(Clone, Copy)]
+ struct StoreEnrollmentContext {
+     store_id: StoreId,
+@@ -2226,6 +2286,46 @@ fn store_preflight(connection: &Connection) -> Result<(), MailError> {
+     Ok(())
+ }
+ 
++fn registry_parent_preflight(connection: &Connection) -> Result<(), MailError> {
++    let malformed: i64 = connection
++        .query_row(
++            "SELECT
++                (SELECT COUNT(*) FROM registered_credentials WHERE
++                    typeof(credential_id)<>'blob' OR length(credential_id)<>16 OR
++                    typeof(account_id)<>'blob' OR length(account_id)<>16 OR
++                    typeof(store_id)<>'blob' OR length(store_id)<>16 OR
++                    typeof(created_transition_id)<>'blob' OR length(created_transition_id)<>16 OR
++                    typeof(created_at)<>'integer' OR created_at<0) +
++                (SELECT COUNT(*) FROM registered_store_versions WHERE
++                    typeof(store_id)<>'blob' OR length(store_id)<>16 OR
++                    typeof(location_sha256)<>'blob' OR length(location_sha256)<>32 OR
++                    typeof(config_generation)<>'integer' OR config_generation<=0 OR
++                    typeof(config_sha256)<>'blob' OR length(config_sha256)<>32 OR
++                    (enrolled_receipt_id IS NOT NULL AND
++                     (typeof(enrolled_receipt_id)<>'blob' OR length(enrolled_receipt_id)<>16)) OR
++                    (committed_transition_id IS NOT NULL AND
++                     (typeof(committed_transition_id)<>'blob' OR length(committed_transition_id)<>16)) OR
++                    ((enrolled_receipt_id IS NULL)=(committed_transition_id IS NULL)) OR
++                    typeof(created_at)<>'integer' OR created_at<0) +
++                (SELECT COUNT(*) FROM registered_account_versions WHERE
++                    typeof(account_id)<>'blob' OR length(account_id)<>16 OR
++                    typeof(store_id)<>'blob' OR length(store_id)<>16 OR
++                    typeof(account_generation)<>'integer' OR account_generation<=0 OR
++                    typeof(credential_id)<>'blob' OR length(credential_id)<>16 OR
++                    typeof(binding_sha256)<>'blob' OR length(binding_sha256)<>32 OR
++                    typeof(committed_transition_id)<>'blob' OR
++                    length(committed_transition_id)<>16 OR
++                    typeof(created_at)<>'integer' OR created_at<0)",
++            [],
++            |row| row.get(0),
++        )
++        .map_err(|_| store_read_error())?;
++    if malformed != 0 {
++        return Err(recovery_error());
++    }
++    Ok(())
++}
++
+ fn load_grant_use(
+     connection: &Connection,
+     grant_id: AuthorizationGrantId,
+@@ -2325,6 +2425,23 @@ fn load_registered_store_by_id(
+         .map_err(|_| store_read_error())
+ }
+ 
++fn load_store_version_by_receipt(
++    connection: &Connection,
++    receipt_id: AuthorizationReceiptId,
++) -> Result<Option<StoredRegisteredStoreVersion>, MailError> {
++    record_validation_query(ValidationQueryKind::BoundedKeyed);
++    connection
++        .query_row(
++            "SELECT store_id,location_sha256,config_generation,config_sha256,
++                    enrolled_receipt_id,committed_transition_id,created_at
++             FROM registered_store_versions WHERE enrolled_receipt_id=?1",
++            [receipt_id.as_bytes()],
++            stored_store_version_from_row,
++        )
++        .optional()
++        .map_err(|_| store_read_error())
++}
++
+ fn stored_registered_store_from_row(
+     row: &rusqlite::Row<'_>,
+ ) -> rusqlite::Result<StoredRegisteredStore> {
+@@ -2346,6 +2463,28 @@ fn stored_registered_store_from_row(
+     })
+ }
+ 
++fn stored_store_version_from_row(
++    row: &rusqlite::Row<'_>,
++) -> rusqlite::Result<StoredRegisteredStoreVersion> {
++    let generation = u64::try_from(row.get::<_, i64>(2)?)
++        .ok()
++        .and_then(NonZeroU64::new)
++        .ok_or(rusqlite::Error::InvalidQuery)?;
++    let enrolled_receipt_id = row
++        .get::<_, Option<Vec<u8>>>(4)?
++        .map(uuid_from_blob_sql)
++        .transpose()?;
++    Ok(StoredRegisteredStoreVersion {
++        store_id: uuid_from_blob_sql(row.get(0)?)?,
++        location_sha256: digest_from_blob_sql(row.get(1)?)?,
++        config_generation: generation,
++        config_sha256: digest_from_blob_sql(row.get(3)?)?,
++        enrolled_receipt_id,
++        committed_transition_id: row.get(5)?,
++        created_at: row.get(6)?,
++    })
++}
++
+ fn store_identity_count(
+     connection: &Connection,
+     store_id: StoreId,
+@@ -2362,18 +2501,17 @@ fn store_identity_count(
+ }
+ 
+ fn enrolled_store_projection(
+-    store: &StoredRegisteredStore,
++    version: &StoredRegisteredStoreVersion,
+ ) -> Result<EnrolledStoreProjection, MailError> {
+-    if store.state != "active" || store.removed_at.is_some() || store.created_at != store.updated_at
+-    {
++    if version.enrolled_receipt_id.is_none() || version.committed_transition_id.is_some() {
+         return Err(recovery_error());
+     }
+     Ok(EnrolledStoreProjection {
+-        store_id: store.store_id,
++        store_id: version.store_id,
+         state: EnrolledStoreState::Active,
+-        config_generation: store.config_generation,
+-        created_at: utc_millis(store.created_at)?,
+-        updated_at: utc_millis(store.updated_at)?,
++        config_generation: version.config_generation,
++        created_at: utc_millis(version.created_at)?,
++        updated_at: utc_millis(version.created_at)?,
+     })
+ }
+ 
+@@ -2964,6 +3102,7 @@ fn preflight_authorization_storage(connection: &Connection) -> Result<(), MailEr
+     nonce_preflight(connection)?;
+     grant_preflight(connection)?;
+     store_preflight(connection)?;
++    registry_parent_preflight(connection)?;
+     event_preflight(connection)
+ }
+ 
+@@ -3220,6 +3359,8 @@ fn validate_t202a_initial_row_counts(connection: &Connection) -> Result<(), Mail
+         .query_row(
+             "SELECT
+                 (SELECT COUNT(*) FROM registered_accounts) +
++                (SELECT COUNT(*) FROM registered_credentials) +
++                (SELECT COUNT(*) FROM registered_account_versions) +
+                 (SELECT COUNT(*) FROM challenge_effects) +
+                 (SELECT COUNT(*) FROM account_transitions) +
+                 (SELECT COUNT(*) FROM credential_cleanup) +
+@@ -3260,7 +3401,10 @@ fn validate_authorization_history(
+         let registry_count: i64 = connection
+             .query_row(
+                 "SELECT (SELECT COUNT(*) FROM grant_uses)
+-                      + (SELECT COUNT(*) FROM registered_stores)",
++                      + (SELECT COUNT(*) FROM registered_stores)
++                      + (SELECT COUNT(*) FROM registered_store_versions)
++                      + (SELECT COUNT(*) FROM registered_credentials)
++                      + (SELECT COUNT(*) FROM registered_account_versions)",
+                 [],
+                 |row| row.get(0),
+             )
+@@ -3449,16 +3593,32 @@ fn validate_stored_receipt(
+ 
+ fn validate_registry_history(connection: &Connection) -> Result<(), MailError> {
+     record_validation_query(ValidationQueryKind::RegistryStream);
+-    let grant_count: i64 = connection
+-        .query_row("SELECT COUNT(*) FROM grant_uses", [], |row| row.get(0))
+-        .map_err(|_| store_read_error())?;
+-    record_validation_query(ValidationQueryKind::RegistryStream);
+-    let store_count: i64 = connection
+-        .query_row("SELECT COUNT(*) FROM registered_stores", [], |row| {
+-            row.get(0)
+-        })
+-        .map_err(|_| store_read_error())?;
+-    if grant_count != store_count {
++    let (grant_count, store_count, version_count, credential_count, account_version_count) =
++        connection
++            .query_row(
++                "SELECT
++                (SELECT COUNT(*) FROM grant_uses),
++                (SELECT COUNT(*) FROM registered_stores),
++                (SELECT COUNT(*) FROM registered_store_versions),
++                (SELECT COUNT(*) FROM registered_credentials),
++                (SELECT COUNT(*) FROM registered_account_versions)",
++                [],
++                |row| {
++                    Ok((
++                        row.get::<_, i64>(0)?,
++                        row.get::<_, i64>(1)?,
++                        row.get::<_, i64>(2)?,
++                        row.get::<_, i64>(3)?,
++                        row.get::<_, i64>(4)?,
++                    ))
++                },
++            )
++            .map_err(|_| store_read_error())?;
++    if grant_count != store_count
++        || store_count != version_count
++        || credential_count != 0
++        || account_version_count != 0
++    {
+         return Err(recovery_error());
+     }
+ 
+@@ -3499,6 +3659,25 @@ fn validate_registry_history(connection: &Connection) -> Result<(), MailError> {
+     if seen != store_count {
+         return Err(recovery_error());
+     }
++
++    record_validation_query(ValidationQueryKind::RegistryStream);
++    let mut statement = connection
++        .prepare(
++            "SELECT store_id,location_sha256,config_generation,config_sha256,
++                    enrolled_receipt_id,committed_transition_id,created_at
++             FROM registered_store_versions ORDER BY store_id,config_generation",
++        )
++        .map_err(|_| store_read_error())?;
++    let mut rows = statement.query([]).map_err(|_| store_read_error())?;
++    let mut seen = 0_i64;
++    while let Some(row) = rows.next().map_err(|_| store_read_error())? {
++        let version = stored_store_version_from_row(row).map_err(|_| recovery_error())?;
++        validate_stored_store_version(connection, &version)?;
++        seen = seen.checked_add(1).ok_or_else(recovery_error)?;
++    }
++    if seen != version_count {
++        return Err(recovery_error());
++    }
+     Ok(())
+ }
+ 
+@@ -3518,6 +3697,8 @@ fn validate_stored_grant(connection: &Connection, grant: &StoredGrantUse) -> Res
+     let enrollment = store_enrollment_context(&manifest).map_err(|_| recovery_error())?;
+     let store = load_registered_store_by_receipt(connection, receipt.receipt_id)?
+         .ok_or_else(recovery_error)?;
++    let version = load_store_version_by_receipt(connection, receipt.receipt_id)?
++        .ok_or_else(recovery_error)?;
+     if challenge.state != "authorized"
+         || grant.grant_id != challenge.grant_id
+         || grant.receipt_id != receipt.receipt_id
+@@ -3537,6 +3718,7 @@ fn validate_stored_grant(connection: &Connection, grant: &StoredGrantUse) -> Res
+     {
+         return Err(recovery_error());
+     }
++    validate_initial_store_version(&version, &store, &enrollment, &receipt)?;
+     validate_registry_events(connection, grant, &store)
+ }
+ 
+@@ -3570,9 +3752,45 @@ fn validate_stored_store(
+     if grant.used_at != store.created_at {
+         return Err(recovery_error());
+     }
++    let version = load_store_version_by_receipt(connection, receipt.receipt_id)?
++        .ok_or_else(recovery_error)?;
++    let challenge = load_challenge(connection, receipt.challenge_id)?;
++    let manifest = ActionManifest::parse(&challenge.manifest).map_err(|_| recovery_error())?;
++    let enrollment = store_enrollment_context(&manifest).map_err(|_| recovery_error())?;
++    validate_initial_store_version(&version, store, &enrollment, &receipt)?;
+     Ok(())
+ }
+ 
++fn validate_stored_store_version(
++    connection: &Connection,
++    version: &StoredRegisteredStoreVersion,
++) -> Result<(), MailError> {
++    let receipt_id = version.enrolled_receipt_id.ok_or_else(recovery_error)?;
++    if version.committed_transition_id.is_some() {
++        return Err(recovery_error());
++    }
++    let receipt = load_receipt_by_id(connection, receipt_id)?.ok_or_else(recovery_error)?;
++    let challenge = load_challenge(connection, receipt.challenge_id)?;
++    let manifest = ActionManifest::parse(&challenge.manifest).map_err(|_| recovery_error())?;
++    let enrollment = store_enrollment_context(&manifest).map_err(|_| recovery_error())?;
++    let store =
++        load_registered_store_by_id(connection, version.store_id)?.ok_or_else(recovery_error)?;
++    record_validation_query(ValidationQueryKind::BoundedKeyed);
++    let grant_id: Vec<u8> = connection
++        .query_row(
++            "SELECT grant_id FROM grant_uses WHERE receipt_id=?1",
++            [receipt_id.as_bytes()],
++            |row| row.get(0),
++        )
++        .map_err(|_| store_read_error())?;
++    let grant_id = uuid_from_blob_sql(grant_id).map_err(|_| recovery_error())?;
++    let grant = load_grant_use(connection, grant_id)?.ok_or_else(recovery_error)?;
++    if grant.receipt_id != receipt_id || grant.used_at != version.created_at {
++        return Err(recovery_error());
++    }
++    validate_initial_store_version(version, &store, &enrollment, &receipt)
++}
++
+ fn grant_use_transcript_from_row(grant: &StoredGrantUse) -> Vec<u8> {
+     let action = grant.action.code().to_be_bytes();
+     let target_kind = grant.target_kind.code().to_be_bytes();
+diff --git a/crates/kirje-store/src/authority/schema_v1.sql b/crates/kirje-store/src/authority/schema_v1.sql
+index b4dcc4a..ae45535 100644
+--- a/crates/kirje-store/src/authority/schema_v1.sql
++++ b/crates/kirje-store/src/authority/schema_v1.sql
+@@ -202,7 +202,8 @@ CREATE TABLE registered_stores (
+           (typeof(removed_at) = 'integer' AND removed_at >= created_at)),
+     CHECK((state = 'removed' AND removed_at IS NOT NULL)
+        OR (state != 'removed' AND removed_at IS NULL)),
+-    UNIQUE(store_id, location_sha256, config_generation, config_sha256),
++    UNIQUE(store_id, location_sha256),
++    UNIQUE(store_id, location_sha256, enrolled_receipt_id),
+     FOREIGN KEY(enrolled_receipt_id) REFERENCES authorization_receipts(receipt_id) ON DELETE RESTRICT
+ ) STRICT;
+ 
+@@ -240,6 +241,9 @@ CREATE TABLE registered_accounts (
+     UNIQUE(account_id, store_id, account_generation, credential_id, binding_sha256),
+     FOREIGN KEY(store_id) REFERENCES registered_stores(store_id) ON DELETE RESTRICT,
+     FOREIGN KEY(authorized_receipt_id) REFERENCES authorization_receipts(receipt_id) ON DELETE RESTRICT,
++    FOREIGN KEY(credential_id, account_id, store_id)
++        REFERENCES registered_credentials(credential_id, account_id, store_id)
++        ON DELETE RESTRICT,
+     FOREIGN KEY(active_transition_id) REFERENCES account_transitions(transition_id) ON DELETE RESTRICT
+ ) STRICT;
+ 
+@@ -509,6 +513,8 @@ CREATE TABLE account_transitions (
+            AND finalized_at IS NULL AND resolved_at IS NOT NULL)
+        OR (state = 'recovery_required' AND finalized_at IS NULL
+            AND resolved_at IS NOT NULL)),
++    UNIQUE(transition_id, store_id),
++    UNIQUE(transition_id, account_id, store_id),
+     FOREIGN KEY(grant_id) REFERENCES grant_uses(grant_id) ON DELETE RESTRICT,
+     FOREIGN KEY(store_id) REFERENCES registered_stores(store_id) ON DELETE RESTRICT,
+     FOREIGN KEY(account_id, store_id)
+@@ -520,6 +526,88 @@ ON account_transitions(store_id, state);
+ CREATE INDEX account_transitions_account_state
+ ON account_transitions(account_id, state);
+ 
++CREATE TABLE registered_credentials (
++    credential_id BLOB PRIMARY KEY
++        CHECK(typeof(credential_id) = 'blob' AND length(credential_id) = 16),
++    account_id BLOB NOT NULL
++        CHECK(typeof(account_id) = 'blob' AND length(account_id) = 16),
++    store_id BLOB NOT NULL
++        CHECK(typeof(store_id) = 'blob' AND length(store_id) = 16),
++    created_transition_id BLOB NOT NULL UNIQUE
++        CHECK(typeof(created_transition_id) = 'blob'
++          AND length(created_transition_id) = 16),
++    created_at INTEGER NOT NULL
++        CHECK(typeof(created_at) = 'integer' AND created_at >= 0),
++    UNIQUE(credential_id, account_id, store_id),
++    FOREIGN KEY(account_id, store_id)
++        REFERENCES registered_accounts(account_id, store_id) ON DELETE RESTRICT,
++    FOREIGN KEY(created_transition_id, account_id, store_id)
++        REFERENCES account_transitions(transition_id, account_id, store_id)
++        ON DELETE RESTRICT
++) STRICT;
++
++CREATE TABLE registered_store_versions (
++    store_id BLOB NOT NULL
++        CHECK(typeof(store_id) = 'blob' AND length(store_id) = 16),
++    location_sha256 BLOB NOT NULL
++        CHECK(typeof(location_sha256) = 'blob' AND length(location_sha256) = 32),
++    config_generation INTEGER NOT NULL
++        CHECK(typeof(config_generation) = 'integer' AND config_generation > 0),
++    config_sha256 BLOB NOT NULL
++        CHECK(typeof(config_sha256) = 'blob' AND length(config_sha256) = 32),
++    enrolled_receipt_id BLOB UNIQUE
++        CHECK(enrolled_receipt_id IS NULL OR
++          (typeof(enrolled_receipt_id) = 'blob' AND length(enrolled_receipt_id) = 16)),
++    committed_transition_id BLOB UNIQUE
++        CHECK(committed_transition_id IS NULL OR
++          (typeof(committed_transition_id) = 'blob'
++           AND length(committed_transition_id) = 16)),
++    created_at INTEGER NOT NULL
++        CHECK(typeof(created_at) = 'integer' AND created_at >= 0),
++    PRIMARY KEY(store_id, config_generation),
++    CHECK((enrolled_receipt_id IS NOT NULL AND committed_transition_id IS NULL)
++       OR (enrolled_receipt_id IS NULL AND committed_transition_id IS NOT NULL)),
++    UNIQUE(store_id, config_generation, config_sha256),
++    UNIQUE(store_id, location_sha256, config_generation, config_sha256),
++    FOREIGN KEY(store_id, location_sha256)
++        REFERENCES registered_stores(store_id, location_sha256) ON DELETE RESTRICT,
++    FOREIGN KEY(store_id, location_sha256, enrolled_receipt_id)
++        REFERENCES registered_stores(store_id, location_sha256, enrolled_receipt_id)
++        ON DELETE RESTRICT,
++    FOREIGN KEY(enrolled_receipt_id)
++        REFERENCES authorization_receipts(receipt_id) ON DELETE RESTRICT,
++    FOREIGN KEY(committed_transition_id, store_id)
++        REFERENCES account_transitions(transition_id, store_id) ON DELETE RESTRICT
++) STRICT;
++
++CREATE TABLE registered_account_versions (
++    account_id BLOB NOT NULL
++        CHECK(typeof(account_id) = 'blob' AND length(account_id) = 16),
++    store_id BLOB NOT NULL
++        CHECK(typeof(store_id) = 'blob' AND length(store_id) = 16),
++    account_generation INTEGER NOT NULL
++        CHECK(typeof(account_generation) = 'integer' AND account_generation > 0),
++    credential_id BLOB NOT NULL
++        CHECK(typeof(credential_id) = 'blob' AND length(credential_id) = 16),
++    binding_sha256 BLOB NOT NULL
++        CHECK(typeof(binding_sha256) = 'blob' AND length(binding_sha256) = 32),
++    committed_transition_id BLOB NOT NULL UNIQUE
++        CHECK(typeof(committed_transition_id) = 'blob'
++          AND length(committed_transition_id) = 16),
++    created_at INTEGER NOT NULL
++        CHECK(typeof(created_at) = 'integer' AND created_at >= 0),
++    PRIMARY KEY(account_id, account_generation),
++    UNIQUE(account_id, store_id, account_generation, credential_id, binding_sha256),
++    FOREIGN KEY(account_id, store_id)
++        REFERENCES registered_accounts(account_id, store_id) ON DELETE RESTRICT,
++    FOREIGN KEY(credential_id, account_id, store_id)
++        REFERENCES registered_credentials(credential_id, account_id, store_id)
++        ON DELETE RESTRICT,
++    FOREIGN KEY(committed_transition_id, account_id, store_id)
++        REFERENCES account_transitions(transition_id, account_id, store_id)
++        ON DELETE RESTRICT
++) STRICT;
++
+ CREATE TABLE credential_cleanup (
+     cleanup_id BLOB PRIMARY KEY
+         CHECK(typeof(cleanup_id) = 'blob' AND length(cleanup_id) = 16),
+@@ -610,11 +698,11 @@ CREATE TABLE remote_effects (
+         ) ON DELETE RESTRICT,
+     FOREIGN KEY(grant_id) REFERENCES grant_uses(grant_id) ON DELETE RESTRICT,
+     FOREIGN KEY(store_id, store_location_sha256, config_generation, config_sha256)
+-        REFERENCES registered_stores(
++        REFERENCES registered_store_versions(
+             store_id, location_sha256, config_generation, config_sha256
+         ) ON DELETE RESTRICT,
+     FOREIGN KEY(account_id, store_id, account_generation, credential_id, binding_sha256)
+-        REFERENCES registered_accounts(
++        REFERENCES registered_account_versions(
+             account_id, store_id, account_generation, credential_id, binding_sha256
+         ) ON DELETE RESTRICT,
+     FOREIGN KEY(trust_epoch) REFERENCES trust_epochs(epoch) ON DELETE RESTRICT,
+diff --git a/crates/kirje-store/tests/authority_registry.rs b/crates/kirje-store/tests/authority_registry.rs
+index 6a1b68c..cec45be 100644
+--- a/crates/kirje-store/tests/authority_registry.rs
++++ b/crates/kirje-store/tests/authority_registry.rs
+@@ -298,10 +298,11 @@ fn clock_pair(connection: &Connection) -> (i64, i64) {
+         .unwrap()
+ }
+ 
+-fn registry_fingerprint(connection: &Connection) -> (i64, i64, i64, (i64, i64)) {
++fn registry_fingerprint(connection: &Connection) -> (i64, i64, i64, i64, (i64, i64)) {
+     (
+         scalar(connection, "SELECT COUNT(*) FROM grant_uses"),
+         scalar(connection, "SELECT COUNT(*) FROM registered_stores"),
++        scalar(connection, "SELECT COUNT(*) FROM registered_store_versions"),
+         scalar(connection, "SELECT COUNT(*) FROM authority_events"),
+         clock_pair(connection),
+     )
+@@ -767,6 +768,32 @@ fn first_use_exact_recovery_and_receipt_priority_use_effective_time() {
+     assert_eq!(first.created_at, first.updated_at);
+ 
+     let connection = Connection::open(fixture.home.database_path()).unwrap();
++    let version = connection
++        .query_row(
++            "SELECT store_id,location_sha256,config_generation,config_sha256,
++                        enrolled_receipt_id,committed_transition_id,created_at
++                 FROM registered_store_versions",
++            [],
++            |row| {
++                Ok((
++                    row.get::<_, Vec<u8>>(0)?,
++                    row.get::<_, Vec<u8>>(1)?,
++                    row.get::<_, i64>(2)?,
++                    row.get::<_, Vec<u8>>(3)?,
++                    row.get::<_, Vec<u8>>(4)?,
++                    row.get::<_, Option<Vec<u8>>>(5)?,
++                    row.get::<_, i64>(6)?,
++                ))
++            },
++        )
++        .unwrap();
++    assert_eq!(version.0, store_id(1).as_bytes());
++    assert_eq!(version.1, location_sha256(1).as_bytes());
++    assert_eq!(version.2, 1);
++    assert_eq!(version.3, config_sha256(1).as_bytes());
++    assert_eq!(version.4, authorized.receipt.receipt_id.as_bytes());
++    assert!(version.5.is_none());
++    assert_eq!(version.6, issued_at(1) + 100);
+     let before = registry_fingerprint(&connection);
+     let recovered = store
+         .enroll_store(enrollment_request(1, &authorized, issued_at(1) + 1_500))
+@@ -777,7 +804,8 @@ fn first_use_exact_recovery_and_receipt_priority_use_effective_time() {
+     assert_eq!(after.0, before.0);
+     assert_eq!(after.1, before.1);
+     assert_eq!(after.2, before.2);
+-    assert_eq!(after.3, (issued_at(1) + 1_500, issued_at(1) + 1_500));
++    assert_eq!(after.3, before.3);
++    assert_eq!(after.4, (issued_at(1) + 1_500, issued_at(1) + 1_500));
+ 
+     let replay = open_ready(&fixture, deterministic(Vec::new()))
+         .verify_proof(VerifyProofRequest {
+@@ -822,10 +850,10 @@ fn authorized_unclaimed_expiry_is_committed_exactly_once() {
+     assert_eq!(retry.code, MailErrorCode::AuthorizationExpired);
+     let later = registry_fingerprint(&connection);
+     assert_eq!(
+-        (later.0, later.1, later.2),
+-        (fingerprint.0, fingerprint.1, fingerprint.2)
++        (later.0, later.1, later.2, later.3),
++        (fingerprint.0, fingerprint.1, fingerprint.2, fingerprint.3)
+     );
+-    assert_eq!(later.3, (issued_at(2) + 950, issued_at(2) + 950));
++    assert_eq!(later.4, (issued_at(2) + 950, issued_at(2) + 950));
+     let rollback =
+         exact_error(store.enroll_store(enrollment_request(2, &authorized, issued_at(2) + 925)));
+     assert_eq!(rollback.code, MailErrorCode::AuthorizationExpired);
+@@ -1100,6 +1128,7 @@ fn enrollment_and_expiry_fault_boundaries_are_atomic_and_zero_entropy() {
+         AuthorityFaultPoint::GrantUseInserted,
+         AuthorityFaultPoint::GrantUsedEvent,
+         AuthorityFaultPoint::RegisteredStoreInserted,
++        AuthorityFaultPoint::RegisteredStoreVersionInserted,
+         AuthorityFaultPoint::StoreEnrolledEvent,
+         AuthorityFaultPoint::EnrollmentClockUpdated,
+         AuthorityFaultPoint::EnrollmentBeforeCommit,
+@@ -1204,6 +1233,13 @@ fn exact_and_distinct_receipt_concurrency_have_one_durable_winner() {
+         scalar(&connection, "SELECT COUNT(*) FROM registered_stores"),
+         1
+     );
++    assert_eq!(
++        scalar(
++            &connection,
++            "SELECT COUNT(*) FROM registered_store_versions"
++        ),
++        1
++    );
+ 
+     let fixture = ready_fixture();
+     let first = Arc::new(authorize(&fixture, 130));
+@@ -1242,6 +1278,13 @@ fn exact_and_distinct_receipt_concurrency_have_one_durable_winner() {
+         scalar(&connection, "SELECT COUNT(*) FROM registered_stores"),
+         1
+     );
++    assert_eq!(
++        scalar(
++            &connection,
++            "SELECT COUNT(*) FROM registered_store_versions"
++        ),
++        1
++    );
+ }
+ 
+ #[test]
+@@ -1289,6 +1332,13 @@ fn store_and_location_only_contenders_have_stable_losers_without_grants() {
+             scalar(&connection, "SELECT COUNT(*) FROM registered_stores"),
+             1
+         );
++        assert_eq!(
++            scalar(
++                &connection,
++                "SELECT COUNT(*) FROM registered_store_versions"
++            ),
++            1
++        );
+         assert_eq!(
+             connection
+                 .query_row(
+@@ -1495,6 +1545,15 @@ fn insert_forbidden_row(connection: &Connection, table: &str) {
+         "registered_accounts" => {
+             "INSERT INTO registered_accounts VALUES(zeroblob(16),zeroblob(16),zeroblob(32),1,zeroblob(16),zeroblob(32),'active',zeroblob(16),NULL,1,1,NULL)"
+         }
++        "registered_credentials" => {
++            "INSERT INTO registered_credentials VALUES(zeroblob(16),zeroblob(16),zeroblob(16),zeroblob(16),1)"
++        }
++        "registered_store_versions" => {
++            "INSERT INTO registered_store_versions VALUES(zeroblob(16),zeroblob(32),1,zeroblob(32),zeroblob(16),NULL,1)"
++        }
++        "registered_account_versions" => {
++            "INSERT INTO registered_account_versions VALUES(zeroblob(16),zeroblob(16),1,zeroblob(16),zeroblob(32),zeroblob(16),1)"
++        }
+         "challenge_effects" => {
+             "INSERT INTO challenge_effects VALUES(zeroblob(32),0,zeroblob(16),1)"
+         }
+@@ -1526,6 +1585,9 @@ fn insert_forbidden_row(connection: &Connection, table: &str) {
+ fn restart_rejects_corruption_oversize_orphans_and_every_later_stage_table() {
+     for table in [
+         "registered_accounts",
++        "registered_credentials",
++        "registered_store_versions",
++        "registered_account_versions",
+         "challenge_effects",
+         "account_transitions",
+         "credential_cleanup",
+@@ -1554,6 +1616,11 @@ fn restart_rejects_corruption_oversize_orphans_and_every_later_stage_table() {
+     for mutation in [
+         "UPDATE grant_uses SET use_sha256=zeroblob(32)",
+         "UPDATE registered_stores SET location_material=zeroblob(4097)",
++        "DELETE FROM registered_store_versions",
++        "UPDATE registered_store_versions SET config_sha256=zeroblob(32)",
++        "UPDATE registered_store_versions SET enrolled_receipt_id=zeroblob(16)",
++        "UPDATE registered_store_versions
++         SET enrolled_receipt_id=NULL,committed_transition_id=zeroblob(16)",
+         "DELETE FROM authority_events WHERE event_code=8",
+     ] {
+         let fixture = ready_fixture();
+@@ -1590,6 +1657,11 @@ fn restart_rejects_corruption_oversize_orphans_and_every_later_stage_table() {
+             "UPDATE registered_stores SET config_generation='wrong-storage-class'",
+             "SELECT typeof(config_generation) FROM registered_stores",
+         ),
++        (
++            "registered_store_versions",
++            "UPDATE registered_store_versions SET config_generation='wrong-storage-class'",
++            "SELECT typeof(config_generation) FROM registered_store_versions",
++        ),
+     ] {
+         let fixture = ready_fixture();
+         let authorized = authorize(&fixture, 10);
+@@ -1606,6 +1678,9 @@ fn restart_rejects_corruption_oversize_orphans_and_every_later_stage_table() {
+         "UPDATE registered_stores SET location_sha256=zeroblob(31)",
+         "UPDATE registered_stores SET config_generation=0",
+         "UPDATE registered_stores SET config_sha256=zeroblob(32)",
++        "UPDATE registered_store_versions SET location_sha256=zeroblob(31)",
++        "UPDATE registered_store_versions SET config_generation=0",
++        "UPDATE registered_store_versions SET created_at=-1",
+     ] {
+         let fixture = ready_fixture();
+         let authorized = authorize(&fixture, 10);
+@@ -1693,6 +1768,85 @@ fn restart_rejects_corruption_oversize_orphans_and_every_later_stage_table() {
+         .unwrap();
+     drop(connection);
+     assert_recovery_required(&fixture);
++
++    let fixture = ready_fixture();
++    let first = authorize(&fixture, 10);
++    open_ready(&fixture, deterministic(Vec::new()))
++        .enroll_store(enrollment_request(10, &first, issued_at(10) + 200))
++        .unwrap();
++    let second = authorize(&fixture, 11);
++    open_ready(&fixture, deterministic(Vec::new()))
++        .enroll_store(enrollment_request(11, &second, issued_at(11) + 200))
++        .unwrap();
++    let connection = Connection::open(fixture.home.database_path()).unwrap();
++    connection
++        .execute_batch("PRAGMA foreign_keys=OFF; PRAGMA ignore_check_constraints=ON;")
++        .unwrap();
++    connection
++        .execute(
++            "UPDATE registered_store_versions SET enrolled_receipt_id=?1 WHERE store_id=?2",
++            params![[0xfb_u8; 16], store_id(10).as_bytes()],
++        )
++        .unwrap();
++    connection
++        .execute(
++            "UPDATE registered_store_versions SET enrolled_receipt_id=?1 WHERE store_id=?2",
++            params![first.receipt.receipt_id.as_bytes(), store_id(11).as_bytes()],
++        )
++        .unwrap();
++    connection
++        .execute(
++            "UPDATE registered_store_versions SET enrolled_receipt_id=?1 WHERE store_id=?2",
++            params![
++                second.receipt.receipt_id.as_bytes(),
++                store_id(10).as_bytes()
++            ],
++        )
++        .unwrap();
++    drop(connection);
++    assert_recovery_required(&fixture);
++}
++
++#[test]
++fn old_seventeen_table_inventory_is_rejected_without_repair() {
++    let fixture = ready_fixture();
++    let connection = Connection::open(fixture.home.database_path()).unwrap();
++    connection
++        .execute_batch(
++            "PRAGMA foreign_keys=OFF;
++             DROP TABLE registered_account_versions;
++             DROP TABLE registered_store_versions;
++             DROP TABLE registered_credentials;",
++        )
++        .unwrap();
++    let before: (i64, i64, i64) = connection
++        .query_row(
++            "SELECT
++                (SELECT COUNT(*) FROM sqlite_schema
++                 WHERE type='table' AND name NOT LIKE 'sqlite_%'),
++                (SELECT application_id FROM pragma_application_id),
++                (SELECT user_version FROM pragma_user_version)",
++            [],
++            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
++        )
++        .unwrap();
++    assert_eq!(before, (17, 1_263_096_394, 1));
++    drop(connection);
++
++    assert_recovery_required(&fixture);
++    let connection = Connection::open(fixture.home.database_path()).unwrap();
++    let after: (i64, i64, i64) = connection
++        .query_row(
++            "SELECT
++                (SELECT COUNT(*) FROM sqlite_schema
++                 WHERE type='table' AND name NOT LIKE 'sqlite_%'),
++                (SELECT application_id FROM pragma_application_id),
++                (SELECT user_version FROM pragma_user_version)",
++            [],
++            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
++        )
++        .unwrap();
++    assert_eq!(after, before);
+ }
+ 
+ #[test]
+@@ -1730,13 +1884,20 @@ fn complete_128_row_history_restarts_with_indexed_streams() {
+     assert_eq!(store_preflight, 1);
+     assert_eq!(event_preflight, 1);
+     assert_eq!(registry_stream, 4);
+-    assert_eq!(bounded_keyed, 20 * 128);
++    assert_eq!(bounded_keyed, 28 * 128);
+     let connection = Connection::open(fixture.home.database_path()).unwrap();
+     assert_eq!(scalar(&connection, "SELECT COUNT(*) FROM grant_uses"), 128);
+     assert_eq!(
+         scalar(&connection, "SELECT COUNT(*) FROM registered_stores"),
+         128
+     );
++    assert_eq!(
++        scalar(
++            &connection,
++            "SELECT COUNT(*) FROM registered_store_versions"
++        ),
++        128
++    );
+     let plans = [
+         query_plan(
+             &connection,
+@@ -1746,6 +1907,11 @@ fn complete_128_row_history_restarts_with_indexed_streams() {
+             &connection,
+             "SELECT store_id FROM registered_stores ORDER BY store_id",
+         ),
++        query_plan(
++            &connection,
++            "SELECT store_id,config_generation FROM registered_store_versions
++             WHERE store_id=zeroblob(16) ORDER BY store_id,config_generation",
++        ),
+         query_plan(
+             &connection,
+             "SELECT sequence,event_code FROM authority_events INDEXED BY authority_events_entity_sequence WHERE entity_kind=10 AND entity_id=zeroblob(16) ORDER BY sequence",
+@@ -1763,6 +1929,11 @@ fn complete_128_row_history_restarts_with_indexed_streams() {
+     );
+     assert!(
+         plans[2]
++            .iter()
++            .any(|line| line.contains("sqlite_autoindex_registered_store_versions_3"))
++    );
++    assert!(
++        plans[3]
+             .iter()
+             .any(|line| line.contains("authority_events_entity_sequence"))
+     );
+diff --git a/crates/kirje-store/tests/authority_schema.rs b/crates/kirje-store/tests/authority_schema.rs
+index 4c14de9..a9a0a70 100644
+--- a/crates/kirje-store/tests/authority_schema.rs
++++ b/crates/kirje-store/tests/authority_schema.rs
+@@ -26,7 +26,7 @@ const BOOTSTRAP_EVENT_DETAIL_SHA256_HEX: &str =
+     "5c37cb3d04458bcfb7a89eb3038e31d2e0f074a81ed07e045794a0aa9519672c";
+ const CONFIRM_EVENT_DETAIL_SHA256_HEX: &str =
+     "6ac5a60f3517c4d914870ae0db4c8aa0160e2b19a9e407a1f6a6d3ef45af8af1";
+-const TABLES: [&str; 17] = [
++const TABLES: [&str; 20] = [
+     "account_transitions",
+     "authority_events",
+     "authority_keys",
+@@ -40,7 +40,10 @@ const TABLES: [&str; 17] = [
+     "effect_observations",
+     "grant_uses",
+     "nonce_uses",
++    "registered_account_versions",
+     "registered_accounts",
++    "registered_credentials",
++    "registered_store_versions",
+     "registered_stores",
+     "remote_effects",
+     "trust_epochs",
+@@ -67,7 +70,7 @@ const TRIGGERS: [&str; 3] = [
+     "trust_epochs_key_roles_insert",
+     "trust_epochs_key_roles_update",
+ ];
+-const COLUMN_INVARIANT_CASES: [(&str, &str, &str, &str); 17] = [
++const COLUMN_INVARIANT_CASES: [(&str, &str, &str, &str); 20] = [
+     (
+         "account_transitions",
+         "kind",
+@@ -146,12 +149,30 @@ const COLUMN_INVARIANT_CASES: [(&str, &str, &str, &str); 17] = [
+         "consumed_at",
+         "nonce=zeroblob(1)",
+     ),
++    (
++        "registered_account_versions",
++        "binding_sha256",
++        "created_at",
++        "credential_id=zeroblob(1)",
++    ),
+     (
+         "registered_accounts",
+         "state",
+         "updated_at",
+         "account_id=zeroblob(1)",
+     ),
++    (
++        "registered_credentials",
++        "created_transition_id",
++        "created_at",
++        "credential_id=zeroblob(1)",
++    ),
++    (
++        "registered_store_versions",
++        "config_sha256",
++        "created_at",
++        "location_sha256=zeroblob(1)",
++    ),
+     (
+         "registered_stores",
+         "state",
+@@ -546,7 +567,7 @@ fn production_and_isolated_constructors_have_closed_inputs() {
+ fn canonical_schema_body_has_exact_digest_and_inventory() {
+     assert_eq!(
+         hex(&Sha256::digest(SCHEMA)),
+-        "572a73ba5fa83c763188d804ce9767a3c21373410d8b170f6d97b49be0a86454"
++        "5d01739b89246a5f495a965e57e416eee9fd0b5016995add41c6edee7f3e970d"
+     );
+     for forbidden in ["PRAGMA", "BEGIN TRANSACTION", "BEGIN IMMEDIATE", "COMMIT"] {
+         assert!(!SCHEMA.contains(forbidden));
+@@ -610,7 +631,7 @@ fn outer_transaction_rollback_leaves_no_schema_identity_or_rows() {
+                 params![[21_u8; 16], detail, detail_sha256],
+             )
+             .unwrap();
+-        assert_eq!(user_object_count(&transaction), 35);
++        assert_eq!(user_object_count(&transaction), 38);
+         assert_eq!(
+             scalar_i64(
+                 &transaction,
+@@ -797,8 +818,13 @@ fn assert_numeric_and_relationship_invariants(connection: &Connection) {
+         "UPDATE authority_meta SET last_observed_at=-1",
+         "UPDATE registered_stores SET config_generation=0",
+         "UPDATE registered_stores SET updated_at=created_at-1",
++        "UPDATE registered_store_versions SET config_generation=0",
++        "UPDATE registered_store_versions SET created_at=-1",
+         "UPDATE registered_accounts SET account_generation=0",
+         "UPDATE registered_accounts SET updated_at=created_at-1",
++        "UPDATE registered_credentials SET created_at=-1",
++        "UPDATE registered_account_versions SET account_generation=0",
++        "UPDATE registered_account_versions SET created_at=-1",
+         "UPDATE authorization_challenges SET action=2",
+         "UPDATE authorization_challenges SET action=256",
+         "UPDATE authorization_challenges SET expires_at=issued_at",
+@@ -947,6 +973,7 @@ fn every_declared_partial_unique_boundary_rejects_a_competing_row() {
+ }
+ 
+ #[test]
++#[allow(clippy::too_many_lines)]
+ fn valid_relationship_chains_pass_and_every_composite_cross_link_fails() {
+     let connection = schema_connection();
+     let root = insert_raw_authority_root(&connection);
+@@ -956,13 +983,18 @@ fn valid_relationship_chains_pass_and_every_composite_cross_link_fails() {
+     insert_raw_challenge(&connection, &store_authorization);
+     insert_raw_receipt(&connection, &store_authorization);
+     insert_registered_store(&connection, &context, store_authorization.receipt_id);
++    insert_receipt_store_version(&connection, &context, store_authorization.receipt_id);
+ 
+     let account_authorization = RawAuthorization::account_create(40, &context, &root);
+     insert_raw_challenge(&connection, &account_authorization);
+     insert_raw_receipt(&connection, &account_authorization);
+-    insert_registered_account(&connection, &context, account_authorization.receipt_id);
+     insert_grant_use(&connection, &account_authorization);
+-    insert_account_transition_and_cleanup(&connection, &context, &account_authorization);
++    insert_registered_account_graph(
++        &connection,
++        &context,
++        account_authorization.receipt_id,
++        &account_authorization,
++    );
+ 
+     let first = RawAuthorization::remote(60, &context, &root);
+     let second = RawAuthorization::remote(90, &context, &root);
+@@ -1058,6 +1090,161 @@ fn valid_relationship_chains_pass_and_every_composite_cross_link_fails() {
+     assert_eq!(scalar_text(&connection, "PRAGMA integrity_check"), "ok");
+ }
+ 
++#[test]
++fn immutable_version_parents_survive_current_projection_updates() {
++    let connection = complete_schema_connection();
++    connection
++        .execute(
++            "UPDATE registered_stores
++             SET config_generation=2,config_sha256=?1,updated_at=21",
++            [[0xa1_u8; 32]],
++        )
++        .unwrap();
++    connection
++        .execute(
++            "UPDATE registered_accounts
++             SET account_generation=2,binding_sha256=?1,updated_at=21",
++            [[0xa2_u8; 32]],
++        )
++        .unwrap();
++
++    assert_eq!(
++        scalar_i64(&connection, "SELECT COUNT(*) FROM remote_effects"),
++        1
++    );
++    assert_eq!(
++        scalar_i64(&connection, "SELECT COUNT(*) FROM pragma_foreign_key_check"),
++        0
++    );
++    assert_eq!(scalar_text(&connection, "PRAGMA integrity_check"), "ok");
++}
++
++#[test]
++fn immutable_parent_origins_and_remote_effect_links_are_exact() {
++    let connection = complete_schema_connection();
++
++    for sql in [
++        "UPDATE registered_store_versions
++         SET enrolled_receipt_id=NULL,committed_transition_id=NULL",
++        "UPDATE registered_store_versions
++         SET committed_transition_id=zeroblob(16)",
++        "UPDATE registered_credentials SET account_id=zeroblob(16)",
++        "UPDATE registered_account_versions SET store_id=zeroblob(16)",
++        "UPDATE remote_effects SET config_sha256=zeroblob(32)",
++        "UPDATE remote_effects SET binding_sha256=zeroblob(32)",
++    ] {
++        assert_sql_mutation_rejected(&connection, sql);
++    }
++
++    assert!(
++        connection
++            .execute(
++                "INSERT INTO registered_store_versions
++                 (store_id,location_sha256,config_generation,config_sha256,
++                  enrolled_receipt_id,committed_transition_id,created_at)
++                 SELECT store_id,location_sha256,2,zeroblob(32),
++                        enrolled_receipt_id,zeroblob(16),created_at
++                 FROM registered_stores LIMIT 1",
++                [],
++            )
++            .is_err()
++    );
++}
++
++#[test]
++fn cross_account_and_cross_store_transition_origins_are_rejected() {
++    let connection = complete_schema_connection();
++    let root = RawAuthorityRoot {
++        owner_key_id: [11; 32],
++        recovery_key_id: [12; 32],
++        bundle_sha256: [13; 32],
++    };
++    let second = RawRemoteContext::synthetic(80);
++    let store = RawAuthorization::store_enroll(100, &second, &root);
++    insert_raw_challenge(&connection, &store);
++    insert_raw_receipt(&connection, &store);
++    insert_registered_store(&connection, &second, store.receipt_id);
++    insert_receipt_store_version(&connection, &second, store.receipt_id);
++    let account = RawAuthorization::account_create(110, &second, &root);
++    insert_raw_challenge(&connection, &account);
++    insert_raw_receipt(&connection, &account);
++    insert_grant_use(&connection, &account);
++    insert_registered_account_graph(&connection, &second, account.receipt_id, &account);
++
++    assert!(
++        connection
++            .execute(
++                "INSERT INTO registered_store_versions VALUES
++                 (?1,?2,2,?3,NULL,?4,21)",
++                params![
++                    second.store_id,
++                    second.store_location_sha256,
++                    [0xb1_u8; 32],
++                    [151_u8; 16]
++                ],
++            )
++            .is_err()
++    );
++    assert!(
++        connection
++            .execute(
++                "INSERT INTO registered_credentials VALUES (?1,?2,?3,?4,21)",
++                params![
++                    [0xb2_u8; 16],
++                    second.account_id,
++                    second.store_id,
++                    [151_u8; 16]
++                ],
++            )
++            .is_err()
++    );
++    assert!(
++        connection
++            .execute(
++                "INSERT INTO registered_account_versions VALUES
++                 (?1,?2,2,?3,?4,?5,21)",
++                params![
++                    second.account_id,
++                    second.store_id,
++                    second.credential_id,
++                    second.binding_sha256,
++                    [151_u8; 16]
++                ],
++            )
++            .is_err()
++    );
++    assert_eq!(
++        scalar_i64(&connection, "SELECT COUNT(*) FROM pragma_foreign_key_check"),
++        0
++    );
++}
++
++#[test]
++fn immutable_parent_query_plans_use_declared_keys_without_temp_sort() {
++    let connection = complete_schema_connection();
++    for sql in [
++        "SELECT store_id,config_generation FROM registered_store_versions
++         WHERE store_id=zeroblob(16) ORDER BY store_id,config_generation",
++        "SELECT store_id FROM registered_store_versions
++         WHERE store_id=zeroblob(16) AND location_sha256=zeroblob(32)
++           AND config_generation=1 AND config_sha256=zeroblob(32)",
++        "SELECT credential_id FROM registered_credentials
++         WHERE credential_id=zeroblob(16) AND account_id=zeroblob(16)
++           AND store_id=zeroblob(16)",
++        "SELECT account_id FROM registered_account_versions
++         WHERE account_id=zeroblob(16) AND store_id=zeroblob(16)
++           AND account_generation=1 AND credential_id=zeroblob(16)
++           AND binding_sha256=zeroblob(32)",
++    ] {
++        let plan = query_plan(&connection, sql);
++        assert!(plan.iter().any(|line| line.contains("INDEX")), "{plan:?}");
++        assert!(
++            plan.iter().all(|line| !line.contains("TEMP B-TREE")),
++            "{plan:?}"
++        );
++    }
++}
++
+ #[test]
+ fn invalid_bootstrap_keys_fail_before_entropy_or_filesystem_effects() {
+     let temp = TempDir::new().unwrap();
+@@ -1084,6 +1271,7 @@ fn invalid_bootstrap_keys_fail_before_entropy_or_filesystem_effects() {
+ }
+ 
+ #[test]
++#[allow(clippy::too_many_lines)]
+ fn bootstrap_is_database_first_stable_and_exactly_retryable() {
+     let temp = TempDir::new().unwrap();
+     let home = isolated(&temp);
+@@ -1140,6 +1328,17 @@ fn bootstrap_is_database_first_stable_and_exactly_retryable() {
+         snapshot.journal_location_sha256
+     );
+     let event_connection = Connection::open(home.database_path()).unwrap();
++    assert_eq!(
++        pragma_i64(&event_connection, "application_id"),
++        APPLICATION_ID
++    );
++    assert_eq!(
++        pragma_i64(&event_connection, "user_version"),
++        SCHEMA_VERSION
++    );
++    assert_eq!(objects(&event_connection, "table"), strings(TABLES));
++    assert_eq!(objects(&event_connection, "index"), strings(INDEXES));
++    assert_eq!(objects(&event_connection, "trigger"), strings(TRIGGERS));
+     let bootstrap_detail = scalar_blob(
+         &event_connection,
+         "SELECT detail FROM authority_events WHERE event_code=1",
+@@ -2088,6 +2287,18 @@ impl RawRemoteContext {
+             policy_sha256: [7; 32],
+         }
+     }
++
++    fn synthetic(seed: u8) -> Self {
++        Self {
++            store_id: [seed; 16],
++            store_location_sha256: [seed.wrapping_add(1); 32],
++            config_sha256: [seed.wrapping_add(2); 32],
++            account_id: [seed.wrapping_add(3); 16],
++            credential_id: [seed.wrapping_add(4); 16],
++            binding_sha256: [seed.wrapping_add(5); 32],
++            policy_sha256: [seed.wrapping_add(6); 32],
++        }
++    }
+ }
+ 
+ #[derive(Clone, Copy)]
+@@ -2361,72 +2572,104 @@ fn insert_registered_store(
+         .unwrap();
+ }
+ 
+-fn insert_registered_account(
++fn insert_receipt_store_version(
+     connection: &Connection,
+     context: &RawRemoteContext,
+     receipt_id: [u8; 16],
+ ) {
+     connection
+         .execute(
+-            "INSERT INTO registered_accounts VALUES (?1,?2,?3,1,?4,?5,'active',?6,NULL,20,20,NULL)",
++            "INSERT INTO registered_store_versions
++             (store_id,location_sha256,config_generation,config_sha256,
++              enrolled_receipt_id,committed_transition_id,created_at)
++             VALUES (?1,?2,1,?3,?4,NULL,20)",
+             params![
+-                context.account_id,
+                 context.store_id,
+-                [231_u8; 32],
+-                context.credential_id,
+-                context.binding_sha256,
++                context.store_location_sha256,
++                context.config_sha256,
+                 receipt_id,
+             ],
+         )
+         .unwrap();
+ }
+ 
+-fn insert_account_transition_and_cleanup(
++fn insert_registered_account_graph(
+     connection: &Connection,
+     context: &RawRemoteContext,
++    receipt_id: [u8; 16],
+     authorization: &RawAuthorization,
+ ) {
+-    let transition_id = [151_u8; 16];
+-    assert!(
+-        connection
+-            .execute(
+-                "INSERT INTO account_transitions VALUES (
+-                 ?1,?2,?3,?4,'account_update',?5,?6,1,3,?7,'prepared',20,NULL,NULL,NULL)",
+-                params![
+-                    transition_id,
+-                    authorization.grant_id,
+-                    context.store_id,
+-                    context.account_id,
+-                    [152_u8; 32],
+-                    [153_u8; 32],
+-                    [154_u8; 32],
+-                ],
+-            )
+-            .is_err()
+-    );
++    let transition_seed = context.account_id[0].wrapping_add(147);
++    let transition_id = [transition_seed; 16];
++    connection
++        .execute_batch("BEGIN; PRAGMA defer_foreign_keys=ON;")
++        .unwrap();
++    connection
++        .execute(
++            "INSERT INTO registered_accounts VALUES
++             (?1,?2,?3,1,?4,?5,'active',?6,NULL,20,20,NULL)",
++            params![
++                context.account_id,
++                context.store_id,
++                [231_u8; 32],
++                context.credential_id,
++                context.binding_sha256,
++                receipt_id,
++            ],
++        )
++        .unwrap();
+     connection
+         .execute(
+             "INSERT INTO account_transitions VALUES (
+-         ?1,?2,?3,?4,'account_update',?5,?6,1,2,?7,'prepared',20,NULL,NULL,NULL)",
++             ?1,?2,?3,?4,'account_create',?5,?6,1,2,?7,'prepared',20,NULL,NULL,NULL)",
+             params![
+                 transition_id,
+                 authorization.grant_id,
+                 context.store_id,
+                 context.account_id,
+-                [152_u8; 32],
+-                [153_u8; 32],
+-                [154_u8; 32],
++                [transition_seed.wrapping_add(1); 32],
++                [transition_seed.wrapping_add(2); 32],
++                [transition_seed.wrapping_add(3); 32],
+             ],
+         )
+         .unwrap();
+-    assert!(connection.execute(
+-        "INSERT INTO credential_cleanup VALUES (?1,?2,'active_v2',?3,?4,'claimed',NULL,20,NULL)",
+-        params![[155_u8; 16], transition_id, [156_u8], [157_u8; 32]],
+-    ).is_err());
+-    connection.execute(
+-        "INSERT INTO credential_cleanup VALUES (?1,?2,'active_v2',?3,?4,'provisional',NULL,20,NULL)",
+-        params![[155_u8; 16], transition_id, [156_u8], [157_u8; 32]],
+-    ).unwrap();
++    connection
++        .execute(
++            "INSERT INTO registered_credentials VALUES (?1,?2,?3,?4,20)",
++            params![
++                context.credential_id,
++                context.account_id,
++                context.store_id,
++                transition_id,
++            ],
++        )
++        .unwrap();
++    connection
++        .execute(
++            "INSERT INTO registered_account_versions VALUES
++             (?1,?2,1,?3,?4,?5,20)",
++            params![
++                context.account_id,
++                context.store_id,
++                context.credential_id,
++                context.binding_sha256,
++                transition_id,
++            ],
++        )
++        .unwrap();
++    connection
++        .execute(
++            "INSERT INTO credential_cleanup VALUES
++             (?1,?2,'active_v2',?3,?4,'provisional',NULL,20,NULL)",
++            params![
++                [transition_seed.wrapping_add(4); 16],
++                transition_id,
++                [transition_seed.wrapping_add(5)],
++                [transition_seed.wrapping_add(6); 32]
++            ],
++        )
++        .unwrap();
++    connection.execute_batch("COMMIT").unwrap();
+ }
+ 
+ fn insert_challenge_effect(connection: &Connection, value: &RawAuthorization) {
+@@ -2658,13 +2901,13 @@ fn complete_schema_connection() -> Connection {
+     insert_raw_challenge(&connection, &store);
+     insert_raw_receipt(&connection, &store);
+     insert_registered_store(&connection, &context, store.receipt_id);
++    insert_receipt_store_version(&connection, &context, store.receipt_id);
+ 
+     let account = RawAuthorization::account_create(40, &context, &root);
+     insert_raw_challenge(&connection, &account);
+     insert_raw_receipt(&connection, &account);
+-    insert_registered_account(&connection, &context, account.receipt_id);
+     insert_grant_use(&connection, &account);
+-    insert_account_transition_and_cleanup(&connection, &context, &account);
++    insert_registered_account_graph(&connection, &context, account.receipt_id, &account);
+ 
+     let remote = RawAuthorization::remote(60, &context, &root);
+     insert_raw_challenge(&connection, &remote);
+@@ -2764,6 +3007,16 @@ fn scalar_blob(connection: &Connection, sql: &str) -> Vec<u8> {
+     connection.query_row(sql, [], |row| row.get(0)).unwrap()
+ }
+ 
++fn query_plan(connection: &Connection, sql: &str) -> Vec<String> {
++    connection
++        .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
++        .unwrap()
++        .query_map([], |row| row.get(3))
++        .unwrap()
++        .collect::<Result<Vec<_>, _>>()
++        .unwrap()
++}
++
+ fn create_database_parent(home: &IsolatedAuthorityHome) {
+     std::fs::create_dir_all(home.database_path().parent().unwrap()).unwrap();
+ }

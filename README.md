@@ -7,9 +7,11 @@ email accounts. The project targets IMAP, SMTP, and JMAP across consumer,
 enterprise, and self-hosted providers without routing mailbox data through a
 Kirje cloud service.
 
-> Status: v0.3 Agent Mail Operations. Kirje provides bounded IMAP reads, private
-> local drafts, multipart SMTP sending, and governed IMAP mailbox operations
-> through one auditable local operation ledger.
+> Status: `v1.0.0-alpha.1` Security Alpha. Kirje provides bounded IMAP reads,
+> private local drafts, multipart SMTP sending, governed IMAP mailbox
+> operations, capability-anchored local input, and an auditable local operation
+> ledger. This is a prerelease; see [RELEASE_NOTES.md](RELEASE_NOTES.md) before
+> using it with an important mailbox.
 
 ## Why Kirje
 
@@ -51,6 +53,8 @@ cargo build --release
 ./target/release/kirje operation apply <operation-id> --pretty
 ./target/release/kirje schema --pretty
 ```
+
+Building from source requires Rust 1.95 or newer.
 
 Every non-MCP command emits a stable JSON envelope. Use `--pretty` only for
 interactive inspection. Secret changes and send approval require a terminal;
@@ -161,6 +165,9 @@ or an explicit destination supplied by the caller. Safe delete never issues
 
 ## Roadmap
 
+- Finish owner-authorized account and credential workflows for `alpha.2`.
+- Complete config/ledger migration to stable internal account identities in
+  `alpha.2`.
 - Historical backfill, thread reconstruction, reconciliation, and event watching.
 - JMAP discovery and JMAP mailbox operations.
 - Provider conformance fixtures and real-mailbox compatibility reports.

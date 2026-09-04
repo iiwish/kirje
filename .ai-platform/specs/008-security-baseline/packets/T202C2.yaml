@@ -1,0 +1,837 @@
+schema_version: 1
+packet_id: 008-T202C2-A006
+task_id: T202C2
+feature_id: 008-security-baseline
+mode: execute_one_task
+adapter: codex_worker
+status: ready_for_delegated_execution
+
+governance_inputs:
+  constitution: .ai-platform/memory/constitution.md
+  product_contract: .ai-platform/docs/product-design.md
+  program_spec: .ai-platform/specs/007-stable-v1-program/spec.md
+  program_plan: .ai-platform/specs/007-stable-v1-program/plan.md
+  feature_spec: .ai-platform/specs/008-security-baseline/spec.md
+  requirements_checklist: .ai-platform/specs/008-security-baseline/checklists/requirements.md
+  feature_plan: .ai-platform/specs/008-security-baseline/plan.md
+  research: .ai-platform/specs/008-security-baseline/research.md
+  data_model: .ai-platform/specs/008-security-baseline/data-model.md
+  contracts:
+    - .ai-platform/specs/008-security-baseline/contracts/authorization.md
+    - .ai-platform/specs/008-security-baseline/contracts/account-config-v2.md
+    - .ai-platform/specs/008-security-baseline/contracts/authority-store.md
+  work_graph: .ai-platform/specs/008-security-baseline/tasks.md
+  analysis: .ai-platform/specs/008-security-baseline/analysis.md
+  predecessor_packet: .ai-platform/specs/008-security-baseline/packets/T202C1S.yaml
+  predecessor_evidence: .ai-platform/evidence/T202C1S/summary.md
+  approval_gates:
+    constitution: confirmed project contract
+    program_spec_plan_work_graph: confirmed under delegated project-owner authority
+    feature_spec_and_plan: confirmed after independent security reviews
+    requirements_checklist: complete
+    predecessor: T202C1S Accepted at production commit 8eceaff and evidence commit 7a0eb7a
+    decomposition: T202C is an acceptance umbrella; T202C1, T202C1S, and T202C2 through T202C4 are strict serial production tasks
+    analysis: T202C2 A001 through A005 received no pass; A006 closes the terminal-recovery retry scope contradiction and independently passed with zero findings
+    execution_authority: explicit standing user instruction to continue without per-step approval; failed or missing gates still stop execution
+
+work_unit:
+  title: Exact account-create challenge and crash-safe registry transition
+  goal: >-
+    Extend immutable challenge issuance only for registry-backed account_create,
+    then implement the complete create prepare, config-committed, finalize,
+    abort, and recovery-required authority lifecycle over the corrected
+    canonical SQLite v1 schema. Reserve account, credential, active display, transition, and
+    store-config identities before external config work; block the store across
+    the authority/config gap; exactly recover before/after snapshots; and fail
+    closed on every unsafe pair without config, keyring, runtime, protocol, or
+    network access.
+  epic: T101
+  stories:
+    - US-001
+    - US-003
+  requirements:
+    - FR-003
+    - FR-004
+    - FR-005
+    - FR-006
+    - FR-016
+    - NFR-001
+    - NFR-002
+    - NFR-003
+    - NFR-006
+    - NFR-007
+  priority: P0
+  depends_on:
+    - T202C1S Accepted at production commit 8eceaff with evidence in .ai-platform/evidence/T202C1S
+    - canonical Authority SQLite v1 DDL SHA-256 5d01739b89246a5f495a965e57e416eee9fd0b5016995add41c6edee7f3e970d
+    - T201 Accepted at production commit 89cc706
+    - confirmed T202C2 account-create challenge, transition, event, and restart amendments in authority-store.md and data-model.md
+  blocks:
+    - T202C3
+    - T202C umbrella acceptance
+    - T202D
+  parallel: false
+  conflicts_with:
+    - any concurrent authority.rs, challenge, grant, registry, transition, event, clock, or restart-validator change
+    - T202C3 through T202E
+
+execution_constraints:
+  allowed_files:
+    - crates/kirje-store/src/lib.rs
+    - crates/kirje-store/src/authority.rs
+    - crates/kirje-store/tests/authority_registry.rs
+    - crates/kirje-store/tests/fixtures/authority/registry/account_create/**
+  forbidden_files:
+    - crates/kirje-store/src/authority/schema_v1.sql
+    - crates/kirje-core/**
+    - crates/kirje-runtime/**
+    - crates/kirje-protocol/**
+    - crates/kirje-cli/**
+    - crates/kirje-mcp/**
+    - Cargo.toml
+    - Cargo.lock
+    - AGENTS.md
+    - .ai-platform/**
+    - docs/**
+    - skills/**
+  forbidden_changes:
+    - no schema, application ID, user version, table, index, trigger, migration, dependency, feature, or MSRV change
+    - no account update/remove, credential set/delete/cleanup, effect, invocation, observation, rotation-finalization, recovery-finalization, policy, assurance, invalidation, or audit API
+    - no config file, config-lock implementation, keyring/credential-secret access, runtime, protocol, CLI, MCP, provider, or network access
+    - no independently callable generic grant-use mutation
+    - no secret, mailbox content, real address, endpoint, UID, subject, body, attachment, private signing seed/key, committed signer source/API, real signature/proof/nonce, token, or authorization password
+    - clearly synthetic detached-signature/proof/nonce/public-key fixture bytes are permitted only under the allowed account_create fixture directory and therefore in the generated evidence diff; an out-of-repository ephemeral precomputation may produce them, but no seed, private key, signer implementation, transient signing log/output, or signer API enters the repository, evidence narrative, worker summary, or product surface
+    - accepted predecessor synthetic public vectors in authority_registry.rs and store_enrollment/signatures.txt are grandfathered only when their baseline bytes are unchanged; full-tree scans classify those exact bytes as accepted synthetic, while changed-file scans require every task-new synthetic byte to be under account_create/**
+    - no weakening, deleting, ignoring, serializing, or conditionally skipping a RED or predecessor test
+    - no delegation and no governance, evidence, task-status, commit, branch, or PR mutation by the worker
+  branch: codex/v1-roadmap-governance
+  worktree: /Users/iiwish/self/kirje
+  isolation: one governed task; clean worktree required after orchestrator packet commit
+  baseline_hashes:
+    crates/kirje-store/src/lib.rs: 80673cbb8a2975c5ee0729a365cb8f49483d3db135879bafc9d792036bd6c3a2
+    crates/kirje-store/src/authority.rs: 7194d7e993fba3fe033efbd086afde9efc4a6c0fc2f3117496581cec478280ee
+    crates/kirje-store/tests/authority_registry.rs: c8a8e49592774b68442b3a6b6c27b9f1a3b9c6e32bf8e6ce2bc05b70591a5a68
+    crates/kirje-store/src/authority/schema_v1.sql: 5d01739b89246a5f495a965e57e416eee9fd0b5016995add41c6edee7f3e970d
+    crates/kirje-store/tests/fixtures/authority/registry/store_enrollment/signatures.txt: 8d71f00425d2d659dd7504bc79961387dacb2f7866545f501ac6e8af021f6a60
+    crates/kirje-store/tests/fixtures/authority/registry/account_create: absent
+
+stage_boundary:
+  supported_new_challenge:
+    - account_create only
+  supported_new_operations:
+    - prepare_account_transition for AccountCreate only
+    - mark_config_committed
+    - finalize_account_transition
+    - abort_transition
+    - mark_transition_recovery_required
+  unchanged_supported_challenges:
+    - store_enroll
+    - owner_rotate
+    - recovery_rotate
+    - owner_recover
+  challenge_effects:
+    - account_create has exactly zero challenge_effects
+  unsupported_actions:
+    - account_update
+    - account_remove
+    - credential_set
+    - credential_delete
+    - credential_cleanup
+    - send_submit and all mailbox mutations
+    - ambiguous_close
+    - policy_update and assurance_update remain unsupported capability
+  terminal_recovery_boundary:
+    - every supported canonical-v1 path through T202E leaves an account-transition RecoveryRequired registered store pair/state unchanged and admits no successor transition on that store
+    - T202E trust recovery may mark additional stores recovery-required but cannot clear, update, delete, or reuse a store already terminal from an account transition
+    - any future recovery-clearing or successor design requires a separately reviewed schema/product contract beyond canonical v1 and is not an implementation option in this packet
+
+governance_amendment:
+  trigger: independent read-only T202C2 preflight against immutable schema v1
+  review_result:
+    pass: false
+    findings: 3 High, 2 Medium
+    blocking_finding: mutable registered store/account tuples were invalid historical remote-effect parents and made future legal mutations fail ON UPDATE RESTRICT
+    prerequisite: satisfied by accepted T202C1S immutable registry-version parents
+  A001_resolutions:
+    - accepted T202C1S redirects historical remote effects to immutable store/account versions and preserves legal current projection updates
+    - prepare and every lifecycle phase use monotonic exact recovery: immutable phase evidence plus every legal successor returns the transition-scoped historical result without replay
+    - clearly synthetic account-create detached signature/proof/nonce/public-key fixture bytes are allowed while every seed, private key, committed signer source/API, and real authority artifact remains forbidden
+    - restart streams store entity events through authority_events_entity_sequence and keyed-loads transitions; it does not sort account_transitions by an unsupported index
+    - fresh challenge issuance reserves only transition ID; effective-time transition digest absence is checked inside first prepare
+  closed_high_findings:
+    - the account/transition circular FK is closed by transaction-local defer_foreign_keys plus an explicit pre-commit foreign_key_check
+    - store-level config CAS is serialized by one active transition per store and store blocking across the config/authority gap
+    - display, transition-kind, transition, no-time intent, and unsafe-recovery identities have exact domain-separated encodings
+    - authorized-unclaimed expiry has an account-create intent independent of raw observed/prepared time and supports exact response-loss recovery
+    - recovery stores the actual unsafe pair on the private store row, keeps account blocked, and binds it through a recovery-observation event digest
+  closed_medium_findings:
+    - codes 7 and 9 through 14 have exact entity/source/related/state/context/receipt/order shapes
+    - every durable state and before/after/third observation has a closed method/error/retry/clock result
+    - account-create cleanup semantics are stage-fenced and the packet includes schema/hash, authorization, no-default, MSRV, affine-query, and query-plan gates
+  A002_result:
+    pass: false
+    findings: 0 Critical, 0 High, 4 Medium, 0 Low
+    resolutions:
+      - config-committed writes immutable versions before mutable projection advancement, with exact timestamps and dedicated credential/store-version/account-version fault hooks
+      - historical retry returns a transition-scoped immutable result after a later independent transition changes current store state or generation only when the selected transition reached Finalized or Aborted
+      - restart event SQL uses only canonical authority_events columns and parses transition identity from bounded detail
+      - analysis distinguishes historical A001 findings from the current A003 review gate
+  A003_result:
+    pass: false
+    findings: 0 Critical, 0 High, 2 Medium, 0 Low
+    resolutions:
+      - RecoveryRequired is the sole strictly proven transition-projection exception that reads the terminal current store pair because no immutable raw unsafe pair exists in canonical v1
+      - the secret stop condition permits only declared synthetic public fixture bytes in the allowed fixture directory and generated evidence diff
+  A004_result:
+    pass: false
+    findings: 0 Critical, 0 High, 1 Medium, 2 Low
+    resolutions:
+      - unchanged accepted synthetic public vectors in the hash-pinned predecessor source and store_enrollment fixture are grandfathered; only task-new synthetic bytes are path-restricted to account_create/**
+      - account-transition RecoveryRequired store pair/state is immutable for every supported canonical-v1 path through T202E, so its terminal projection remains reconstructable
+      - analysis, plan, task, and packet identified A005 as the sole pending review
+  A005_result:
+    pass: false
+    findings: 0 Critical, 0 High, 1 Medium, 0 Low
+    resolutions:
+      - cross-transition historical retry applies only after the selected transition reached Finalized or Aborted, the only account-transition terminals that permit a legal successor on the same store
+      - RecoveryRequired exact retry requires the unchanged terminal current store pair/state and exact recovery graph with no successor transition or recovery-clearing mutation
+      - prepare and config-committed retries may return RecoveryRequired only as the selected transition's own legal terminal successor under that same no-successor proof
+  A006_result:
+    pass: true
+    findings: 0 Critical, 0 High, 0 Medium, 0 Low
+    token: T202C2_A006_PACKET_REVIEW_PASS
+    verification:
+      - A005 terminal-retry contradiction is closed across projection, lifecycle, RED, and test-matrix rules
+      - every A001 through A004 closure remains intact
+      - artifact validator, diff check, format, Clippy, 99 all-feature store tests, DDL inventory/hash, and indexed no-temp-sort event query passed independently
+  required_review: satisfied by T202C2_A006_PACKET_REVIEW_PASS
+
+codebase_context:
+  local_instructions:
+    - AGENTS.md
+  relevant_read_only_files:
+    - crates/kirje-core/src/account.rs
+    - crates/kirje-core/src/authorization.rs
+    - crates/kirje-core/src/mail.rs
+    - crates/kirje-store/src/authority/schema_v1.sql
+    - crates/kirje-store/tests/authority_authorization.rs
+    - crates/kirje-store/tests/authority_schema.rs
+    - .ai-platform/specs/008-security-baseline/contracts/account-config-v2.md
+    - .ai-platform/specs/008-security-baseline/contracts/authority-store.md
+    - .ai-platform/specs/008-security-baseline/data-model.md
+  existing_patterns:
+    - core owns typed UUIDv4 IDs, ConfigCas, AccountSnapshot, AccountMutationManifest, AccountCreate validation, sealed ActionManifest parsing, target/action codes, and SHA-256 values
+    - T202B owns immutable challenges/receipts/nonces, exact proof replay, effective authority time, fixed apply lock, deterministic test entropy, fault hooks, event detail, and historical validation
+    - T202C1 owns the only canonical grant-use helper, immutable use transcript, authorized-unclaimed expiry order, store enrollment graph, store registry rows, and affine-query validator counters
+    - every post-bootstrap mutation opens the fixed existing authority DB without CREATE, classifies it, validates canonical schema/anchor/history inside BEGIN IMMEDIATE, and maps private failures to bounded stable errors
+    - corrected schema v1 contains immutable credential/store-version/account-version parents plus an intentional new-account/account-transition/credential FK cycle
+    - public projections omit private authority, config, location, credential, binding, and proof material and do not implement generic formatting/serialization traits
+  implementation_preferences:
+    - reuse and factor T202C1 grant, expiry, event, clock, transcript, error, and validator helpers rather than creating a second replay path
+    - parse the sealed core manifest once per bounded operation and derive proposed account context from that typed value
+    - represent lifecycle values as closed Rust enums with explicit persistent codes, never enum ordinals or caller strings
+    - preflight broad row storage classes once, then stream rows and use only bounded keyed/indexed checks
+
+required_types:
+  enums:
+    - AccountTransitionKind with all five schema kinds and explicit persistent u8 codes; T202C2 accepts only AccountCreate
+    - AccountTransitionState with Prepared, ConfigCommitted, Finalized, Aborted, RecoveryRequired and explicit event-state codes
+    - RegisteredAccountState with Proposed, Active, Blocked, Removed
+    - RegisteredStoreTransitionState with Active, Blocked, RecoveryRequired
+  prepare_request:
+    fields:
+      - GrantUseRequest
+      - transition_id
+      - store_id
+      - account_id
+      - closed transition kind
+      - before and after config SHA-256
+      - expected and next config generations
+      - display-ID SHA-256
+      - account generation
+      - credential_id
+      - binding SHA-256
+      - observed_at_unix_ms
+    constructor_checks:
+      - observed time is nonnegative and representable as UTC milliseconds
+      - expected and next generation are positive, SQLite-representable, and exact successor values
+      - before and after config digests differ
+      - AccountCreate requires account generation exactly one
+      - GrantUse target kind/shape remains owned by its accepted constructor
+    database_checks:
+      - every field equals the immutable challenge/receipt/sealed-manifest context
+      - the display digest is recomputed from exact validated after.display_id bytes
+  observation_request:
+    fields:
+      - transition_id
+      - exact declared source state
+      - actual config generation
+      - actual config SHA-256
+      - observed_at_unix_ms
+    constructor_checks:
+      - time and generation are representable
+      - source state is closed; each method restricts it as specified below
+    forbidden_inputs:
+      - no current/stale boolean
+      - no event source
+      - no account/store/receipt/grant identity duplicate
+      - no path, config bytes, keyring callback, credential, or external handle
+  projection:
+    includes:
+      - transition_id
+      - account_id
+      - closed transition/account/store states
+      - config generation
+      - account generation
+      - prepared UTC timestamp
+    omits:
+      - store_id
+      - credential_id
+      - display, binding, config, location, manifest, event, proof, signature, nonce, key, endpoint, SQL, or path material
+    trait_fence:
+      - request and projection types do not implement Debug, Display, Serialize, Deserialize, JsonSchema, Default, or logging helpers
+    transition_scoped_snapshot:
+      - Prepared, ConfigCommitted, Finalized, and Aborted return values are derived from the selected transition's immutable row, version rows, and exact events; they never copy state or generation from a later independent transition's mutable registered_stores projection
+      - Prepared means transition Prepared, account Proposed, store Blocked, expected config generation, account generation one, and original prepared timestamp
+      - ConfigCommitted means transition ConfigCommitted, account Proposed, store Blocked, next config generation, account generation one, and original prepared timestamp
+      - Finalized means transition Finalized, account Active, store Active, next config generation, account generation one, and original prepared timestamp
+      - Aborted means transition Aborted, account Removed, store Active, expected config generation, account generation one, and original prepared timestamp
+      - RecoveryRequired is the sole terminal-current-row exception: after proving registered_stores is RecoveryRequired, the selected account is Blocked with active_transition_id equal to the selected RecoveryRequired transition, both recovery events recompute from the exact current unsafe pair, and no successor transition/event exists, its config generation is read from that terminal store pair
+      - a missing/mutated store pair, wrong account/transition link, wrong recovery digest/prior state, or any successor makes the complete history owner_recovery_required rather than returning a projection
+      - a later transition on the same store may exist only after the selected transition reached Finalized or Aborted; retries of that selected transition's committed phases return its immutable terminal projection rather than the later current store projection
+      - RecoveryRequired permits no later transition; every exact retry requires the unchanged terminal current store pair/state and complete recovery graph with no successor
+
+canonical_identities:
+  display_digest:
+    domain: "KIRJE-ACCOUNT-DISPLAY-ID-V1\\0"
+    tags:
+      - "0x0001 exact validated display-ID UTF-8"
+    digest: SHA-256 of the authority encode_transcript bytes; uniqueness is scoped by the schema pair store_id plus digest
+  transition_kind_codes:
+    account_create: 1
+    account_update: 2
+    account_remove: 3
+    credential_set: 4
+    credential_delete: 5
+  transition:
+    domain: "KIRJE-ACCOUNT-TRANSITION-V1\\0"
+    tags:
+      - "0x0001 transition UUID16"
+      - "0x0002 grant UUID16"
+      - "0x0003 store UUID16"
+      - "0x0004 account UUID16"
+      - "0x0005 transition kind u8"
+      - "0x0006 before config SHA-256 BLOB32"
+      - "0x0007 after config SHA-256 BLOB32"
+      - "0x0008 expected generation u64be"
+      - "0x0009 next generation u64be"
+      - "0x000a prepared-at i64be"
+    persistence: only transition_sha256 is stored; exact bytes are recomputed from rows
+  no_time_prepare_intent:
+    domain: "KIRJE-ACCOUNT-TRANSITION-INTENT-V1\\0"
+    tags:
+      - "0x0001 grant UUID16"
+      - "0x0002 receipt UUID16"
+      - "0x0003 action u16be"
+      - "0x0004 target-kind u16be"
+      - "0x0005 canonical target bytes"
+      - "0x0006 manifest SHA-256 BLOB32"
+      - "0x0007 transition UUID16"
+      - "0x0008 store UUID16"
+      - "0x0009 account UUID16"
+      - "0x000a transition kind u8"
+      - "0x000b before config SHA-256 BLOB32"
+      - "0x000c after config SHA-256 BLOB32"
+      - "0x000d expected generation u64be"
+      - "0x000e next generation u64be"
+      - "0x000f display-ID SHA-256 BLOB32"
+      - "0x0010 account generation u64be"
+      - "0x0011 credential UUID16"
+      - "0x0012 binding SHA-256 BLOB32"
+    identity: excludes raw observed and prepared time; exact expiry retry is reconstructable from immutable rows plus request
+  unsafe_recovery:
+    domain: "KIRJE-ACCOUNT-TRANSITION-RECOVERY-V1\\0"
+    tags:
+      - "0x0001 transition SHA-256 BLOB32"
+      - "0x0002 prior transition state u16be"
+      - "0x0003 actual config generation u64be"
+      - "0x0004 actual config SHA-256 BLOB32"
+    identity: event context is SHA-256 of exact bytes; actual pair is private in registered_stores and validator recomputes the digest
+
+account_create_challenge:
+  intrinsic_shape:
+    - target and context account are the same proposed AccountId
+    - context store equals ConfigCas store and context binding equals after binding; policy is absent
+    - before absent; after present with generation 1, proposed binding, reentry_required credential, credential_reentry_required reason, empty cleanup IDs
+    - mutation cleanup empty; config generation increments once; before/after digests differ
+    - no challenge effect
+  pending_recovery_order:
+    - validate request and sealed manifest bytes, ready authority, and intrinsic manifest
+    - compute authorization context and return exact unexpired pending challenge before current registry absence checks
+    - expire an old pending challenge and append its exact event before fresh checks
+  fresh_context_order:
+    - exact store ID/location and active state
+    - exact current config generation/digest
+    - no prepared/config_committed transition for the store
+    - globally absent account, credential, and transition-ID identities
+    - no proposed/active/blocked display digest for the store
+    - validate requested expiry before entropy and insert
+  stable_errors:
+    store_location_mismatch: config_store_identity_conflict
+    stale_or_absent_or_removed_store_or_config_or_binding: authorization_context_stale
+    busy_store: account_update_conflict
+    recovery_required_store: owner_recovery_required
+    stable_id_collision: account_identity_conflict
+    active_display_collision: account_already_exists
+  historical_rule:
+    - pending, authorized, expired, used, sibling, and stale account-create challenges are validated intrinsically and do not reapply current absence/state checks
+
+prepare_transaction:
+  first_use_preconditions:
+    - complete canonical schema, anchor, accepted challenge/receipt/grant/store/account/transition/event history is valid inside the write transaction
+    - no existing grant use
+    - exact current unexpired receipt/challenge/create manifest and no-time prepare intent
+    - active store has exact before generation/digest and sealed location
+    - no nonterminal transition for the store
+    - all proposed identities, the effective-time transition digest, and active display slot remain absent
+  atomic_order:
+    - insert canonical T202C1 grant use and grant_used event
+    - update store active to blocked without changing before config pair
+    - enable and verify transaction-local PRAGMA defer_foreign_keys=ON
+    - insert proposed registered account with active_transition_id and exact receipt/identity values
+    - insert prepared account transition with exact grant/store/account/config values and transition digest
+    - insert registered_credentials with the proposed credential/account/store and creating transition
+    - run PRAGMA foreign_key_check and require zero rows after the complete cyclic graph exists
+    - append store_state_changed then account_transition_prepared
+    - update paired authority clock and commit
+  row_shapes:
+    store:
+      - state blocked
+      - before config pair retained
+      - updated_at equals effective prepare time
+    account:
+      - state proposed
+      - removed_at null
+      - active_transition_id exact
+      - account generation 1
+      - exact receipt, display digest, credential, and binding values
+      - created_at equals updated_at equals effective prepare time
+    transition:
+      - state prepared
+      - prepared_at effective prepare time
+      - all later timestamps null
+  defer_foreign_keys:
+    - permitted only after all precondition reads in first prepare and only inside that BEGIN IMMEDIATE
+    - must read back enabled
+    - must be followed by exact empty foreign_key_check after account, transition, and credential rows
+    - rollback or commit resets the connection setting; normal/open validation never defers
+  exact_recovery:
+    - a present exact grant requires the immutable account/transition reservation and prepared event graph plus any complete legal later lifecycle
+    - return that transition's scoped latest durable projection after checked clock when it legally advanced; a later independent store transition may coexist only after the selected transition reached Finalized or Aborted; append no event and mutate no lifecycle timestamp
+    - when the selected transition's latest state is RecoveryRequired, exact retry instead requires its unchanged terminal current store pair/state and exact recovery graph with no successor transition
+    - changed bounded prepare identity after grant use returns grant_already_used
+    - missing or changed persisted atomic graph for an exact grant is owner_recovery_required
+  expiry:
+    - compare exact receipt/challenge/intent before current occupancy
+    - effective time after receipt expiry changes only challenge authorized to expired, paired clock, and one authorized-to-expired event with intent digest
+    - exact response-loss/restart/concurrent retry returns authorization_expired and no duplicate event
+    - changed intent returns authorization_context_stale; changed raw observed time alone is not identity
+  conflict_precedence_after_expiry:
+    - store config/location/state
+    - active store transition
+    - global account/credential/transition identities
+    - active display slot
+  no_external_effects:
+    - no entropy after challenge issuance
+    - no callback, config read/write, keyring operation, credential probe, adapter, runtime, protocol, or network call
+
+observation_classifier:
+  before: exact expected_generation plus before_config_sha256
+  after: exact next_generation plus after_config_sha256
+  third: every other pair
+
+lifecycle_matrix:
+  monotonic_phase_recovery:
+    - before applying a fresh pair classifier, each method checks whether its exact phase event already committed
+    - an exact completed phase validates its immutable request/event identity and every legal successor event/state, then returns the selected transition's scoped latest durable projection without replaying that phase
+    - mark_config_committed exact retry may therefore return ConfigCommitted, Finalized, or RecoveryRequired after another process legally advanced it; prepare exact retry may return every legal successor for the selected transition
+    - finalized and aborted exact retries return their transition-scoped terminal projection even after a later independent transition changes current store state/generation; later tasks must preserve this monotonic rule
+    - recovery exact retry is the terminal-current-row exception and succeeds only while the exact unsafe pair/state and recovery graph are unchanged and no successor transition exists
+    - changed phase identity or an illegal/missing successor graph is conflict or corruption according to the closed precedence; observed time may update only the paired clock
+  unsafe_precedence:
+    - after history and terminal-exact lookup, Prepared plus third enters common recovery from any observation method
+    - after history and terminal-exact lookup, ConfigCommitted plus before or third enters common recovery from any observation method
+    - safe pairs apply method-specific expected-state rules only after this classifier
+  mark_config_committed:
+    expected_request_state: Prepared
+    from_prepared_before:
+      result: unchanged Prepared exact retry point
+      writes: paired clock only
+    from_prepared_after:
+      result: ConfigCommitted
+      ordered_writes:
+        - insert immutable after registered_store_versions row with this transition origin and created_at equal to effective config-commit time
+        - insert immutable account-generation-one registered_account_versions row with this transition origin, reserved credential, and created_at equal to the same effective time
+        - update transition Prepared to ConfigCommitted and set config_committed_at to the same effective time
+        - advance registered_stores current config pair before to after while state remains Blocked and set updated_at to the same effective time
+        - append one account_config_committed event with occurred_at equal to the same effective time
+        - update paired clock to the same effective time and commit
+    from_prepared_third:
+      result: RecoveryRequired through common recovery transaction
+    from_config_committed_or_legal_successor_after:
+      result: exact response-loss recovery returning the selected transition's scoped legal-successor projection
+      writes: paired clock only
+    other_durable_state_or_pair:
+      result: account_update_conflict unless the common unsafe-recovery rule applies
+  finalize_account_transition:
+    expected_request_state: ConfigCommitted
+    from_config_committed_after:
+      result: Finalized
+      writes:
+        - account proposed to active, clear active transition, account updated_at
+        - transition finalized/finalized_at
+        - store blocked to active retaining after pair, store updated_at
+        - finalized event then store-unblocked event
+        - paired clock
+    from_finalized_after:
+      result: exact response-loss recovery
+      writes: paired clock only
+    from_config_committed_before_or_third:
+      result: RecoveryRequired through common recovery transaction
+    other_durable_state_or_pair:
+      result: account_update_conflict
+  abort_transition:
+    expected_request_state: Prepared
+    from_prepared_before:
+      result: Aborted
+      writes:
+        - account proposed to removed, clear active transition, set removed_at/updated_at
+        - transition aborted/resolved_at
+        - store blocked to active retaining before pair, store updated_at
+        - aborted event then store-unblocked event
+        - paired clock
+    from_aborted_before:
+      result: exact response-loss recovery
+      writes: paired clock only
+    from_prepared_after:
+      result: account_update_conflict with no write
+    from_prepared_third:
+      result: RecoveryRequired through common recovery transaction
+    other_durable_state_or_pair:
+      result: account_update_conflict
+  mark_transition_recovery_required:
+    expected_request_state:
+      - Prepared
+      - ConfigCommitted
+    accepted_pairs:
+      - third from Prepared
+      - before or third from ConfigCommitted
+    first_result:
+      - transition recovery_required/resolved_at
+      - account blocked and active transition retained
+      - store recovery_required with exact actual observed pair
+      - store-recovery event then transition-recovery event, both with unsafe-recovery digest
+      - paired clock
+    exact_recovery:
+      - same declared prior state and same actual store pair return unchanged; paired clock only
+    rejected_pairs:
+      - before or after from Prepared
+      - after from ConfigCommitted
+      - any changed terminal pair
+    rejected_result: account_update_conflict with no write
+  global_rules:
+    - each first state change uses store-derived effective authority time and exact UTC conversion
+    - all events for one transition step are adjacent, share effective time, and precede paired clock commit as packet order specifies
+    - exact recovery never refreshes prepared/config_committed/finalized/resolved/created/updated/removed timestamps
+    - raw observed time is never exact-retry identity
+    - recovery_required is terminal in T202C2 and cannot be cleared
+    - recovery_required plus the exact stored actual pair/recovery digest returns the recovery projection from any observation method; every changed terminal pair conflicts
+    - registered_credentials.created_at equals the create transition prepared_at, proposed account created_at/initial updated_at, and both prepare state-event timestamps
+    - transition-origin registered_store_versions.created_at and registered_account_versions.created_at equal transition config_committed_at, the account_config_committed event occurred_at, and the store updated_at written by that config-commit transaction
+
+event_contract:
+  maps:
+    entity_kind: "4 store, 5 account, 6 transition, 8 challenge, 9 receipt, 10 grant"
+    event_code: "5 challenge_expired, 7 grant_used, 9 store_state_changed, 10 account_transition_prepared, 11 account_config_committed, 12 account_transition_finalized, 13 account_transition_aborted, 14 account_transition_recovery_required"
+    source: "1 authority_store, 4 runtime, 5 crash_recovery, 6 owner_reconciliation"
+    state: "0401 store_active, 0402 store_blocked, 0404 store_recovery_required, 0501 account_proposed, 0502 account_active, 0503 account_blocked, 0504 account_removed, 0601 transition_prepared, 0602 transition_config_committed, 0603 transition_finalized, 0604 transition_aborted, 0605 transition_recovery_required"
+  prepare_order:
+    - grant_used is the accepted T202C1 shape with use digest
+    - store_state_changed: entity store, source runtime, related transition, active to blocked, transition digest, receipt
+    - account_transition_prepared: entity transition, source runtime, related account, none to prepared, transition digest, receipt
+  config_committed:
+    - entity transition, source runtime, related account, prepared to config_committed, transition digest, receipt
+  finalize_order:
+    - transition finalized: entity transition, source runtime, related account, config_committed to finalized, transition digest, receipt
+    - store state changed: entity store, source runtime, related transition, blocked to active, transition digest, receipt
+  abort_order:
+    - transition aborted: entity transition, source owner_reconciliation, related account, prepared to aborted, transition digest, receipt
+    - store state changed: entity store, source owner_reconciliation, related transition, blocked to active, transition digest, receipt
+  recovery_order:
+    - store state changed: entity store, source crash_recovery, related transition, blocked to recovery_required, recovery digest, receipt
+    - transition recovery: entity transition, source crash_recovery, related account, exact prior state to recovery_required, recovery digest, receipt
+  replay:
+    - no exact prepare/lifecycle/expiry recovery appends an event
+    - missing, duplicate, swapped, interleaved, wrong-source, wrong-state, wrong-related, wrong-context, wrong-receipt, or timestamp-drift event is corruption
+  privacy:
+    - event detail has no display/binding/config/location digest or material, credential identity, manifest, proof, signature, nonce, key, endpoint, path, secret, mailbox content, or provider response
+    - unsafe actual config is represented only by its domain-separated recovery digest in event detail
+
+restart_validator:
+  stage_allowlist:
+    - accepted T202A, T202B, T202C1, and T202C1S rows/events
+    - intrinsic account_create challenges
+    - account_create grant/account/transition rows and codes 9 through 14 exactly as packeted
+    - no other account-transition kind or later-stage row/event
+  row_preflight:
+    - one broad storage-class/length/range/enum/nullability query per account and transition table
+    - accepted registry_parent_preflight remains outside every row loop, has a dedicated test-support counter, and is asserted exactly once on 128-row restart
+    - SQL read failures map to StoreRead only at the exact injected read boundary; malformed rows map to OwnerRecoveryRequired
+  store_chain:
+    - treat registered_stores config/state/updated_at as current mutable registry projection, not immutable enrollment result
+    - exact enroll_store retry loads and validates the immutable initial store version and original enrollment graph while validating the current transition chain
+    - stream registered stores deterministically
+    - stream registered_store_versions for that store by its store_id/config_generation composite primary-key order; require the receipt-origin initial pair and exact transition-origin successor versions
+    - stream the store's entity-kind-4 events through authority_events_entity_sequence; parse each bounded state-change detail to obtain the transition identity and keyed-load its transition/account/events
+    - prepared leaves chain before and must be last with store blocked
+    - config_committed advances to after and must be last with store blocked
+    - finalized advances to after and permits a later transition
+    - aborted leaves pair before and permits a later transition
+    - recovery_required is last and requires store recovery state, exact stored actual pair, prior-state classifier, and recomputed recovery digest
+    - final derived pair and state equal registered_stores exactly
+  account_chain:
+    - every registered account has exactly one account_create transition, create receipt/grant, and matching proposed registry values
+    - every proposed credential has one immutable registered_credentials row tied to the create transition
+    - every config-committed/finalized/recovery-after-commit create has one exact immutable account version; prepared/aborted-before-commit has none
+    - finalized maps to active/no-transition; aborted to removed/no-transition; prepared or config_committed to proposed/active-transition; recovery to blocked/active-transition
+    - exact timestamp and removed_at rules hold
+    - account and credential identities are never reusable; display slot is unique only for proposed/active/blocked
+  event_chain:
+    - every row transition has exactly its packet-owned event sequence and every code 9 through 14 event has one exact row transition
+    - sequence is contiguous and sqlite_sequence equals count equals max
+  complexity:
+    - O(1) additional Rust history memory; no Vec, HashMap, HashSet, BTreeMap, BTreeSet, collect, or unbounded history retained by production validation
+    - one bounded transition/account/manifest/event at a time
+    - affine validation query-count growth over at least 128 finalized creates plus terminal prepared/config_committed/aborted/recovery variants
+    - no repeated unindexed full-table scan; EXPLAIN QUERY PLAN proves store-version primary-key order and primary/unique/entity-event lookup usage with no USE TEMP B-TREE
+    - the store-event stream is the bounded equivalent of SELECT sequence,event_code,source,occurred_at,detail,detail_sha256 FROM authority_events INDEXED BY authority_events_entity_sequence WHERE entity_kind=4 AND entity_id=? ORDER BY sequence; transition identity and related/state/context/receipt values are parsed from the bounded canonical detail, and account_transitions is never joined and sorted by event sequence
+  corruption:
+    - fail the complete open as owner_recovery_required for row/transcript/digest/FK/event/timestamp/config-chain/state-shape drift
+    - never silently repair, delete, unblock, finalize, abort, reissue, or normalize history
+
+fault_contract:
+  challenge:
+    - preserve all accepted T202B/C1 challenge fault boundaries for account_create
+  prepare_precommit:
+    - after grant insert/event
+    - after store block
+    - after defer enabled
+    - after account insert
+    - after transition insert
+    - after credential insert
+    - after foreign-key check
+    - after store block event
+    - after prepared event
+    - after clock
+    - before commit
+  prepare_postcommit:
+    - response loss returns exact prepared graph on retry
+  expiry:
+    - after expired state
+    - after clock
+    - after expiry event
+    - after commit response loss
+  config_committed:
+    - after immutable store-version insert
+    - after immutable account-version insert
+    - after transition update
+    - after store pair update
+    - after event
+    - after clock
+    - before and after commit
+  finalize_abort_recovery:
+    - after each registry row update
+    - after each event
+    - after clock
+    - before and after commit
+  fault_expectation:
+    - every precommit fault leaves the exact prior durable graph and clock
+    - every postcommit fault leaves one complete recoverable graph and no duplicate event on retry
+    - test faults exercise the production classifier and cannot bypass production result mapping
+
+tdd_plan:
+  red:
+    command: cargo test -p kirje-store --test authority_registry --all-features --locked
+    first_discriminating_failures:
+      - exact original enroll_store retry against complete legal C2 histories whose current registry shape is prepared, config_committed, finalized, aborted, or recovery-required must fail on the old validator/store.matches_request path before any C2 production edit
+      - prepare response loss followed by legal config-commit/finalize or abort, and config-commit response loss followed by legal finalize/recovery, must fail until monotonic phase recovery validates immutable history rather than only current phase
+      - prepare response loss followed by exact transition recovery, restart, and prepare retry must return the RecoveryRequired projection from the strictly verified terminal store pair; deleting that bounded terminal-row read or mutating any recovery link/digest must fail the RED
+      - after transition T1 finalizes or aborts and independent T2 changes the same store to Prepared, ConfigCommitted, Finalized, Aborted, or RecoveryRequired, exact retry of every committed T1 phase must return the unchanged T1-scoped projection rather than T2's current store state/generation; no T3 exists after a recovery-required T2
+      - the one-time registry_parent_preflight must gain its own query counter asserted once before any C2 per-row validator loop can be added
+    required_new_failures:
+      - account_create is rejected by the current T202B action fence
+      - canonical display, transition, intent, and recovery byte goldens are absent
+      - fresh/reused/concurrent challenge account registry context is unimplemented
+      - prepare request/projection/types and lifecycle methods are absent
+      - cyclic FK prepare, store-wide reservation, global identity, partial display, expiry, and fault matrices fail
+      - lifecycle before/after/third, response-loss, and legal-successor monotonic-recovery matrices fail
+      - event graph and restart validator reject all C2 rows
+      - 128-history affine counter/query-plan proof fails
+      - trait/privacy/no-external-call stage fences fail
+    proof_rule: capture exact failing test names and confirm failures are missing C2 behavior, never fixture/parser/setup mistakes
+  green:
+    - add closed private/public types and exact constructors without changing core or schema
+    - extend challenge intrinsic/fresh checks only for AccountCreate
+    - factor one canonical grant/expiry substrate for enrollment and prepare
+    - implement prepare with transaction-local cyclic-FK closure
+    - implement one shared exact transition loader/classifier/projection and four lifecycle APIs
+    - extend event insertion/validation and restart streams for exact C2 graph
+    - add minimum fault hooks and deterministic synthetic account-create fixtures
+  refactor:
+    - run only after focused green
+    - remove real duplication in grant, expiry, event, row, and classifier helpers without changing accepted T202C1 ordering/errors
+    - keep bounded functions and explicit persistent maps; do not introduce an abstraction that hides transaction order
+  broaden:
+    - run every validation command below fresh
+
+test_matrix:
+  canonical_bytes:
+    - display digest golden and one-byte/case mutation
+    - all five transition-kind codes although only create executes
+    - transition transcript/digest golden and each-field mutation
+    - no-time intent golden, raw observed-time nonidentity, every bounded-field mutation
+    - unsafe recovery digest golden and transition/prior-state/generation/digest mutations
+  challenge:
+    - exact fresh, pending reuse, restart reuse, expired replacement, concurrent same context, entropy exhaustion and rollback
+    - stale/absent/removed/blocked/recovery store; location, config generation/digest, binding, target, account context drift
+    - account, credential, transition ID, and active display conflicts with exact stable errors and zero writes/entropy
+    - removed display reuse allowed but historical IDs denied
+    - zero challenge effects and later-stage action fences
+  prepare:
+    - exact success and request projection privacy
+    - global identity and store-wide active transition races
+    - account proposed/store blocked before any external boundary
+    - FK-deferral readback, final foreign_key_check, rollback at every boundary
+    - credential-insert fault rolls back the complete deferred cyclic graph; credential/account/transition/prepare-event timestamps are exactly equal
+    - exact retry/restart/response loss; changed grant and changed prepare identity
+    - effective-time transition digest collision is checked transactionally only after prepared_at is known
+    - authorized expiry exact/changed retry and occupancy non-probing order
+  lifecycle:
+    - complete durable-state by before/after/third matrix for all four APIs
+    - config_committed, finalize, abort, recovery row/state/time/event atomicity
+    - independent store-version and account-version insert faults roll back both immutable/current graphs; both version times equal transition/store/event/clock config-commit time
+    - exact terminal retry with changed observed time; changed pair/source-state conflict
+    - after T1 reached Finalized or Aborted, T1 phase retry after T2 independently changes the same store state/generation returns the immutable T1-scoped terminal projection and advances only the paired clock
+    - RecoveryRequired retry has no T2 case and succeeds only with the unchanged terminal current store pair/state, exact recovery graph, and no successor transition
+    - no recovery clearing; no finalize/abort from unsafe state
+    - precommit rollback and postcommit exact recovery at every hook
+  restart:
+    - every legal prepared/config_committed/finalized/aborted/recovery shape
+    - multiple sequential creates, abort then display reuse, one nonterminal last rule
+    - exact original enroll_store retry after each current store state returns its immutable initial projection and never rewrites current state
+    - row/FK/transcript/manifest/event/config-chain/timestamp corruptions
+    - injected StoreRead remains StoreRead and malformed storage maps recovery
+    - 128 or more complete histories, affine exact query-counter formula, O(1) source scan, indexed query plans
+  privacy_and_scope:
+    - request/projection trait negative compile/source checks
+    - projection and all errors omit forbidden values
+    - event detail digest/bytes scan
+    - production source contains no config/keyring/runtime/protocol/network/credential callback or generic grant-use API
+    - full-tree real/private-material scan plus baseline-hash/diff proof that accepted predecessor synthetic vectors are unchanged and every task-new synthetic public byte exists only under account_create/**
+
+validation_loop:
+  retry_budget: 3 implementation attempts before packet/spec re-evaluation
+  focused_commands:
+    - cargo test -p kirje-store --test authority_registry --all-features --locked
+    - cargo test -p kirje-store --test authority_authorization --all-features --locked
+    - cargo test -p kirje-store --test authority_schema --all-features --locked
+    - cargo test -p kirje-store --all-features --locked
+    - cargo test -p kirje-store --no-default-features --locked
+    - cargo clippy -p kirje-store --all-targets --all-features --locked -- -D warnings
+  full_commands:
+    - cargo fmt --all --check
+    - cargo test --workspace --all-features --locked
+    - cargo +1.88.0 test -p kirje-store --all-features --locked
+    - cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+    - cargo build --workspace --all-features --locked
+    - cargo deny check licenses
+    - cargo deny check bans
+    - cargo deny check sources
+    - cargo deny check advisories
+    - sh -c 'test "$(shasum -a 256 crates/kirje-store/src/authority/schema_v1.sql | cut -d " " -f1)" = "5d01739b89246a5f495a965e57e416eee9fd0b5016995add41c6edee7f3e970d"'
+    - python3 /Users/iiwish/.codex/skills/ai-delivery-governor/scripts/validate_delivery_artifacts.py --root /Users/iiwish/self/kirje --feature-id 008-security-baseline
+    - git diff --check
+    - git status --short
+  expected_signals:
+    - all commands exit zero except cargo deny advisories may report only the already accepted yanked chacha20 0.10.1 chain with no dependency drift
+    - focused RED is captured before production implementation and focused/full GREEN is fresh after final diff
+    - authority_registry reports every C2 matrix pass; predecessor authorization/schema/store/workspace counts do not regress
+    - schema hash is exactly 5d01739b89246a5f495a965e57e416eee9fd0b5016995add41c6edee7f3e970d and changed files remain allowed
+    - source/privacy/secret scans report zero prohibited production API, trait, real/private value, modified predecessor vector, or misplaced task-new synthetic byte
+  failure_handling:
+    - first relevant failure is fixed test-first inside allowed files and rerun focused
+    - second failure is classified as implementation, packet ambiguity, dependency, or environment
+    - packet/spec ambiguity, schema pressure, validation downgrade, or scope expansion stops implementation and returns to orchestrator
+    - tests, assertions, checks, or validation commands are never removed/weakened to manufacture green
+
+evidence_contract:
+  orchestrator_owned_path: .ai-platform/evidence/T202C2
+  required_files:
+    - summary.md
+    - diff.patch
+    - test-results.md
+    - attempts/T202C2-A001.md
+  worker_return:
+    - attempt ID and status
+    - exact changed files
+    - RED command, failing test names, and expected failure reasons
+    - implementation summary mapped to packet sections
+    - GREEN and full validation commands with exit codes and concise counts
+    - canonical digest/hash outputs without sensitive bytes
+    - fault, concurrency, expiry, lifecycle, event, restart, affine-query, query-plan, privacy, trait, and secret-scan result summaries
+    - residual risks and any unrun command
+  orchestrator_integration:
+    - inspect changed-files scope and full diff
+    - independently rerun focused and full gates from final tree
+    - generate exact production diff from packet baseline to reviewed production commit
+    - run independent spec/security/code-quality review with zero Critical/High/Medium required
+    - write evidence only after outputs are verified; worker never edits evidence
+
+review_contract:
+  spec_compliance:
+    - corrected canonical T202C1S schema and stage boundaries preserved
+    - exact challenge, request, transcript, state, error, clock, event, and validator contracts implemented
+    - one store-level transition reservation and complete cyclic-FK transaction proven
+  security:
+    - expiry before occupancy, exact grant replay order, no authority restoration, no external call, no secret exposure, and fail-closed unsafe config proven
+    - request/projection/event/error privacy and negative trait surface proven
+  engineering_quality:
+    - no quadratic keyed validation, unbounded collection, duplicated action policy, brittle SQL mapping, panic on durable input, or hidden transaction ordering
+    - predecessor T202B/T202C1 behavior remains exact
+  qa_acceptance:
+    - fresh create, exact retry, abort/reuse, config-commit/finalize, response loss, concurrency, and recovery all behave from a local operator perspective without remote effects
+  pass_rule:
+    - independent reviewer reports zero Critical, High, and Medium finding
+    - Low findings are fixed or explicitly accepted with bounded rationale before orchestrator acceptance
+
+stop_conditions:
+  - T202C1S is not Accepted or its canonical schema digest is not pinned into an amended packet validation command
+  - packet review is missing or has any unresolved Critical, High, or Medium finding
+  - predecessor commit/evidence/schema hash is absent or worktree has conflicting changes
+  - RED cannot be produced for missing C2 behavior
+  - required behavior needs any forbidden file, schema/index/dependency/core change, config/keyring/runtime/network access, or validation downgrade
+  - defer_foreign_keys cannot be limited to and verified inside one first-prepare transaction
+  - affine/O(1) restart validation cannot be proven on immutable v1 indexes
+  - stable error/event/retry semantics remain ambiguous
+  - any secret, real mailbox value, real proof/nonce/public key, private seed/key, signer material, or user credential appears in source, fixture, output, or evidence; unchanged hash-pinned predecessor synthetic vectors are grandfathered, and task-new synthetic public bytes are allowed only under account_create/** and the generated evidence diff
+  - full final gates or independent review do not pass
+
+handoff:
+  issue: null
+  pull_request: created only at the T202 or approved security-slice boundary
+  reviewers:
+    - independent security/spec reviewer
+    - independent code-quality/QA reviewer
+  finish_options:
+    - orchestrator integrates verified evidence and marks T202C2 Accepted under standing project-owner delegation
+    - otherwise create a scoped retry attempt or return packet/spec blocker

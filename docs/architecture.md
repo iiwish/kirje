@@ -10,10 +10,10 @@ Agent harness
           |
      kirje-runtime
      /       |          \
- config   keyring    kirje-core ports
-                    /       |       \
-       kirje-protocol  kirje-store  services
-        (IMAP + SMTP)  (index + ledger)
+ local-io  keyring    kirje-core ports
+                         /       \
+              kirje-protocol   kirje-store
+               (IMAP + SMTP)   (index, ledger, authority)
 ```
 
 The CLI is the durable automation contract. MCP maps typed tools to the same
@@ -37,6 +37,11 @@ application services and must not become a second implementation.
   index stores no bodies; ledger records store bounded immutable request
   snapshots, attachment summaries, digests, receipts, and audit events. Neither
   stores credentials.
+- `kirje-local-io`: final-component no-follow opens, open-handle identity,
+  limit-plus-one reads, and private atomic replacement for local input and
+  configuration files.
+- `kirje-credential`: unpublished delete-only keyring boundary used directly
+  only by `kirje-store`; it cannot read, copy, export, or set a credential.
 - `kirje-cli`: versioned JSON envelope, local attachment import, interactive
   secret setup, and the only approval surface for send and mailbox operations.
 - `kirje-mcp`: compact typed tools with explicit local-write and remote-write
@@ -60,7 +65,8 @@ stale applying work ambiguous without retrying it. IMAP mutations validate
 UIDVALIDITY and use `UID MOVE` when available or `UID COPY` plus `\\Deleted`
 without `EXPUNGE`. Archive and safe-delete destinations come from server
 special-use declarations or explicit caller input. JMAP, background watching,
-and permanent deletion fit behind these boundaries but are outside v0.3.
+and permanent deletion fit behind these boundaries but are outside
+`v1.0.0-alpha.1`.
 
 The project intentionally excludes React, Tauri, an embedded LLM, and a hosted
 mail relay from the core architecture.

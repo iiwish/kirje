@@ -5,12 +5,14 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+publish = false
 
 [dependencies]
 chrono.workspace = true
 directories.workspace = true
 keyring.workspace = true
 kirje-core.workspace = true
+kirje-local-io.workspace = true
 kirje-protocol.workspace = true
 kirje-store.workspace = true
 secrecy.workspace = true

@@ -1,0 +1,286 @@
+schema_version: 1
+packet_id: 008-T202A-A001
+task_id: T202A
+feature_id: 008-security-baseline
+mode: execute_one_task
+adapter: codex_worker
+status: accepted
+
+governance_inputs:
+  constitution: .ai-platform/memory/constitution.md
+  product_contract: .ai-platform/docs/product-design.md
+  program_spec: .ai-platform/specs/007-stable-v1-program/spec.md
+  program_plan: .ai-platform/specs/007-stable-v1-program/plan.md
+  feature_spec: .ai-platform/specs/008-security-baseline/spec.md
+  requirements_checklist: .ai-platform/specs/008-security-baseline/checklists/requirements.md
+  feature_plan: .ai-platform/specs/008-security-baseline/plan.md
+  research: .ai-platform/specs/008-security-baseline/research.md
+  data_model: .ai-platform/specs/008-security-baseline/data-model.md
+  contracts:
+    - .ai-platform/specs/008-security-baseline/contracts/authorization.md
+    - .ai-platform/specs/008-security-baseline/contracts/authority-store.md
+  work_graph: .ai-platform/specs/008-security-baseline/tasks.md
+  analysis: .ai-platform/specs/008-security-baseline/analysis.md
+  approval_gates:
+    constitution: confirmed project contract
+    program_spec_plan_work_graph: confirmed under delegated project-owner authority
+    feature_spec_and_plan: confirmed after independent security reviews
+    requirements_checklist: complete
+    analysis: APPROVED_FOR_T202A_PACKETIZATION with no unresolved Critical, High, or Medium finding
+    execution_authority: explicit standing user instruction to continue without per-step approval; failed or missing gates still stop execution
+
+work_unit:
+  title: Pinned authority schema and bootstrap
+  goal: >-
+    Add the minimal validated core OwnerPublicKey, create the complete immutable
+    authority SQLite v1 schema transaction body, and implement only the fixed
+    production home, isolated test-support home, database identity and schema
+    preflight, OS-CSPRNG boundary, typed anchor/location inputs, database-first
+    prepare_bootstrap, exact confirm_anchor, clock high-water, and T202A
+    open/bootstrap match matrix. Every staged row or staged anchor is
+    recovery-required in A. All later authority tables exist but expose no
+    challenge, receipt, registry, effect, rotation, recovery, or audit operation.
+  epic: T101
+  story:
+    - US-003
+  requirements:
+    - FR-012
+    - FR-018
+    - NFR-001
+    - NFR-002
+    - NFR-003
+    - NFR-006
+    - NFR-007
+  priority: P0
+  depends_on:
+    - T201 Accepted at commit 89cc706
+    - confirmed 008 governance artifacts
+    - canonical Authority SQLite V1 DDL SHA-256 3a59cf60ebe57affad3e440c3eb3f70e09d8e3c90974fc57318861560c4fb632
+  blocks:
+    - T202B
+    - T202 umbrella acceptance
+  parallel: false
+  conflicts_with:
+    - any concurrent authority schema, authority home, bootstrap, anchor, entropy, or clock change
+    - T202B through T202E
+
+codebase_context:
+  local_instructions:
+    - AGENTS.md
+  relevant_files:
+    - Cargo.toml
+    - Cargo.lock
+    - crates/kirje-core/src/account.rs
+    - crates/kirje-core/src/authorization.rs
+    - crates/kirje-core/src/mail.rs
+    - crates/kirje-store/Cargo.toml
+    - crates/kirje-store/src/lib.rs
+    - crates/kirje-store/src/outbox.rs
+  existing_patterns:
+    - kirje-store maps SQLite failures to stable MailError values without exposing SQL, paths, row bytes, or provider data
+    - existing store connections set a five-second busy timeout, enable foreign keys and WAL, and secure created database files on Unix
+    - core owns UUIDv4 identities, OwnerRealmId, Sha256Digest, owner_key_id, stable security error codes, and the common transcript semantics
+    - JournalId already exists in core; EffectClaimId and AuthoritySessionId remain owned by T202D and are not added here
+    - the workspace uses Rust 1.88, edition 2024, unsafe_code forbid, rusqlite bundled, and locked dependencies
+  interfaces_or_contracts:
+    - .ai-platform/specs/008-security-baseline/contracts/authority-store.md
+    - .ai-platform/specs/008-security-baseline/contracts/authorization.md
+    - .ai-platform/specs/008-security-baseline/data-model.md#authority-sqlite-v1
+  required_design:
+    - schema_v1.sql is byte-for-byte the SQL fence under Data Model Authority SQLite V1 Executable DDL Body and must retain the packet SHA-256
+    - schema_v1.sql is a transaction body with no top-level BEGIN, COMMIT, or PRAGMA; trigger-program BEGIN/END tokens are not transaction control
+    - prepare_bootstrap owns exactly one BEGIN IMMEDIATE, executes the schema body, inserts initial keys/epoch/meta/event, sets application_id 1263096394 and user_version 1, then issues one COMMIT
+    - injected failure or rollback before the one commit leaves zero user-created tables, indexes, triggers, views, authority rows, application ID, and user version
+    - schema creation is all-or-nothing and creates all 17 user tables, all 14 declared indexes, and all 3 declared triggers
+    - every connection enables foreign_keys, trusted_schema OFF, WAL, synchronous FULL, and busy_timeout 5000 before authority work
+    - open validates application ID, exact schema version, complete schema objects, foreign keys, and row invariants before returning usable state
+    - nonzero foreign application IDs, zero-ID databases with any user object, KIRJ zero/unsupported/newer versions, partial schemas, and corrupt rows fail closed without migration or repair
+    - a zero-ID database is pristine only when it has no user-created table, index, trigger, or view and no authority row; SQLite internal objects do not authorize reuse
+    - AuthorityHome::production takes no argument and uses exactly directories::ProjectDirs::from("", "", "kirje") for config_dir/owner-trust.toml, data_local_dir/authority.sqlite3, and data_local_dir/authority.apply.lock
+    - AuthorityStore::open_production derives AuthorityHome internally and accepts only typed AnchorPresence plus JournalLocationDigest; no path, environment, CLI, MCP, or generic-home override exists
+    - absent database plus present anchor returns recovery-required without creating a replacement authority database or identities
+    - open_isolated and deterministic entropy are public only under the non-default test-support feature; one IsolatedAuthorityHome supplies three distinct absolute paths beneath one caller-owned root
+    - production entropy calls getrandom 0.4.3::fill and exposes no entropy parameter; deterministic tests consume exact bytes and prove committed retry never advances entropy
+    - public kirje_core::OwnerPublicKey is constructed only from exact 32 bytes accepted by VerifyingKey::from_bytes and reported non-weak by is_weak; it exposes borrowed public bytes/equality and has no default, serde, unchecked, private-key, key-generation, signature, or signing API
+    - malformed or weak OwnerPublicKey construction and equal BootstrapInput role keys return stable non-retryable authorization_malformed before entropy, file creation, or SQLite mutation; no kirje-core Cargo change is permitted
+    - the named BootstrapInput fields assign owner and recovery roles; the swapped-role SQL negative means an epoch cannot reference a stored recovery-role row as owner or an owner-role row as recovery
+    - bootstrap uses the fixed apply lock plus BEGIN IMMEDIATE; SQLite uniqueness remains the correctness boundary if a process dies while holding the advisory lock
+    - prepare_bootstrap initializes the complete schema body, creates independent random OwnerRealmId and JournalId values, derives role-separated owner/recovery key IDs with core owner_key_id, inserts both distinct active keys and exact initial active epoch 1, writes pending_anchor meta, appends the bounded bootstrap event, sets identity/version, and commits before returning
+    - generated UUID bytes have RFC4122 variant and version 4 bits and enter typed core identities before persistence
+    - exact prepare retry compares both 32-byte public keys and JournalLocationDigest and returns the committed snapshot without new randomness; changed input or incomplete security rows returns OwnerRecoveryRequired
+    - AnchorSnapshot is a strict typed v1 representation with state normal and exact public fields; store code neither reads nor writes the anchor file
+    - confirm_anchor accepts only the exact committed pending snapshot, checks observed time and location, and changes only pending_anchor to ready plus confirmation event in one transaction
+    - open returns only unconfigured, bootstrap_pending, confirmation_required, ready, or recovery_required in T202A; every staged row or staged anchor is recovery_required because A cannot prove a signed successor
+    - staged_finalize_required classification and every stage/finalize/rotation mutation are deferred to T202E, which must first use T202B's core snapshot and strictly verify the exact transition receipt plus every role-required POP
+    - authority_keys public keys are globally unique; trust epochs require distinct owner/recovery IDs, exact owner/recovery role masks, exact active initial epoch 1 shape, and checked exact predecessor plus one successors
+    - exact parent composite UNIQUE keys and child composite foreign keys reject cross-linked receipt, nonce-use, grant-use, challenge-effect/remote-effect, effect-claim, invocation, and observation chains; duplicated store/account/challenge/effect context is bound as a whole and every foreign key keeps ON DELETE RESTRICT
+    - accepted observed_at values update last_observed_at to max(existing, observed); more than 30000 ms rollback fails ClockRollbackDetected and all arithmetic is checked
+    - trust-bundle digest is the exact KIRJE-TRUST-BUNDLE-V1 tagged transcript; journal location stays a separate typed digest and is never derived from display path text
+    - errors expose stable codes and bounded static diagnostics only; no SQL text, row bytes, key bytes, location material, private path, or anchor content appears
+    - later authority tables are unreachable through production mutation APIs in this task
+  forbidden_changes:
+    - any file outside execution_constraints.allowed_files
+    - any core edit other than the minimal OwnerPublicKey prerequisite and its contract tests; any runtime, CLI, MCP, protocol, Agent Skill, docs, governance, or evidence edit
+    - challenge, proof, receipt, nonce-use, grant-use, registry, account-transition, cleanup, effect, claim, invocation, observation, rotation, recovery, or audit operation APIs
+    - anchor file parsing from an unbounded reader, anchor file I/O, keyring access, network access, or caller-selected production paths
+    - credentials, real addresses, endpoints, UIDs, mailbox content, private keys, signatures, proofs, nonces, or raw provider values in code, fixtures, logs, or output
+    - serializer-dependent trust-bundle bytes, permissive UUIDs, randomness fallbacks, silent database repair, schema migration, or weakened SQLite constraints
+    - unsafe Kirje code
+
+execution_constraints:
+  branch_or_worktree: codex/v1-roadmap-governance in the current workspace
+  allowed_files:
+    - Cargo.toml
+    - Cargo.lock
+    - crates/kirje-core/src/authorization.rs
+    - crates/kirje-core/tests/authorization_contract.rs
+    - crates/kirje-store/Cargo.toml
+    - crates/kirje-store/src/lib.rs
+    - crates/kirje-store/src/authority.rs
+    - crates/kirje-store/src/authority/schema_v1.sql
+    - crates/kirje-store/tests/authority_schema.rs
+    - crates/kirje-store/tests/fixtures/authority/schema/**
+  test_targets:
+    - crates/kirje-core/tests/authorization_contract.rs
+    - crates/kirje-store/tests/authority_schema.rs
+    - crates/kirje-store/tests/fixtures/authority/schema/**
+  ownership_notes:
+    - current uncommitted 008 governance and packet files are orchestrator-owned and must not be edited
+    - first add the narrow authority_schema test and demonstrate a contract-relevant failure before any production edit
+    - do not modify existing message-index/outbox behavior except the minimum module export needed for authority.rs
+    - core edits are limited to OwnerPublicKey and its tests; do not move T202B's full AuthorizationPayloadSnapshot into A
+    - stop if an allowed production file has a concurrent change not attributable to this attempt
+    - preserve all user and accepted T201 work
+  dependency_constraints:
+    - use existing directories 6.0.0 and rusqlite 0.37.0 workspace dependencies
+    - add direct getrandom 0.4.3 only for production entropy
+    - add fs4 1.1.0 only if AuthorityStore itself acquires the required fixed advisory apply lock
+    - retain uuid 1.x with v4 and do not enable serde or randomness features beyond existing workspace needs
+    - test-support has no default activation and adds no production path/entropy constructor
+    - kirje-core Cargo.toml and its dependency graph do not change; use its existing pinned ed25519-dalek dependency
+    - do not add an ORM, migration framework, canonical JSON package, async runtime, keyring, crypto signer, or unsafe platform binding
+
+tdd_plan:
+  required: true
+  exception: null
+  red:
+    steps:
+      - add public kirje_core::OwnerPublicKey exact-length/parse/non-weak/API-surface tests plus malformed, weak, and equal owner/recovery authorization_malformed negatives
+      - add compile/API tests for fixed production construction and feature-gated complete isolated construction
+      - add exact schema-body SQL digest, 17-table/14-index/3-trigger inventory, pragma, application/version preflight, and foreign/partial/newer/corrupt database tests
+      - add outer-transaction failure/rollback tests proving zero user objects, rows, application ID, and user version before the sole commit
+      - add raw-SQL negative cases covering every table's NULL, storage class, length, range, enum, relation, FK, ordinal, and partial unique constraints, including equal public key, wrong epoch-to-stored-role reference, initial staged key or epoch, and epoch gap
+      - add valid minimal relationship chains and cross-link negatives for receipt, nonce use, grant use, challenge effect/remote effect, effect claim, invocation, and observation, followed by foreign_key_check, integrity_check, and index checks
+      - add trust-bundle and location digest goldens plus mutation checks
+      - add missing/present anchor versus absent/pristine/pending/ready/staged/corrupt database matrix tests; every staged input is recovery_required and staged_finalize_required is absent
+      - add prepare/confirm crash, restart, changed retry, concurrent winner, deterministic entropy consumption, UUID bit, and clock 30000/30001 ms tests
+      - run the targeted test before production implementation and preserve the relevant compile/assertion failure in worker output
+    command: cargo test -p kirje-store --test authority_schema --all-features --locked
+    expected_failure: >-
+      The new test fails only because the authority module, schema, typed APIs, or
+      required behavior does not yet exist. An unrelated dependency, syntax,
+      environment, or existing-test failure is not valid RED evidence.
+  green:
+    command: cargo test -p kirje-core --test authorization_contract --all-features --locked && cargo test -p kirje-store --test authority_schema --all-features --locked
+    expected_signal: all public-key, schema, API, bootstrap, crash, concurrency, and clock contract tests pass
+  refactor:
+    command: cargo test -p kirje-store --all-features --locked
+    expected_signal: all existing and new store tests remain green
+
+validation_loop:
+  commands:
+    - cargo fmt --all --check
+    - cargo test -p kirje-core --test authorization_contract --all-features --locked
+    - cargo test -p kirje-store --test authority_schema --all-features --locked
+    - cargo test -p kirje-core -p kirje-store --all-features --locked
+    - cargo test -p kirje-store --no-default-features --locked
+    - cargo clippy -p kirje-core -p kirje-store --all-targets --all-features --locked -- -D warnings
+    - cargo +1.88 check -p kirje-core -p kirje-store --all-features --locked
+  retry_budget: 2
+  failure_policy:
+    first_failure: fix only a T202A contract or implementation defect within allowed files and rerun the narrowest failing command
+    second_failure: classify scope, spec, dependency, MSRV, or environment blocker and stop if the packet must change
+    beyond_budget: return blocked attempt output without weakening schema, tests, fixed paths, entropy, crash semantics, or fail-closed behavior
+  no_downgrade:
+    - do not delete, ignore, or relax a failing security assertion
+    - do not normalize malformed rows or silently rebuild partial authority state
+    - do not replace OS randomness with time, process ID, hashing, or a fallback PRNG
+    - do not expose isolated constructors in the default feature set
+    - do not skip Rust 1.88 validation because the host default compiler is newer
+
+definition_of_done:
+  - canonical schema SQL retains SHA-256 3a59cf60ebe57affad3e440c3eb3f70e09d8e3c90974fc57318861560c4fb632 and executes as a transaction body with 17 user tables, 14 declared indexes, 3 triggers, application ID, and version
+  - one outer bootstrap transaction owns all objects/initial rows/version and rollback before its sole commit leaves zero user objects, rows, application ID, and user version
+  - every SQL invariant has at least one raw invalid-row or corrupt-read test; valid minimal rows satisfy all foreign keys and every declared cross-link negative is rejected by SQLite
+  - public kirje_core::OwnerPublicKey rejects malformed/weak/equal-role values with authorization_malformed and has no serde/default/private/signing surface; equal public key, wrong epoch-to-stored-role reference, initial staged key or epoch, and epoch gap negatives pass without a core Cargo change
+  - wrong, partial, newer, copied, mismatched, or corrupt authority state fails closed without repair or identity regeneration
+  - production home and store APIs admit no path, environment, entropy, CLI, or MCP override
+  - isolated home and deterministic entropy exist only under explicit non-default test-support and enforce complete-root ownership
+  - bootstrap is database-first, restart-safe, concurrent-winner stable, exact-retry idempotent, and transitions pending_anchor to ready only after exact anchor confirmation
+  - trust bundle, key IDs, UUID bits, typed anchor snapshot, clock high-water, and T202A open matrix are byte/row executable; every staged state is recovery_required
+  - no later authority transaction API, credential access, anchor I/O, network access, or private-output surface enters this task
+  - targeted, store-wide, default-feature, Clippy, format, and Rust 1.88 checks pass
+
+evidence_contract:
+  owner: delivery_orchestrator
+  worker_output_only: true
+  summary: .ai-platform/evidence/T202A/summary.md
+  diff: .ai-platform/evidence/T202A/diff.patch
+  test_results: .ai-platform/evidence/T202A/test-results.md
+  attempt: .ai-platform/evidence/T202A/attempts/T202A-A001.md
+  required:
+    - exact changed-file scope and diff summary
+    - RED command, exit signal, and contract-relevant failure
+    - GREEN and refactor command results
+    - all validation command results
+    - schema SQL digest, object/index inventory, pragma values, and SQLite version
+    - raw-SQL constraint, valid-row/FK, and cross-link rejection matrix summary
+    - bootstrap outer-transaction rollback, crash/restart/concurrency/open-state/clock matrix summary
+    - OwnerPublicKey malformed/weak/equality/API-surface and no-core-Cargo-change review
+    - constructor and default-feature API surface review
+    - dependency version, features, MSRV, license, and unsafe review
+    - secret/private-material/path/output scan
+    - residual risks and exact follow-up ownership
+
+review_contract:
+  required_passes:
+    - spec compliance against FR-012, FR-018 and mapped NFRs
+    - SQLite schema, transaction, crash, and concurrency security review
+    - API surface, entropy, path, and privacy review
+    - bug and code-quality review
+    - QA acceptance of schema, bootstrap, mismatch, corruption, and feature matrices
+  blocking_findings:
+    - canonical DDL drift or incomplete schema creation
+    - nested schema transaction or rollback that leaves any user object, row, application ID, or user version
+    - cross-linked durable chain accepted by SQLite or missing parent composite uniqueness/child composite foreign key
+    - malformed/weak/equal role keys lack authorization_malformed rejection, wrong epoch-to-stored-role reference is accepted, initial staged epoch is accepted, or epoch gap is accepted
+    - foreign/partial/newer database acceptance or silent repair
+    - identity regeneration after a committed bootstrap
+    - caller-controlled production home or production entropy injection
+    - staged_finalize_required returned by T202A; anchor I/O, credential access, network behavior, or later authority operations
+    - missing apply-lock/transaction concurrency boundary
+    - private path, key, row, SQL, or sensitive fixture exposure
+    - scope drift beyond allowed files
+  acceptance_rule: >-
+    The worker never accepts the task. After independent spec, security,
+    engineering, and QA passes, the orchestrator may record evidence-based
+    acceptance under the user's explicit standing project-owner delegation.
+
+handoff:
+  external_issue: null
+  pull_request: null
+  finish_options:
+    - accept T202A and packetize T202B
+    - create a bounded review-fix attempt
+    - stop on a governance or environment blocker
+
+stop_conditions:
+  - T201 is not Accepted at commit 89cc706 or current HEAD is not its governed descendant
+  - packet, canonical DDL, task, or contract is missing, stale, or internally inconsistent
+  - current changes touch an allowed production file before worker RED begins
+  - a Critical, High, or Medium review finding remains unresolved
+  - RED does not fail for the documented missing authority behavior
+  - implementation requires any file outside allowed_files
+  - implementation would require weakening SQL, fixed-home, entropy, clock, crash, privacy, or later-task boundaries
+  - required validation command is unavailable
+  - any credential, mailbox content, private key, signature, proof, nonce, real address, endpoint, UID, or provider response appears in fixtures or output

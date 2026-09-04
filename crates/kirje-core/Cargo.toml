@@ -5,11 +5,13 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+publish = false
 description = "Provider-neutral domain model for the Kirje agent email runtime"
 
 [dependencies]
 base64.workspace = true
 chrono.workspace = true
+ed25519-dalek.workspace = true
 schemars.workspace = true
 secrecy.workspace = true
 serde.workspace = true
