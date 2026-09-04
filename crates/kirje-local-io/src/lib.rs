@@ -443,13 +443,10 @@ fn create_private_temporary(
 }
 
 fn map_open_error(dir: &Dir, final_component: &OsStr, error: io::Error) -> BoundaryError {
-    if dir
-        .symlink_metadata(final_component)
-        .is_ok_and(|metadata| metadata.file_type().is_symlink())
-    {
-        BoundaryError::LinkRejected
-    } else {
-        BoundaryError::Io(error)
+    match dir.symlink_metadata(final_component) {
+        Ok(metadata) if metadata.file_type().is_symlink() => BoundaryError::LinkRejected,
+        Ok(metadata) if !metadata.file_type().is_file() => BoundaryError::NotRegularFile,
+        _ => BoundaryError::Io(error),
     }
 }
 
