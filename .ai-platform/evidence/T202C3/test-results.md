@@ -1,5 +1,24 @@
 # T202C3 Test Results
 
+## Alpha.1 Closure Validation
+
+Production cleanup implementation: `2be6ce6`.
+Release-candidate integration: `bebb9ce`.
+
+- Cleanup claim exact-recovery test: passed.
+- Cleanup terminal deletion/backend-failure recovery test: passed.
+- Full `kirje-store` authority suites: 9 unit, 33 authorization, 47 registry,
+  31 schema, and 11 outbox tests passed.
+- Full workspace: 246 tests passed, 0 failed.
+- Workspace formatting, all-target/all-feature locked Clippy, locked debug and
+  release builds, and `cargo deny check` passed.
+- Isolated release-binary `schema` and `doctor` smoke passed with no account,
+  credential, or network input.
+
+The historical attempt sections below preserve the original RED/GREEN and
+review record. Statements that a cleanup phase was unimplemented describe the
+named historical attempt rather than the current production tree.
+
 ## A001 RED
 
 After correcting a test-harness compile error, the focused command exited 101:

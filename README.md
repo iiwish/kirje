@@ -165,8 +165,9 @@ or an explicit destination supplied by the caller. Safe delete never issues
 
 ## Roadmap
 
-- Finish owner-authorized account and credential workflows before stable 1.0.
-- Complete config/ledger migration to stable internal account identities.
+- Finish owner-authorized account and credential workflows for `alpha.2`.
+- Complete config/ledger migration to stable internal account identities in
+  `alpha.2`.
 - Historical backfill, thread reconstruction, reconciliation, and event watching.
 - JMAP discovery and JMAP mailbox operations.
 - Provider conformance fixtures and real-mailbox compatibility reports.

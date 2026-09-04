@@ -41,7 +41,7 @@ leaves `claimed` state for exact recovery; success records one terminal event.
 - `kirje --version` reports `kirje 1.0.0-alpha.1`.
 - The release binary's `schema` and isolated `doctor` commands return contract
   `2026-09-04.1`; a local macOS arm64 archive contains only the binary and the
-  three declared documents, and its SHA-256 checksum verifies.
+  five declared documents, and its SHA-256 checksum verifies.
 - CLI contract tests cover create-only account behavior, protocol-clean MCP
   startup, local attachment import, redirected secret/approval rejection, and
   the versioned JSON envelope.
@@ -59,7 +59,8 @@ are not represented as completed local evidence.
 
 - Interactive CLI confirmation remains the active public approval mechanism.
   Owner-key authority setup and account/credential workflows are library-only
-  in this alpha and are excluded from MCP.
+  in this alpha and are excluded from MCP; their product integration is the
+  `v1.0.0-alpha.2` checkpoint.
 - Config v2 stable internal IDs, ledger v3 authority migration, bounded custom
   MCP framing, and bounded initial IMAP transport responses remain scheduled
   before stable 1.0.
@@ -73,6 +74,7 @@ are not represented as completed local evidence.
 
 The tag must be exactly `v1.0.0-alpha.1`. The release workflow rejects a tag
 that differs from the workspace version. Each archive contains the `kirje`
-binary, `README.md`, `LICENSE`, and `NOTICE`; all archives are covered by the
-generated SHA-256 checksum file. Workspace crates are unpublished so the
-release path cannot accidentally publish partial internal APIs to crates.io.
+binary, `README.md`, `RELEASE_NOTES.md`, `CHANGELOG.md`, `LICENSE`, and `NOTICE`;
+all archives are covered by the generated SHA-256 checksum file. Workspace
+crates are unpublished so the release path cannot accidentally publish partial
+internal APIs to crates.io.

@@ -9,7 +9,7 @@
 
 ## Checklist Scope
 
-- Feature: `008-security-baseline`, targeting `v1.0.0-alpha.1`
+- Feature: `008-security-baseline`, targeting `v1.0.0-alpha.2`
 - Reviewed artifacts:
   - `.ai-platform/specs/008-security-baseline/spec.md`
   - `.ai-platform/specs/007-stable-v1-program/spec.md`

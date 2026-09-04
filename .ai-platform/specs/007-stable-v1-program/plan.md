@@ -5,7 +5,7 @@
 - Feature ID: `007-stable-v1-program`
 - Status: Confirmed
 - Source spec: `spec.md`
-- Updated: 2026-08-31
+- Updated: 2026-09-04
 - Target release: `v1.0.0`
 
 ## Decision Summary
@@ -16,10 +16,9 @@ independent product programs. Each implementation batch is small enough to
 review and commit; each tagged checkpoint runs the complete local gate and CI
 matrix once.
 
-The current `codex/v1-roadmap-governance` branch is the first checkpoint. Its
-accepted commits and interrupted account-create implementation are preserved.
-The account-create diff enters review from its recorded RED/GREEN evidence; it
-is not discarded, regenerated, or expanded before review.
+The `codex/v1-roadmap-governance` branch carries the accepted authority
+foundation and the locally gated `alpha.1` release candidate. Remote CI, PR,
+tag, and release publication remain explicit external handoff actions.
 
 ## Constitution Check
 
@@ -55,9 +54,9 @@ contract unit.
 
 The delivery sequence is:
 
-1. current branch checkpoint;
-2. `v1.0.0-alpha.1` security foundation;
-3. `v1.0.0-alpha.2` mailbox convergence;
+1. `v1.0.0-alpha.1` distributable security foundation;
+2. `v1.0.0-alpha.2` owner-bound runtime security;
+3. `v1.0.0-alpha.3` mailbox convergence;
 4. `v1.0.0-beta.1` delivery reconciliation;
 5. `v1.0.0-beta.2` policy and provider compatibility;
 6. `v1.0.0-rc.1` stable contracts and distribution;
@@ -88,36 +87,28 @@ The branch does not accumulate another multi-thousand-line unreviewed diff.
 Accepted history keeps its commit identity and is never rewritten to simplify
 the plan.
 
-### D-005 Current Branch Recovery
+### D-005 Authority Foundation Baseline
 
-The current branch checkpoint starts at `ab9f059` plus the preserved
-account-create diff in:
+The authority database provides bootstrap, signed challenges and receipts,
+config-store enrollment, account and credential transitions, and durable
+credential-cleanup claim/delete state. The cleanup path is isolated behind an
+opaque permit and the unpublished delete-only credential crate. The full
+owner-bound runtime product path remains in the `alpha.2` security baseline.
 
-- `crates/kirje-store/src/authority.rs`
-- `crates/kirje-store/tests/authority_registry.rs`
-- `crates/kirje-store/tests/fixtures/authority/registry/account_create/**`
+### D-006 Security Program Batching
 
-The interrupted attempt recorded real RED failures, focused GREEN, package and
-workspace tests, MSRV tests, Clippy, build, schema hash, query-bound, and
-privacy scans. The remaining work is evidence integration, adversarial review,
-resolution or scheduling of the existing yanked transitive dependency, and Git
-handoff. New account-create scope is not part of checkpoint recovery.
+Security delivery uses two usable checkpoints. `alpha.1` contains the existing
+mail runtime plus the security foundation needed to continue safely:
+capability-anchored local input, create-only account writes, the authority and
+delete-only credential substrates, dependency remediation, full local gates,
+cross-platform CI, and native release assets.
 
-### D-006 Security Alpha Batching
+`alpha.2` completes the owner-bound product path: remaining authority
+lifecycles, config v2 and ledger v3 migration, runtime authorization, bounded
+protocol framing, CLI workflows, and exact MCP exclusions.
 
-The security checkpoint uses four bounded batches:
-
-1. recover and review account-create;
-2. complete account, credential, challenge, claim, rotation, and recovery
-   authority lifecycles;
-3. integrate safe local I/O, config v2, ledger v3, runtime authorization,
-   adapters, capability bounds, and the dependency-policy remediation;
-4. complete CLI/MCP workflows, canonical docs, security review, CI, and the
-   `alpha.1` tag.
-
-The detailed `008-security-baseline` contracts remain binding. Its remaining
-task blocks are acceptance coverage for these batches, not mandatory one-PR
-release units.
+The detailed `008-security-baseline` contracts remain binding for `alpha.2`.
+Its task blocks are acceptance coverage, not mandatory one-PR release units.
 
 ### D-007 Narrow 1.0 Boundary
 
@@ -135,17 +126,18 @@ buildable artifacts remain preview quality and are labeled honestly.
 
 ## Checkpoint Plan
 
-### Current Branch Checkpoint
+### Security Foundation Alpha
 
-Outcome: reviewed account-create implementation, integrated evidence, one clean
-checkpoint commit, PR/merge decision, and no unexplained workspace changes.
+Outcome: one installable binary retains the existing governed CLI/MCP mail
+workflows and adds bounded local input, create-only account writes, authority
+and delete-only credential foundations, a green dependency policy, honest
+prerelease boundaries, and native release automation.
 
-Gate: account-create focused tests, exact content hashes, diff/privacy checks,
-independent code review, and the already recorded unchanged-hash full-test
-evidence. The yanked `chacha20` dependency is a visible baseline finding and
-must be removed before `alpha.1` acceptance.
+Gate: full local formatting, Clippy, tests, locked builds, dependency policy,
+isolated CLI smoke, release archive/checksum smoke, canonical docs, CI matrix,
+and tag `v1.0.0-alpha.1`.
 
-### Security Alpha
+### Owner Security Alpha
 
 Outcome: owner-authorized account and credential workflows are usable through
 CLI, forbidden through MCP where required, and enforced by shared runtime
@@ -154,7 +146,7 @@ bounded. Runtime/docs report the exact IMAP/SMTP authentication boundary.
 
 Gate: `SFR-001` through `SFR-007`, all `008` acceptance coverage, migration,
 secret scan, full local gate, CI, controlled account workflow, and tag
-`v1.0.0-alpha.1`.
+`v1.0.0-alpha.2`.
 
 ### Mailbox Alpha
 
@@ -163,7 +155,7 @@ rebuild, coverage semantics, deterministic thread graph, and CLI/MCP parity.
 
 Gate: interruption and drift fixtures, bounded protocol queries, migration,
 thread anomalies, controlled read-only mailbox validation, full local gate,
-CI, and tag `v1.0.0-alpha.2`.
+CI, and tag `v1.0.0-alpha.3`.
 
 ### Delivery Beta
 
@@ -242,8 +234,8 @@ are additive.
 
 - Large accepted branch delta: close the current checkpoint before starting new
   production scope; keep commits intact and review the uncommitted diff first.
-- Hidden baseline dependency failure: keep `cargo deny` failure visible and
-  remediate the yanked transitive dependency before `alpha.1`.
+- Dependency regressions: every distributable checkpoint requires a green
+  `cargo deny` advisory, ban, license, and source-policy gate.
 - Reduced process mistaken for reduced safety: preserve TDD, content-hash
   evidence, adversarial review, full checkpoint gates, and explicit blockers.
 - Checkpoint scope growth: each batch has allowed paths, a packet, stop

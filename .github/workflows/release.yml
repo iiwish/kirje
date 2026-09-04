@@ -69,7 +69,7 @@ jobs:
           name="kirje-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir "${name}"
           cp "target/${{ matrix.target }}/release/kirje" "${name}/kirje"
-          cp README.md LICENSE NOTICE "${name}/"
+          cp README.md RELEASE_NOTES.md CHANGELOG.md LICENSE NOTICE "${name}/"
           tar -czf "${name}.tar.gz" "${name}"
       - name: Package Windows archive
         if: matrix.format == 'zip'
@@ -78,7 +78,7 @@ jobs:
           $name = "kirje-$env:GITHUB_REF_NAME-${{ matrix.target }}"
           New-Item -ItemType Directory -Path $name
           Copy-Item "target/${{ matrix.target }}/release/kirje.exe" "$name/kirje.exe"
-          Copy-Item README.md,LICENSE,NOTICE $name
+          Copy-Item README.md,RELEASE_NOTES.md,CHANGELOG.md,LICENSE,NOTICE $name
           Compress-Archive -Path $name -DestinationPath "$name.zip"
       - uses: actions/upload-artifact@v4
         with:

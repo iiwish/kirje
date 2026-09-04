@@ -5,7 +5,7 @@
 - Feature ID: `007-stable-v1-program`
 - Status: Confirmed
 - Source: `spec.md`, `plan.md`
-- Updated: 2026-08-31
+- Updated: 2026-09-04
 - Target release: `v1.0.0`
 
 ## Scheduling Rules
@@ -15,32 +15,12 @@
   a PR/merge decision and, except T109, a prerelease or stable tag.
 - Focused RED/GREEN and changed-crate gates run per task. Full workspace,
   dependency, migration, CI, and checkpoint-specific gates run once per tag.
-- Future packets are generated just in time after their predecessor clears its
-  execution gate. The user explicitly accepted `T202C3-A005` on 2026-08-30.
-- F002 packet review failed at `38ca4273` with engineering C0/H1/M2/L0, spec
-  C0/H0/M1/L0, and QA PASS C0/H0/M0/L0. On 2026-08-31 the user authorized the
-  orchestrator to approve existing-boundary clarifications. F006 then failed
-  review on authority-source, strict-parsing, phase-lifecycle, and negative-
-  control defects without changing its substantive cleanup contract. F007 then
-  failed/refused review. F008 then failed with exact counts spec C0/H2/M2/L0,
-  engineering/security C0/H4/M1/L0, and QA C0/H4/M2/L0. F009 review failed with
-  spec C0/H1/M0/L0, engineering/security C0/H1/M2/L0, and QA C0/H1/M1/L0. The
-  F010 review returned spec PASS C0/H0/M0/L0, engineering/security BLOCK
-  C0/H3/M3/L0, and QA BLOCK C0/H1/M2/L0. The orchestrator approved F011's
-  trusted-local procedural clarification under delegated authority. F011 review
-  returned spec PASS C0/H0/M0/L0, engineering/security BLOCK C0/H1/M1/L0, and
-  QA PASS C0/H0/M0/L0. F012 review returned spec BLOCK C0/H0/M1/L0,
-  engineering/security BLOCK C0/H1/M1/L0, and QA BLOCK C0/H0/M1/L0. F013 removes
-  I self-reference and adds post-commit acceptance; this is not user review of
-  the resulting packet. F013 awaits three
-  independent packet reviews with every write permission closed; A007/A008
-  remain non-executable.
-- For the user-authorized unattended delegation beginning 2026-08-30, the
-  orchestrator may accept an internal attempt or major milestone only after
-  TDD, the packet's full validation loop, required evidence, and all three
-  review passes complete with no unresolved blocking finding. The record names
-  delegated orchestrator acceptance and never states that the user personally
-  reviewed unseen work. Missing or failed evidence still blocks progression.
+- T109 and the account/credential transition foundation retain their accepted
+  commit identities. Cleanup claim/delete, bounded local I/O, dependency
+  remediation, and release closure are present in commits `2be6ce6` and
+  `bebb9ce` with fresh full-workspace evidence.
+- The full `008-security-baseline` remains scheduled for `alpha.2`; shipping the
+  narrower `alpha.1` foundation does not mark T110-T112 Accepted.
 - The unattended cadence permits bounded subagent management and local commits
   only. It forbids push, merge, tag, publish, GitHub Release, live mailbox or
   provider effects, and credential input. Existing-boundary findings and review
@@ -60,9 +40,9 @@
 
 | Checkpoint | Tasks | Output |
 | --- | --- | --- |
-| Current branch | T109 | reviewed checkpoint commit and PR/merge decision |
-| Security Alpha | T110-T112 | `v1.0.0-alpha.1` |
-| Mailbox Alpha | T113-T114 | `v1.0.0-alpha.2` |
+| Security foundation | T109 + alpha.1 release closure | `v1.0.0-alpha.1` |
+| Owner Security Alpha | T110-T112 | `v1.0.0-alpha.2` |
+| Mailbox Alpha | T113-T114 | `v1.0.0-alpha.3` |
 | Delivery Beta | T115-T116 | `v1.0.0-beta.1` |
 | Policy Beta | T117 | `v1.0.0-beta.2` |
 | Contract RC | T118-T119 | `v1.0.0-rc.1` |
@@ -397,7 +377,7 @@ release metadata
 Goal:
 Expose owner/account/credential workflows through CLI, preserve the MCP deny
 surface, align capability and security documentation, run complete gates, and
-publish `v1.0.0-alpha.1`.
+publish `v1.0.0-alpha.2`.
 
 Allowed files:
 - `crates/kirje-cli/**`
@@ -415,7 +395,7 @@ Test targets:
 
 Deliverables:
 - Usable CLI workflow, exact MCP exclusions, canonical docs, checkpoint
-  evidence, PR/merge, and `v1.0.0-alpha.1`.
+  evidence, PR/merge, and `v1.0.0-alpha.2`.
 
 Acceptance criteria:
 - Security alpha success path works without exposing secrets.
@@ -499,7 +479,7 @@ Conflicts with: Thread schema, CLI/MCP sync/query contracts, and release metadat
 
 Goal:
 Deliver deterministic header-based thread graphs and bounded CLI/MCP
-convergence, coverage, and thread services; publish `v1.0.0-alpha.2`.
+convergence, coverage, and thread services; publish `v1.0.0-alpha.3`.
 
 Allowed files:
 - `crates/kirje-core/**`
@@ -515,7 +495,7 @@ Test targets:
   read-only mailbox scenarios.
 
 Deliverables:
-- Thread/query commits, checkpoint evidence, PR/merge, and alpha.2 tag.
+- Thread/query commits, checkpoint evidence, PR/merge, and alpha.3 tag.
 
 Acceptance criteria:
 - Thread identity is deterministic and never inferred authoritatively from

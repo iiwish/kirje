@@ -16,7 +16,8 @@ indistinguishable from deletion, and backend failures remain recoverable.
 ## Prerelease Boundaries
 
 - CLI TTY approval remains the active user-facing approval mechanism. The
-  owner-key authority workflow is not yet exposed through CLI or MCP.
+  owner-key authority workflow is not exposed through CLI or MCP; that product
+  integration is the `v1.0.0-alpha.2` checkpoint.
 - Account configuration remains the version 1 display-ID format. Stable
   internal account/config-v2 migration is scheduled before stable 1.0.
 - JMAP, background watch, historical backfill, permanent deletion, and automatic
@@ -24,5 +25,6 @@ indistinguishable from deletion, and backend failures remain recoverable.
 - Real-provider behavior varies. Use a dedicated test mailbox first and follow
   `docs/conformance.md`; no live mailbox action is part of the release gate.
 
-Release archives contain `kirje`, `README.md`, `LICENSE`, and `NOTICE`.
-`SHA256SUMS` covers every uploaded archive.
+Release archives contain `kirje`, `README.md`, `RELEASE_NOTES.md`,
+`CHANGELOG.md`, `LICENSE`, and `NOTICE`. `SHA256SUMS` covers every uploaded
+archive.

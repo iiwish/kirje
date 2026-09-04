@@ -4,9 +4,9 @@
 
 - Feature ID: `008-security-baseline`
 - Status: Confirmed
-- Target checkpoint: `v1.0.0-alpha.1`
+- Target checkpoint: `v1.0.0-alpha.2`
 - Source: `spec.md`, `plan.md`, `research.md`, `data-model.md`, `contracts/**`
-- Updated: 2026-08-31
+- Updated: 2026-09-04
 - Review authority: delegated project owner
 
 ## Scheduling Rules
@@ -2004,7 +2004,7 @@ Definition of Done:
 - Independent reviews have no Critical/High/blocking finding.
 - Controlled evidence is credential/content-free and accurately read-only or a
   sanitized environment blocker.
-- Workspace/package version and release notes identify `v1.0.0-alpha.1`.
+- Workspace/package version and release notes identify `v1.0.0-alpha.2`.
 - Branch is ready for one reviewed release commit and PR.
 
 Packet path:

@@ -5,8 +5,8 @@
 - Feature ID: `007-stable-v1-program`
 - Status: Confirmed
 - Target release: `v1.0.0`
-- Delivery checkpoints: `alpha.1`, `alpha.2`, `beta.1`, `beta.2`, `rc.1`,
-  `rc.2`, and stable
+- Delivery checkpoints: `alpha.1`, `alpha.2`, `alpha.3`, `beta.1`, `beta.2`,
+  `rc.1`, `rc.2`, and stable
 - Product: Kirje
 - Updated: 2026-08-31
 - Source: User-confirmed direct delivery of the narrow, reliability-first 1.0
@@ -316,11 +316,14 @@ its checksum, provenance, dependency inventory, and release notes.
 
 ## Delivery Checkpoints
 
-1. Current branch checkpoint: preserve, review, and merge the accepted security
-   foundation plus the account-create transition already under test.
-2. `v1.0.0-alpha.1`: complete owner-authorized account, credential, local-input,
-   runtime, CLI, MCP-deny, and capability boundaries.
-3. `v1.0.0-alpha.2`: deliver resumable mailbox convergence and deterministic
+1. `v1.0.0-alpha.1`: publish the distributable security foundation: bounded
+   capability-anchored local input, create-only account configuration, the
+   authority and delete-only credential substrates, a green dependency gate,
+   cross-platform CI, and verifiable native release automation.
+2. `v1.0.0-alpha.2`: complete owner-authorized account and credential binding,
+   config v2, ledger v3, runtime authorization, CLI workflows, the MCP deny
+   surface, and bounded protocol framing.
+3. `v1.0.0-alpha.3`: deliver resumable mailbox convergence and deterministic
    thread queries through shared CLI/MCP services.
 4. `v1.0.0-beta.1`: deliver separate SMTP/Sent progress and explicit uncertain
    outcome reconciliation without automatic replay.
@@ -369,7 +372,8 @@ the final release commit.
 3. No phase weakens the confirmed constitution or the v0.3 remote-write safety
    invariants.
 4. Documentation and runtime capability reporting match the narrow IMAP/SMTP
-   1.0 boundary at `alpha.1` and remain consistent through release.
+   1.0 boundary from the first distributable alpha and remain consistent
+   through release.
 5. A failed or unavailable real-provider check is recorded as a sanitized
    blocker and cannot be converted into a compatibility claim.
 6. The final `v1.0.0` release is created only after `rc.2` acceptance and a

@@ -4,9 +4,9 @@
 
 - Feature ID: `008-security-baseline`
 - Status: Confirmed
-- Target checkpoint: `v1.0.0-alpha.1`
+- Target checkpoint: `v1.0.0-alpha.2`
 - Product: Kirje
-- Updated: 2026-08-31
+- Updated: 2026-09-04
 - Source: `007-stable-v1-program`, the accepted v0.3 baseline, and the
   credential, approval, input-boundary, and capability-claim audits performed
   before Mailbox Alpha planning.
