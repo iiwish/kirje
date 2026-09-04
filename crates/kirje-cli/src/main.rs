@@ -1,7 +1,6 @@
 use std::{
-    fs,
-    io::{self, IsTerminal as _, Read as _},
-    path::PathBuf,
+    io::{self, IsTerminal as _},
+    path::{Path, PathBuf},
     process::ExitCode,
 };
 
@@ -13,6 +12,9 @@ use kirje_core::{
     MailAccountConfig, MailError, MailErrorCode, MailboxOperationRequest, MessageRead,
     MessageReference, MessageSearch, Protocol, SendAttachment, SendRequest, TransportSecurity,
     discover_account, find_provider_preset, provider_registry,
+};
+use kirje_local_io::{
+    BoundaryError, open_existing_regular, open_parent, read_bounded, read_stream_bounded,
 };
 use kirje_runtime::{
     AccountRepository, KeyringSecretStore, KirjeRuntime, TomlAccountRepository, resolve_index_path,
@@ -765,29 +767,16 @@ fn handle_attachment(cli: &Cli, command: &AttachmentCommand) -> Result<Value, Ma
 }
 
 fn import_attachment(
-    path: &PathBuf,
+    path: &Path,
     filename: Option<&str>,
     mime_type: &str,
 ) -> Result<Value, MailError> {
-    let metadata = fs::symlink_metadata(path)
-        .map_err(|_| MailError::invalid_input("cannot read attachment file metadata"))?;
-    if !metadata.file_type().is_file() {
-        return Err(MailError::invalid_input(
-            "attachment import requires a regular file",
-        ));
-    }
-    if metadata.len() > kirje_core::MAX_SEND_ATTACHMENT_BYTES as u64 {
-        return Err(MailError::new(
-            MailErrorCode::ResourceLimit,
-            format!(
-                "each imported attachment cannot exceed {} bytes",
-                kirje_core::MAX_SEND_ATTACHMENT_BYTES
-            ),
-            false,
-        ));
-    }
-    let bytes =
-        fs::read(path).map_err(|_| MailError::invalid_input("cannot read attachment file"))?;
+    let parent = open_parent(path)
+        .map_err(|error| map_local_input_error(&error, "attachment file", false))?;
+    let mut opened = open_existing_regular(&parent)
+        .map_err(|error| map_local_input_error(&error, "attachment file", false))?;
+    let bytes = read_bounded(&mut opened, kirje_core::MAX_SEND_ATTACHMENT_BYTES)
+        .map_err(|error| map_local_input_error(&error, "attachment file", false))?;
     let default_filename = path
         .file_name()
         .and_then(|value| value.to_str())
@@ -859,9 +848,9 @@ fn handle_send(cli: &Cli, command: &SendCommand) -> Result<Value, MailError> {
     }
 }
 
-const MAX_SEND_INPUT_BYTES: u64 = 12 * 1024 * 1024;
-const MAX_OPERATION_INPUT_BYTES: u64 = 600 * 1024;
-const MAX_DRAFT_INPUT_BYTES: u64 = 12 * 1024 * 1024;
+const MAX_SEND_INPUT_BYTES: usize = 24 * 1024 * 1024;
+const MAX_OPERATION_INPUT_BYTES: usize = 1024 * 1024;
+const MAX_DRAFT_INPUT_BYTES: usize = 24 * 1024 * 1024;
 
 fn read_send_request(input: &str) -> Result<SendRequest, MailError> {
     let request: SendRequest = read_json_input(input, MAX_SEND_INPUT_BYTES, "send request")?;
@@ -947,38 +936,43 @@ fn handle_operation(cli: &Cli, command: &OperationCommand) -> Result<Value, Mail
 
 fn read_json_input<T: DeserializeOwned>(
     input: &str,
-    max_bytes: u64,
+    max_bytes: usize,
     label: &str,
 ) -> Result<T, MailError> {
     let bytes = if input == "-" {
-        let mut bytes = Vec::new();
-        io::stdin()
-            .take(max_bytes + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|_| MailError::invalid_input(format!("cannot read {label} from stdin")))?;
-        bytes
+        read_stream_bounded(&mut io::stdin().lock(), max_bytes)
+            .map_err(|error| map_local_input_error(&error, label, true))?
     } else {
-        let metadata = fs::metadata(input)
-            .map_err(|_| MailError::invalid_input(format!("cannot read {label} file")))?;
-        if !metadata.is_file() || metadata.len() > max_bytes {
-            return Err(MailError::new(
-                MailErrorCode::ResourceLimit,
-                format!("{label} file exceeds the configured input limit"),
-                false,
-            ));
-        }
-        fs::read(input)
-            .map_err(|_| MailError::invalid_input(format!("cannot read {label} file")))?
+        let parent = open_parent(PathBuf::from(input).as_path())
+            .map_err(|error| map_local_input_error(&error, label, false))?;
+        let mut opened = open_existing_regular(&parent)
+            .map_err(|error| map_local_input_error(&error, label, false))?;
+        read_bounded(&mut opened, max_bytes)
+            .map_err(|error| map_local_input_error(&error, label, false))?
     };
-    if bytes.len() as u64 > max_bytes {
-        return Err(MailError::new(
+    serde_json::from_slice(&bytes)
+        .map_err(|_| MailError::invalid_input(format!("{label} must be valid JSON")))
+}
+
+fn map_local_input_error(error: &BoundaryError, label: &str, stream: bool) -> MailError {
+    match error {
+        BoundaryError::ResourceLimit { .. } => MailError::new(
             MailErrorCode::ResourceLimit,
             format!("{label} exceeds the configured input limit"),
             false,
-        ));
+        ),
+        BoundaryError::LinkRejected | BoundaryError::NotRegularFile => {
+            MailError::invalid_input(format!("{label} must be a regular file, not a link"))
+        }
+        BoundaryError::InvalidPath => MailError::invalid_input(format!("{label} path is invalid")),
+        BoundaryError::IdentityMismatch => {
+            MailError::invalid_input(format!("{label} changed while it was being read"))
+        }
+        BoundaryError::Io(_) if stream => {
+            MailError::invalid_input(format!("cannot read {label} from stdin"))
+        }
+        BoundaryError::Io(_) => MailError::invalid_input(format!("cannot read {label} file")),
     }
-    serde_json::from_slice(&bytes)
-        .map_err(|_| MailError::invalid_input(format!("{label} must be valid JSON")))
 }
 
 fn runtime(cli: &Cli) -> Result<KirjeRuntime, MailError> {

@@ -2,6 +2,8 @@
 members = [
   "crates/kirje-cli",
   "crates/kirje-core",
+  "crates/kirje-credential",
+  "crates/kirje-local-io",
   "crates/kirje-mcp",
   "crates/kirje-protocol",
   "crates/kirje-runtime",
@@ -12,7 +14,7 @@ resolver = "2"
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.95"
 license = "Apache-2.0"
 repository = "https://github.com/iiwish/kirje"
 
@@ -20,6 +22,8 @@ repository = "https://github.com/iiwish/kirje"
 anyhow = "1.0"
 ammonia = "4.1"
 base64 = "0.22"
+cap-fs-ext = "4.0.3"
+cap-std = "4.0.3"
 chrono = { version = "0.4", default-features = false, features = ["alloc", "clock", "serde"] }
 clap = { version = "4.5", features = ["derive", "env"] }
 directories = "6.0"
@@ -29,6 +33,8 @@ getrandom = "=0.4.3"
 io-imap = { version = "0.6", default-features = false, features = ["client", "rustls-ring"] }
 io-sasl = { version = "0.1", default-features = false }
 kirje-core = { path = "crates/kirje-core" }
+kirje-credential = { path = "crates/kirje-credential" }
+kirje-local-io = { path = "crates/kirje-local-io" }
 kirje-mcp = { path = "crates/kirje-mcp" }
 kirje-protocol = { path = "crates/kirje-protocol" }
 kirje-runtime = { path = "crates/kirje-runtime" }

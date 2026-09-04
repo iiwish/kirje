@@ -52,6 +52,8 @@ cargo build --release
 ./target/release/kirje schema --pretty
 ```
 
+Building from source requires Rust 1.95 or newer.
+
 Every non-MCP command emits a stable JSON envelope. Use `--pretty` only for
 interactive inspection. Secret changes and send approval require a terminal;
 credentials and approval confirmations are never accepted through flags or

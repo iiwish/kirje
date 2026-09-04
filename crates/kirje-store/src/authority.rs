@@ -8,7 +8,10 @@ use std::{
 #[cfg(feature = "test-support")]
 use std::cell::Cell;
 #[cfg(feature = "test-support")]
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{
+    Arc, Barrier, Mutex,
+    atomic::{AtomicUsize, Ordering},
+};
 
 use chrono::{DateTime, SecondsFormat, TimeZone as _, Utc};
 use directories::ProjectDirs;
@@ -572,6 +575,67 @@ pub struct AccountTransitionProjection {
     pub prepared_at: DateTime<Utc>,
 }
 
+/// Input for atomically consuming one cleanup authorization grant.
+#[derive(Clone, Eq, PartialEq)]
+pub struct CredentialCleanupClaimRequest {
+    grant_use: GrantUseRequest,
+    cleanup_id: CleanupId,
+    observed_at_unix_ms: i64,
+}
+
+impl CredentialCleanupClaimRequest {
+    /// Bind one exact cleanup target to its immutable authorization grant.
+    ///
+    /// # Errors
+    ///
+    /// Rejects non-cleanup grants, mismatched targets, and invalid timestamps.
+    pub fn new(
+        grant_use: GrantUseRequest,
+        cleanup_id: CleanupId,
+        observed_at_unix_ms: i64,
+    ) -> Result<Self, MailError> {
+        if grant_use.action != SensitiveAction::CredentialCleanup
+            || grant_use.target_kind != TargetKind::Cleanup
+            || grant_use.target_bytes.as_slice() != cleanup_id.as_bytes()
+            || observed_at_unix_ms < 0
+        {
+            return Err(credential_cleanup_invalid_error());
+        }
+        input_utc_millis(observed_at_unix_ms)?;
+        Ok(Self {
+            grant_use,
+            cleanup_id,
+            observed_at_unix_ms,
+        })
+    }
+}
+
+/// Durable public state for a credential-cleanup lifecycle.
+#[derive(Clone, Eq, PartialEq)]
+pub struct CredentialCleanupProjection {
+    pub cleanup_id: CleanupId,
+    pub state: CleanupState,
+    pub claimed_at: Option<DateTime<Utc>>,
+    pub deleted_at: Option<DateTime<Utc>>,
+}
+
+/// Result of claiming or exactly recovering one cleanup grant.
+pub struct CredentialCleanupClaimOutcome {
+    pub projection: CredentialCleanupProjection,
+    pub permit: Option<CleanupDeletePermit>,
+}
+
+/// Opaque single-owner permission to invoke the delete-only credential boundary.
+pub struct CleanupDeletePermit {
+    cleanup_id: CleanupId,
+    grant_id: AuthorizationGrantId,
+    receipt_id: AuthorizationReceiptId,
+    use_sha256: Sha256Digest,
+    locator_material: Vec<u8>,
+    database_path: PathBuf,
+    _apply_lock: File,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ChallengeReview {
     pub bounded: bool,
@@ -747,6 +811,13 @@ impl IsolatedAuthorityHome {
         self.test_hooks.fault = Some(fault);
         self
     }
+
+    /// Install a deterministic delete-only backend result for isolated tests.
+    #[must_use]
+    pub fn with_credential_delete_probe(mut self, calls: Arc<AtomicUsize>, fail: bool) -> Self {
+        self.test_hooks.credential_delete = Some(CredentialDeleteTestHook { calls, fail });
+        self
+    }
 }
 
 #[cfg(feature = "test-support")]
@@ -919,6 +990,15 @@ struct AuthorityTestHooks {
     prepare_retry: Option<TestPause>,
     #[cfg(feature = "test-support")]
     fault: Option<AuthorityFaultPoint>,
+    #[cfg(feature = "test-support")]
+    credential_delete: Option<CredentialDeleteTestHook>,
+}
+
+#[cfg(feature = "test-support")]
+#[derive(Clone)]
+struct CredentialDeleteTestHook {
+    calls: Arc<AtomicUsize>,
+    fail: bool,
 }
 
 #[cfg(feature = "test-support")]
@@ -2418,6 +2498,183 @@ impl AuthorityStore {
         self.apply_account_observation(&request, AccountObservationOperation::Recovery)
     }
 
+    /// Consume one authorized cleanup grant and return the sole delete permit.
+    ///
+    /// Exact recovery of a committed claim returns a fresh opaque permit. Exact
+    /// recovery after deletion returns the terminal projection without a permit.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable replay, expiry, cleanup, recovery, clock, or store errors.
+    #[allow(clippy::too_many_lines, clippy::needless_pass_by_value)]
+    pub fn claim_credential_cleanup(
+        &self,
+        request: CredentialCleanupClaimRequest,
+    ) -> Result<CredentialCleanupClaimOutcome, MailError> {
+        if !matches!(self.state, AuthorityOpenState::Ready(_)) {
+            return Err(recovery_error());
+        }
+        let apply_lock = acquire_apply_lock(&self.home)?;
+        if !authority_database_exists(&self.home.database)? {
+            return Err(recovery_error());
+        }
+        let mut connection = existing_authority_read_connection(&self.home.database)?;
+        if classify_database(&connection)? != DatabaseClass::AuthorityV1 {
+            return Err(recovery_error());
+        }
+        configure_authority_pragmas(&connection)?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| store_write_error())?;
+        let loaded = self.validate_ready_transaction(&transaction)?;
+
+        if let Some(grant) = load_grant_use(&transaction, request.grant_use.grant_id)? {
+            if !grant.matches_request(&request.grant_use) {
+                return Err(grant_already_used_error());
+            }
+            let receipt =
+                load_receipt_by_id(&transaction, grant.receipt_id)?.ok_or_else(recovery_error)?;
+            let challenge = load_challenge(&transaction, receipt.challenge_id)?;
+            let manifest = validate_cleanup_claim_identity(&request, &challenge, &receipt)?;
+            let cleanup = load_credential_cleanup(&transaction, request.cleanup_id)?
+                .ok_or_else(recovery_error)?;
+            if cleanup.claim_grant_id != Some(grant.grant_id)
+                || !matches!(cleanup.state, CleanupState::Claimed | CleanupState::Deleted)
+            {
+                return Err(recovery_error());
+            }
+            validate_credential_cleanup_context(&transaction, &loaded.snapshot, &manifest, false)?;
+            let effective_time =
+                checked_clock(loaded.last_observed_at, request.observed_at_unix_ms)?;
+            utc_millis(effective_time)?;
+            observe_clock_pair(&transaction, effective_time)?;
+            transaction.commit().map_err(|_| store_write_error())?;
+            secure_authority_files(&self.home.database)?;
+            let projection = cleanup_projection(&cleanup, Some(grant.used_at))?;
+            let permit = if cleanup.state == CleanupState::Claimed {
+                Some(cleanup_delete_permit(
+                    &self.home, &cleanup, &grant, apply_lock,
+                )?)
+            } else {
+                None
+            };
+            return Ok(CredentialCleanupClaimOutcome { projection, permit });
+        }
+
+        let receipt = load_receipt_by_id(&transaction, request.grant_use.receipt_id)?
+            .ok_or_else(authorization_context_stale_error)?;
+        let challenge = load_challenge(&transaction, receipt.challenge_id).map_err(|error| {
+            if error.code == MailErrorCode::AuthorizationMalformed {
+                authorization_context_stale_error()
+            } else {
+                error
+            }
+        })?;
+        let manifest = validate_cleanup_claim_identity(&request, &challenge, &receipt)?;
+        let effective_time = checked_clock(loaded.last_observed_at, request.observed_at_unix_ms)?;
+        utc_millis(effective_time)?;
+        if challenge.state == "expired" {
+            return Err(authorization_expired_error());
+        }
+        if challenge.state != "authorized" {
+            return Err(authorization_context_stale_error());
+        }
+        if effective_time > receipt.expires_at {
+            let changed = transaction
+                .execute(
+                    "UPDATE authorization_challenges SET state='expired'
+                     WHERE challenge_id=?1 AND state='authorized'",
+                    [challenge.challenge_id.as_bytes()],
+                )
+                .map_err(|_| store_write_error())?;
+            if changed != 1 {
+                return Err(recovery_error());
+            }
+            observe_clock_pair(&transaction, effective_time)?;
+            insert_enrollment_expiry_event(
+                &transaction,
+                &challenge,
+                &receipt,
+                challenge.manifest_sha256,
+                effective_time,
+            )?;
+            transaction.commit().map_err(|_| store_write_error())?;
+            secure_authority_files(&self.home.database)?;
+            return Err(authorization_expired_error());
+        }
+
+        validate_credential_cleanup_public_pair(&transaction, &manifest)?;
+        validate_credential_cleanup_context(&transaction, &loaded.snapshot, &manifest, true)?;
+        let cleanup = load_credential_cleanup(&transaction, request.cleanup_id)?
+            .ok_or_else(credential_cleanup_invalid_error)?;
+        let use_receipt = grant_use_transcript(&request.grant_use, effective_time);
+        let use_sha256 = Sha256Digest::digest(&use_receipt);
+        insert_grant_use(
+            &transaction,
+            &request.grant_use,
+            &use_receipt,
+            use_sha256,
+            effective_time,
+        )?;
+        insert_grant_used_event(
+            &transaction,
+            request.grant_use.grant_id,
+            receipt.receipt_id,
+            use_sha256,
+            effective_time,
+        )?;
+        let changed = transaction
+            .execute(
+                "UPDATE credential_cleanup SET state='claimed',claim_grant_id=?1
+                 WHERE cleanup_id=?2 AND state='ready' AND claim_grant_id IS NULL
+                   AND deleted_at IS NULL",
+                params![
+                    request.grant_use.grant_id.as_bytes(),
+                    request.cleanup_id.as_bytes(),
+                ],
+            )
+            .map_err(|_| store_write_error())?;
+        if changed != 1 {
+            return Err(credential_cleanup_invalid_error());
+        }
+        insert_cleanup_event(
+            &transaction,
+            request.cleanup_id,
+            16,
+            request.grant_use.grant_id,
+            receipt.receipt_id,
+            0x0702,
+            0x0703,
+            use_sha256,
+            effective_time,
+        )?;
+        observe_clock_pair(&transaction, effective_time)?;
+        transaction.commit().map_err(|_| store_write_error())?;
+        secure_authority_files(&self.home.database)?;
+        let claimed = StoredCredentialCleanup {
+            state: CleanupState::Claimed,
+            claim_grant_id: Some(request.grant_use.grant_id),
+            ..cleanup
+        };
+        let grant = StoredGrantUse {
+            grant_id: request.grant_use.grant_id,
+            receipt_id: request.grant_use.receipt_id,
+            action: request.grant_use.action,
+            target_kind: request.grant_use.target_kind,
+            target_id: request.grant_use.target_bytes,
+            manifest_sha256: request.grant_use.manifest_sha256,
+            use_receipt,
+            use_sha256,
+            used_at: effective_time,
+        };
+        let projection = cleanup_projection(&claimed, Some(effective_time))?;
+        let permit = cleanup_delete_permit(&self.home, &claimed, &grant, apply_lock)?;
+        Ok(CredentialCleanupClaimOutcome {
+            projection,
+            permit: Some(permit),
+        })
+    }
+
     #[allow(clippy::too_many_lines)]
     fn apply_account_observation(
         &self,
@@ -2855,6 +3112,130 @@ impl AuthorityStore {
     }
 }
 
+mod credential_cleanup_delete_adapter {
+    use super::*;
+
+    impl AuthorityStore {
+        /// Consume the opaque cleanup permit, invoke one idempotent credential
+        /// deletion, and durably record the terminal cleanup state.
+        ///
+        /// # Errors
+        ///
+        /// Backend failures leave the durable cleanup in `claimed` state so an
+        /// exact grant recovery can retry safely.
+        #[allow(clippy::too_many_lines)]
+        pub fn apply_credential_cleanup_delete(
+            &self,
+            permit: CleanupDeletePermit,
+            observed_at_unix_ms: i64,
+        ) -> Result<CredentialCleanupProjection, MailError> {
+            let CleanupDeletePermit {
+                cleanup_id,
+                grant_id,
+                receipt_id,
+                use_sha256,
+                locator_material,
+                database_path,
+                _apply_lock,
+            } = permit;
+            if database_path != self.home.database
+                || !matches!(self.state, AuthorityOpenState::Ready(_))
+                || observed_at_unix_ms < 0
+            {
+                return Err(recovery_error());
+            }
+            input_utc_millis(observed_at_unix_ms)?;
+            let mut connection = existing_authority_read_connection(&self.home.database)?;
+            if classify_database(&connection)? != DatabaseClass::AuthorityV1 {
+                return Err(recovery_error());
+            }
+            configure_authority_pragmas(&connection)?;
+            let transaction = connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(|_| store_write_error())?;
+            let loaded = self.validate_ready_transaction(&transaction)?;
+            let effective_time = checked_clock(loaded.last_observed_at, observed_at_unix_ms)?;
+            utc_millis(effective_time)?;
+            let cleanup =
+                load_credential_cleanup(&transaction, cleanup_id)?.ok_or_else(recovery_error)?;
+            let grant = load_grant_use(&transaction, grant_id)?.ok_or_else(recovery_error)?;
+            if cleanup.state != CleanupState::Claimed
+                || cleanup.claim_grant_id != Some(grant_id)
+                || cleanup.locator_material != locator_material
+                || cleanup.locator_sha256 != Sha256Digest::digest(&locator_material)
+                || cleanup.deleted_at.is_some()
+                || grant.receipt_id != receipt_id
+                || grant.use_sha256 != use_sha256
+                || grant.action != SensitiveAction::CredentialCleanup
+                || grant.target_kind != TargetKind::Cleanup
+                || grant.target_id.as_slice() != cleanup_id.as_bytes()
+            {
+                return Err(recovery_error());
+            }
+            let (kind, service, username) =
+                parse_delete_only_locator(&locator_material).ok_or_else(recovery_error)?;
+            if kind != cleanup.locator_kind
+                || !delete_only_locator_shape_is_valid(kind, service, username)
+            {
+                return Err(recovery_error());
+            }
+            let service = std::str::from_utf8(service).map_err(|_| recovery_error())?;
+            let username = std::str::from_utf8(username).map_err(|_| recovery_error())?;
+            let locator = kirje_credential::DeleteOnlyLocator::new(service, username)
+                .map_err(|_| credential_delete_error())?;
+            #[cfg(feature = "test-support")]
+            let simulated = self.test_hooks.credential_delete.as_ref().map(|hook| {
+                hook.calls.fetch_add(1, Ordering::SeqCst);
+                if hook.fail {
+                    Err(credential_delete_error())
+                } else {
+                    Ok(())
+                }
+            });
+            #[cfg(not(feature = "test-support"))]
+            let simulated: Option<Result<(), MailError>> = None;
+            if let Some(result) = simulated {
+                result?;
+                drop(locator);
+            } else {
+                kirje_credential::delete_only(locator).map_err(|_| credential_delete_error())?;
+            }
+
+            let changed = transaction
+                .execute(
+                    "UPDATE credential_cleanup SET state='deleted',deleted_at=?1
+                     WHERE cleanup_id=?2 AND state='claimed' AND claim_grant_id=?3
+                       AND deleted_at IS NULL",
+                    params![effective_time, cleanup_id.as_bytes(), grant_id.as_bytes()],
+                )
+                .map_err(|_| store_write_error())?;
+            if changed != 1 {
+                return Err(recovery_error());
+            }
+            insert_cleanup_event(
+                &transaction,
+                cleanup_id,
+                17,
+                grant_id,
+                receipt_id,
+                0x0703,
+                0x0704,
+                use_sha256,
+                effective_time,
+            )?;
+            observe_clock_pair(&transaction, effective_time)?;
+            transaction.commit().map_err(|_| store_write_error())?;
+            secure_authority_files(&self.home.database)?;
+            let deleted = StoredCredentialCleanup {
+                state: CleanupState::Deleted,
+                deleted_at: Some(effective_time),
+                ..cleanup
+            };
+            cleanup_projection(&deleted, Some(grant.used_at))
+        }
+    }
+}
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum DatabaseClass {
     Pristine,
@@ -2922,6 +3303,18 @@ struct StoredGrantUse {
     use_receipt: Vec<u8>,
     use_sha256: Sha256Digest,
     used_at: i64,
+}
+
+struct StoredCredentialCleanup {
+    cleanup_id: CleanupId,
+    transition_id: TransitionId,
+    locator_kind: LocatorKind,
+    locator_material: Vec<u8>,
+    locator_sha256: Sha256Digest,
+    state: CleanupState,
+    claim_grant_id: Option<AuthorizationGrantId>,
+    created_at: i64,
+    deleted_at: Option<i64>,
 }
 
 impl StoredGrantUse {
@@ -3361,6 +3754,24 @@ const fn locator_kind_name(kind: LocatorKind) -> &'static str {
     match kind {
         LocatorKind::ActiveV2 => "active_v2",
         LocatorKind::LegacyV1 => "legacy_v1",
+    }
+}
+
+fn locator_kind_from_name(value: &str) -> Option<LocatorKind> {
+    match value {
+        "active_v2" => Some(LocatorKind::ActiveV2),
+        "legacy_v1" => Some(LocatorKind::LegacyV1),
+        _ => None,
+    }
+}
+
+fn cleanup_state_from_name(value: &str) -> Option<CleanupState> {
+    match value {
+        "provisional" => Some(CleanupState::Provisional),
+        "ready" => Some(CleanupState::Ready),
+        "claimed" => Some(CleanupState::Claimed),
+        "deleted" => Some(CleanupState::Deleted),
+        _ => None,
     }
 }
 
@@ -4703,6 +5114,76 @@ fn validate_credential_cleanup_public_pair(
     }
 }
 
+fn validate_cleanup_claim_identity(
+    request: &CredentialCleanupClaimRequest,
+    challenge: &StoredChallenge,
+    receipt: &StoredReceipt,
+) -> Result<ActionManifest, MailError> {
+    let manifest = ActionManifest::parse(&challenge.manifest)
+        .map_err(|_| authorization_context_stale_error())?;
+    let ManifestPayload::CredentialCleanup(cleanup) = manifest.payload() else {
+        return Err(authorization_context_stale_error());
+    };
+    if request.grant_use.grant_id != challenge.grant_id
+        || request.grant_use.receipt_id != receipt.receipt_id
+        || receipt.challenge_id != challenge.challenge_id
+        || receipt.grant_id != challenge.grant_id
+        || request.grant_use.action != SensitiveAction::CredentialCleanup
+        || request.grant_use.action != challenge.action
+        || request.grant_use.target_kind != TargetKind::Cleanup
+        || request.grant_use.target_kind.code() != challenge.target_kind_code
+        || request.grant_use.target_bytes != challenge.target_id
+        || request.grant_use.target_bytes.as_slice() != request.cleanup_id.as_bytes()
+        || request.grant_use.manifest_sha256 != challenge.manifest_sha256
+        || request.grant_use.manifest_sha256 != receipt.manifest_sha256
+        || cleanup.cleanup_id != request.cleanup_id
+    {
+        return Err(authorization_context_stale_error());
+    }
+    Ok(manifest)
+}
+
+fn cleanup_projection(
+    cleanup: &StoredCredentialCleanup,
+    claimed_at: Option<i64>,
+) -> Result<CredentialCleanupProjection, MailError> {
+    Ok(CredentialCleanupProjection {
+        cleanup_id: cleanup.cleanup_id,
+        state: cleanup.state,
+        claimed_at: claimed_at.map(utc_millis).transpose()?,
+        deleted_at: cleanup.deleted_at.map(utc_millis).transpose()?,
+    })
+}
+
+fn cleanup_delete_permit(
+    home: &AuthorityHome,
+    cleanup: &StoredCredentialCleanup,
+    grant: &StoredGrantUse,
+    apply_lock: File,
+) -> Result<CleanupDeletePermit, MailError> {
+    utc_millis(cleanup.created_at)?;
+    let (kind, service, username) =
+        parse_delete_only_locator(&cleanup.locator_material).ok_or_else(recovery_error)?;
+    if cleanup.state != CleanupState::Claimed
+        || cleanup.claim_grant_id != Some(grant.grant_id)
+        || cleanup.locator_kind != kind
+        || cleanup.locator_sha256 != Sha256Digest::digest(&cleanup.locator_material)
+        || cleanup.deleted_at.is_some()
+        || !delete_only_locator_shape_is_valid(kind, service, username)
+    {
+        return Err(recovery_error());
+    }
+    Ok(CleanupDeletePermit {
+        cleanup_id: cleanup.cleanup_id,
+        grant_id: grant.grant_id,
+        receipt_id: grant.receipt_id,
+        use_sha256: grant.use_sha256,
+        locator_material: cleanup.locator_material.clone(),
+        database_path: home.database.clone(),
+        _apply_lock: apply_lock,
+    })
+}
+
 fn validate_fresh_account_mutation_context(
     connection: &Connection,
     value: &kirje_core::AccountMutationManifest,
@@ -5616,6 +6097,45 @@ fn load_receipt_by_id(
              FROM authorization_receipts WHERE receipt_id=?1",
             [receipt_id.as_bytes()],
             stored_receipt_from_row,
+        )
+        .optional()
+        .map_err(|_| store_read_error())
+}
+
+fn load_credential_cleanup(
+    connection: &Connection,
+    cleanup_id: CleanupId,
+) -> Result<Option<StoredCredentialCleanup>, MailError> {
+    record_validation_query(ValidationQueryKind::BoundedKeyed);
+    connection
+        .query_row(
+            "SELECT cleanup_id,transition_id,locator_kind,locator_material,locator_sha256,
+                    state,claim_grant_id,created_at,deleted_at
+             FROM credential_cleanup WHERE cleanup_id=?1",
+            [cleanup_id.as_bytes()],
+            |row| {
+                let transition = row
+                    .get::<_, Option<Vec<u8>>>(1)?
+                    .ok_or(rusqlite::Error::InvalidQuery)
+                    .and_then(uuid_from_blob_sql)?;
+                let claim_grant_id = row
+                    .get::<_, Option<Vec<u8>>>(6)?
+                    .map(uuid_from_blob_sql)
+                    .transpose()?;
+                Ok(StoredCredentialCleanup {
+                    cleanup_id: uuid_from_blob_sql(row.get(0)?)?,
+                    transition_id: transition,
+                    locator_kind: locator_kind_from_name(&row.get::<_, String>(2)?)
+                        .ok_or(rusqlite::Error::InvalidQuery)?,
+                    locator_material: row.get(3)?,
+                    locator_sha256: digest_from_blob_sql(row.get(4)?)?,
+                    state: cleanup_state_from_name(&row.get::<_, String>(5)?)
+                        .ok_or(rusqlite::Error::InvalidQuery)?,
+                    claim_grant_id,
+                    created_at: row.get(7)?,
+                    deleted_at: row.get(8)?,
+                })
+            },
         )
         .optional()
         .map_err(|_| store_read_error())
@@ -6947,6 +7467,7 @@ fn validate_registry_history(connection: &Connection) -> Result<(), MailError> {
         credential_transition_count,
         create_count,
         unattached_cleanup_count,
+        claimed_cleanup_count,
     ) = connection
         .query_row(
             "SELECT
@@ -6967,7 +7488,9 @@ fn validate_registry_history(connection: &Connection) -> Result<(), MailError> {
                 (SELECT COUNT(*) FROM account_transitions
                  WHERE kind IN ('account_create','account_update')),
                 (SELECT COUNT(*) FROM account_transitions WHERE kind='account_create'),
-                (SELECT COUNT(*) FROM credential_cleanup WHERE transition_id IS NULL)",
+                (SELECT COUNT(*) FROM credential_cleanup WHERE transition_id IS NULL),
+                (SELECT COUNT(*) FROM credential_cleanup
+                 WHERE state IN ('claimed','deleted'))",
             [],
             |row| {
                 Ok((
@@ -6983,11 +7506,12 @@ fn validate_registry_history(connection: &Connection) -> Result<(), MailError> {
                     row.get::<_, i64>(9)?,
                     row.get::<_, i64>(10)?,
                     row.get::<_, i64>(11)?,
+                    row.get::<_, i64>(12)?,
                 ))
             },
         )
         .map_err(|_| store_read_error())?;
-    if grant_count != store_count + transition_count
+    if grant_count != store_count + transition_count + claimed_cleanup_count
         || credential_count != credential_transition_count
         || account_count != create_count
         || version_count != store_count + committed_count
@@ -7092,6 +7616,7 @@ fn validate_stored_grant(connection: &Connection, grant: &StoredGrantUse) -> Res
                 SensitiveAction::CredentialSet | SensitiveAction::CredentialDelete,
                 TargetKind::Credential
             )
+            | (SensitiveAction::CredentialCleanup, TargetKind::Cleanup)
     ) || !valid_target_shape(grant.target_kind, &grant.target_id)
         || grant.use_receipt != grant_use_transcript_from_row(grant)
         || grant.use_sha256 != Sha256Digest::digest(&grant.use_receipt)
@@ -7123,6 +7648,26 @@ fn validate_stored_grant(connection: &Connection, grant: &StoredGrantUse) -> Res
         let transition = load_account_transition_by_grant(connection, grant.grant_id)?
             .ok_or_else(recovery_error)?;
         return validate_stored_account_transition(connection, &transition);
+    }
+    if grant.action == SensitiveAction::CredentialCleanup {
+        let cleanup_id: CleanupId =
+            uuid_from_blob_sql(grant.target_id.clone()).map_err(|_| recovery_error())?;
+        let cleanup =
+            load_credential_cleanup(connection, cleanup_id)?.ok_or_else(recovery_error)?;
+        let manifest = ActionManifest::parse(&challenge.manifest).map_err(|_| recovery_error())?;
+        let ManifestPayload::CredentialCleanup(value) = manifest.payload() else {
+            return Err(recovery_error());
+        };
+        if cleanup.cleanup_id != value.cleanup_id
+            || cleanup.transition_id != value.transition_id.ok_or_else(recovery_error)?
+            || cleanup.locator_kind != value.locator_kind
+            || cleanup.locator_sha256 != value.locator_sha256
+            || cleanup.claim_grant_id != Some(grant.grant_id)
+            || !matches!(cleanup.state, CleanupState::Claimed | CleanupState::Deleted)
+        {
+            return Err(recovery_error());
+        }
+        return Ok(());
     }
     let manifest = ActionManifest::parse(&challenge.manifest).map_err(|_| recovery_error())?;
     let enrollment = store_enrollment_context(&manifest).map_err(|_| recovery_error())?;
@@ -7711,7 +8256,7 @@ fn validate_account_mutation_parent(
     Ok(())
 }
 
-#[allow(clippy::type_complexity)]
+#[allow(clippy::too_many_lines, clippy::type_complexity)]
 fn validate_transition_cleanup(
     connection: &Connection,
     transition: &StoredAccountTransition,
@@ -7728,11 +8273,6 @@ fn validate_transition_cleanup(
     if usize::try_from(count).ok() != Some(mutation.cleanup.len()) {
         return Err(recovery_error());
     }
-    let expected_state = if transition.state == AccountTransitionState::Finalized {
-        "ready"
-    } else {
-        "provisional"
-    };
     let realm_id = if mutation.cleanup.is_empty() {
         None
     } else {
@@ -7787,18 +8327,47 @@ fn validate_transition_cleanup(
             before.ok_or_else(recovery_error)?,
             descriptor.locator_kind,
         );
+        let lifecycle_valid = match (transition.state, state.as_str()) {
+            (AccountTransitionState::Finalized, "ready")
+            | (
+                AccountTransitionState::Prepared
+                | AccountTransitionState::ConfigCommitted
+                | AccountTransitionState::Aborted
+                | AccountTransitionState::RecoveryRequired,
+                "provisional",
+            ) => claim.is_none() && deleted.is_none(),
+            (AccountTransitionState::Finalized, "claimed") => claim.is_some() && deleted.is_none(),
+            (AccountTransitionState::Finalized, "deleted") => claim.is_some() && deleted.is_some(),
+            _ => false,
+        };
         if descriptor.expected_state != CleanupState::Provisional
             || kind != locator_kind_name(descriptor.locator_kind)
             || digest.as_slice() != descriptor.locator_sha256.as_bytes()
             || material != expected_locator
             || Sha256Digest::digest(&material) != descriptor.locator_sha256
-            || state != expected_state
-            || claim.is_some()
-            || deleted.is_some()
+            || !lifecycle_valid
             || created_at != transition.prepared_at
         {
             return Err(recovery_error());
         }
+        let claim_grant = claim
+            .map(uuid_from_blob_sql)
+            .transpose()
+            .map_err(|_| recovery_error())?;
+        let claim_time = if let Some(grant_id) = claim_grant {
+            let grant = load_grant_use(connection, grant_id)?.ok_or_else(recovery_error)?;
+            if grant.action != SensitiveAction::CredentialCleanup
+                || grant.target_kind != TargetKind::Cleanup
+                || grant.target_id.as_slice() != descriptor.cleanup_id.as_bytes()
+                || grant.used_at < transition.finalized_at.ok_or_else(recovery_error)?
+                || deleted.is_some_and(|deleted_at| deleted_at < grant.used_at)
+            {
+                return Err(recovery_error());
+            }
+            Some(grant.used_at)
+        } else {
+            None
+        };
         record_validation_query(ValidationQueryKind::BoundedKeyed);
         let ready_events: i64 = connection
             .query_row(
@@ -7811,6 +8380,23 @@ fn validate_transition_cleanup(
         let expected_events = i64::from(transition.state == AccountTransitionState::Finalized);
         if ready_events != expected_events {
             return Err(recovery_error());
+        }
+        for (event_code, expected) in [
+            (16, i64::from(claim_time.is_some())),
+            (17, i64::from(deleted.is_some())),
+        ] {
+            record_validation_query(ValidationQueryKind::BoundedKeyed);
+            let actual: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM authority_events
+                     WHERE entity_kind=7 AND entity_id=?1 AND event_code=?2",
+                    params![descriptor.cleanup_id.as_bytes(), i64::from(event_code)],
+                    |row| row.get(0),
+                )
+                .map_err(|_| store_read_error())?;
+            if actual != expected {
+                return Err(recovery_error());
+            }
         }
     }
     Ok(())
@@ -8414,6 +9000,7 @@ fn validate_challenge_event(
                     | ManifestPayload::CredentialDelete(value) => {
                         account_prepare_intent_from_rows(&challenge, receipt, &value.account)?
                     }
+                    ManifestPayload::CredentialCleanup(_) => challenge.manifest_sha256,
                     _ => return Err(recovery_error()),
                 };
                 (
@@ -8498,9 +9085,52 @@ fn validate_registry_event_row(
                 Some(receipt_id),
                 occurred_at,
             );
-            if state != "ready"
+            if !matches!(state.as_str(), "ready" | "claimed" | "deleted")
                 || transition.state != AccountTransitionState::Finalized
                 || row.source != 6
+                || row.occurred_at != occurred_at
+                || row.detail != expected
+                || row.detail_sha256.as_slice() != Sha256::digest(&expected).as_slice()
+            {
+                return Err(recovery_error());
+            }
+        }
+        (7, event_code @ (16 | 17), 16) => {
+            let cleanup_id: CleanupId =
+                uuid_from_blob_sql(row.entity_id.clone()).map_err(|_| recovery_error())?;
+            let cleanup =
+                load_credential_cleanup(connection, cleanup_id)?.ok_or_else(recovery_error)?;
+            let grant_id = cleanup.claim_grant_id.ok_or_else(recovery_error)?;
+            let grant = load_grant_use(connection, grant_id)?.ok_or_else(recovery_error)?;
+            let (prior_state, next_state, occurred_at) = if event_code == 16 {
+                (0x0702, 0x0703, grant.used_at)
+            } else {
+                (
+                    0x0703,
+                    0x0704,
+                    cleanup.deleted_at.ok_or_else(recovery_error)?,
+                )
+            };
+            let expected = authority_event_detail(
+                u16::try_from(event_code).map_err(|_| recovery_error())?,
+                7,
+                cleanup_id.as_bytes(),
+                4,
+                10,
+                grant_id.as_bytes(),
+                prior_state,
+                next_state,
+                grant.use_sha256,
+                Some(grant.receipt_id),
+                occurred_at,
+            );
+            let state_reaches_event = if event_code == 16 {
+                matches!(cleanup.state, CleanupState::Claimed | CleanupState::Deleted)
+            } else {
+                cleanup.state == CleanupState::Deleted
+            };
+            if !state_reaches_event
+                || row.source != 4
                 || row.occurred_at != occurred_at
                 || row.detail != expected
                 || row.detail_sha256.as_slice() != Sha256::digest(&expected).as_slice()
@@ -9298,6 +9928,34 @@ fn insert_grant_used_event(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
+fn insert_cleanup_event(
+    transaction: &Transaction<'_>,
+    cleanup_id: CleanupId,
+    event_code: u16,
+    grant_id: AuthorizationGrantId,
+    receipt_id: AuthorizationReceiptId,
+    prior_state: u16,
+    next_state: u16,
+    context: Sha256Digest,
+    occurred_at: i64,
+) -> Result<(), MailError> {
+    insert_typed_event(
+        transaction,
+        7,
+        cleanup_id.as_bytes(),
+        event_code,
+        4,
+        10,
+        grant_id.as_bytes(),
+        prior_state,
+        next_state,
+        context,
+        Some(receipt_id),
+        occurred_at,
+    )
+}
+
 fn insert_store_enrolled_event(
     transaction: &Transaction<'_>,
     store_id: StoreId,
@@ -9871,6 +10529,13 @@ fn credential_cleanup_invalid_error() -> MailError {
     MailError::stable(
         MailErrorCode::CredentialCleanupInvalid,
         "credential cleanup is invalid",
+    )
+}
+
+fn credential_delete_error() -> MailError {
+    MailError::stable(
+        MailErrorCode::SecretStoreUnavailable,
+        "OS credential store is unavailable",
     )
 }
 

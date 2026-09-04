@@ -11,6 +11,7 @@ chrono.workspace = true
 directories.workspace = true
 keyring.workspace = true
 kirje-core.workspace = true
+kirje-local-io.workspace = true
 kirje-protocol.workspace = true
 kirje-store.workspace = true
 secrecy.workspace = true

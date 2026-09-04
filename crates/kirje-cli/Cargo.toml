@@ -16,6 +16,7 @@ anyhow.workspace = true
 base64.workspace = true
 clap.workspace = true
 kirje-core.workspace = true
+kirje-local-io.workspace = true
 kirje-mcp.workspace = true
 kirje-runtime.workspace = true
 rpassword.workspace = true

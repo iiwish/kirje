@@ -3,10 +3,15 @@
 use std::{
     num::NonZeroU64,
     str::FromStr,
-    sync::{Arc, Barrier},
+    sync::{
+        Arc, Barrier,
+        atomic::{AtomicUsize, Ordering},
+    },
     thread,
 };
 
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use ed25519_dalek::{Signer as _, SigningKey};
 use kirje_core::{
     AccountBinding, AccountId, AccountSnapshot, AccountStateReason, ActionManifest,
     AuthorizationGrantId, AuthorizationProof, AuthorizationReceiptProjection,
@@ -22,11 +27,11 @@ use kirje_store::{
     AccountTransitionState, AnchorPresence, AuthorityFaultPoint, AuthorityOpenContext,
     AuthorityOpenState, AuthorityStore, AuthorityValidationQueryCounts,
     AuthorizationChallengeExport, BootstrapInput, BootstrapSnapshot, CreateChallengeRequest,
-    CredentialCleanupReservation, DeterministicEntropy, EnrollStoreRequest,
-    EnrolledStoreProjection, EnrolledStoreState, GrantUseRequest, IsolatedAuthorityHome,
-    JournalLocationDigest, PrepareAccountTransitionRequest, RegisteredAccountState,
-    RegisteredStoreTransitionState, VerifyProofRequest, reset_authority_validation_query_counts,
-    take_authority_validation_query_counts,
+    CredentialCleanupClaimRequest, CredentialCleanupReservation, DeterministicEntropy,
+    EnrollStoreRequest, EnrolledStoreProjection, EnrolledStoreState, GrantUseRequest,
+    IsolatedAuthorityHome, JournalLocationDigest, PrepareAccountTransitionRequest,
+    RegisteredAccountState, RegisteredStoreTransitionState, VerifyProofRequest,
+    reset_authority_validation_query_counts, take_authority_validation_query_counts,
 };
 use rusqlite::{Connection, params};
 use sha2::{Digest as _, Sha256};
@@ -533,6 +538,73 @@ fn cleanup_tombstone_bytes(
 fn credential_cleanup_manifest(fixture: &ReadyFixture) -> ActionManifest {
     let origin = account_control_manifest(SensitiveAction::AccountUpdate, 60);
     credential_cleanup_manifest_for_origin(fixture, &origin, 503_200, None)
+}
+
+fn authorize_credential_cleanup(fixture: &ReadyFixture) -> AuthorizedFixture {
+    let manifest = credential_cleanup_manifest(fixture);
+    let challenge = open_ready(fixture, deterministic(vec![0xc1; 48]))
+        .create_challenge(CreateChallengeRequest {
+            manifest: manifest.clone(),
+            observed_at_unix_ms: 504_000,
+            expires_at_unix_ms: 504_900,
+        })
+        .unwrap();
+    let signing_payload = URL_SAFE_NO_PAD
+        .decode(&challenge.signing_payload_base64url)
+        .unwrap();
+    let signing_key = SigningKey::from_bytes(&hex(
+        "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+    ));
+    let proof = AuthorizationProof::new(
+        challenge.challenge_id,
+        challenge.key_id,
+        challenge.signing_payload_sha256,
+        signing_key.sign(&signing_payload).to_bytes(),
+    );
+    let receipt = open_ready(fixture, deterministic(vec![0xc2; 16]))
+        .verify_proof(VerifyProofRequest {
+            proof: proof.clone(),
+            observed_at_unix_ms: 504_100,
+        })
+        .unwrap();
+    let connection = Connection::open(fixture.home.database_path()).unwrap();
+    let grant: Vec<u8> = connection
+        .query_row(
+            "SELECT grant_id FROM authorization_challenges WHERE challenge_id=?1",
+            [challenge.challenge_id.as_bytes()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    AuthorizedFixture {
+        challenge,
+        receipt,
+        proof,
+        manifest,
+        grant_id: AuthorizationGrantId::try_from(Uuid::from_slice(&grant).unwrap()).unwrap(),
+    }
+}
+
+fn cleanup_claim_request(
+    authorized: &AuthorizedFixture,
+    observed_at_unix_ms: i64,
+) -> CredentialCleanupClaimRequest {
+    let ManifestPayload::CredentialCleanup(cleanup) = authorized.manifest.payload() else {
+        unreachable!();
+    };
+    CredentialCleanupClaimRequest::new(
+        GrantUseRequest::new(
+            authorized.grant_id,
+            authorized.receipt.receipt_id,
+            SensitiveAction::CredentialCleanup,
+            TargetKind::Cleanup,
+            cleanup.cleanup_id.as_bytes().to_vec(),
+            authorized.manifest.sha256(),
+        )
+        .unwrap(),
+        cleanup.cleanup_id,
+        observed_at_unix_ms,
+    )
+    .unwrap()
 }
 
 fn credential_cleanup_manifest_for_origin(
@@ -4540,6 +4612,157 @@ fn credential_cleanup_challenge_is_exact() {
         issuance_fingerprint(&Connection::open(fixture.home.database_path()).unwrap()),
         invalid_before
     );
+}
+
+#[test]
+fn credential_cleanup_claim_is_atomic_and_exactly_recoverable() {
+    let fixture = a003_updated_account_fixture();
+    let authorized = authorize_credential_cleanup(&fixture);
+    let request = cleanup_claim_request(&authorized, 504_200);
+    let outcome = open_ready(&fixture, deterministic(Vec::new()))
+        .claim_credential_cleanup(request.clone())
+        .unwrap();
+    assert_eq!(outcome.projection.state, CleanupState::Claimed);
+    assert!(outcome.projection.claimed_at.is_some());
+    assert!(outcome.projection.deleted_at.is_none());
+    assert!(outcome.permit.is_some());
+    let expected_projection = outcome.projection.clone();
+    drop(outcome);
+
+    let connection = Connection::open(fixture.home.database_path()).unwrap();
+    let ManifestPayload::CredentialCleanup(cleanup) = authorized.manifest.payload() else {
+        unreachable!();
+    };
+    let (state, grant): (String, Vec<u8>) = connection
+        .query_row(
+            "SELECT state,claim_grant_id FROM credential_cleanup WHERE cleanup_id=?1",
+            [cleanup.cleanup_id.as_bytes()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(state, "claimed");
+    assert_eq!(grant.as_slice(), authorized.grant_id.as_bytes());
+    let event_codes: Vec<i64> = connection
+        .prepare(
+            "SELECT event_code FROM authority_events
+             WHERE (entity_kind=10 AND entity_id=?1 AND event_code=7)
+                OR (entity_kind=7 AND entity_id=?2 AND event_code=16)
+             ORDER BY sequence",
+        )
+        .unwrap()
+        .query_map(
+            params![
+                authorized.grant_id.as_bytes(),
+                cleanup.cleanup_id.as_bytes()
+            ],
+            |row| row.get(0),
+        )
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(event_codes, vec![7, 16]);
+    drop(connection);
+
+    let recovered = open_ready(&fixture, deterministic(Vec::new()))
+        .claim_credential_cleanup(cleanup_claim_request(&authorized, 504_300))
+        .unwrap();
+    assert!(recovered.projection == expected_projection);
+    assert!(recovered.permit.is_some());
+    drop(recovered);
+
+    let changed_grant = GrantUseRequest::new(
+        authorized.grant_id,
+        authorized.receipt.receipt_id,
+        SensitiveAction::CredentialCleanup,
+        TargetKind::Cleanup,
+        cleanup.cleanup_id.as_bytes().to_vec(),
+        Sha256Digest::digest(b"changed-cleanup-manifest"),
+    )
+    .unwrap();
+    let changed =
+        CredentialCleanupClaimRequest::new(changed_grant, cleanup.cleanup_id, 504_400).unwrap();
+    assert_eq!(
+        exact_error(
+            open_ready(&fixture, deterministic(Vec::new())).claim_credential_cleanup(changed)
+        )
+        .code,
+        MailErrorCode::GrantAlreadyUsed
+    );
+}
+
+#[test]
+fn credential_cleanup_delete_is_terminal_and_backend_failure_is_retryable() {
+    let mut fixture = a003_updated_account_fixture();
+    let calls = Arc::new(AtomicUsize::new(0));
+    fixture.home = fixture
+        .home
+        .clone()
+        .with_credential_delete_probe(calls.clone(), false);
+    let authorized = authorize_credential_cleanup(&fixture);
+    let store = open_ready(&fixture, deterministic(Vec::new()));
+    let claimed = store
+        .claim_credential_cleanup(cleanup_claim_request(&authorized, 504_200))
+        .unwrap();
+    let deleted = store
+        .apply_credential_cleanup_delete(claimed.permit.unwrap(), 504_300)
+        .unwrap();
+    assert_eq!(deleted.state, CleanupState::Deleted);
+    assert!(deleted.deleted_at.is_some());
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    drop(store);
+
+    let terminal = open_ready(&fixture, deterministic(Vec::new()))
+        .claim_credential_cleanup(cleanup_claim_request(&authorized, 504_400))
+        .unwrap();
+    assert_eq!(terminal.projection.state, CleanupState::Deleted);
+    assert!(terminal.permit.is_none());
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let connection = Connection::open(fixture.home.database_path()).unwrap();
+    assert_eq!(
+        scalar(
+            &connection,
+            "SELECT COUNT(*) FROM authority_events WHERE event_code=17"
+        ),
+        1
+    );
+
+    let mut failed_fixture = a003_updated_account_fixture();
+    let failed_calls = Arc::new(AtomicUsize::new(0));
+    failed_fixture.home = failed_fixture
+        .home
+        .clone()
+        .with_credential_delete_probe(failed_calls.clone(), true);
+    let failed_authorized = authorize_credential_cleanup(&failed_fixture);
+    let failed_store = open_ready(&failed_fixture, deterministic(Vec::new()));
+    let failed_claim = failed_store
+        .claim_credential_cleanup(cleanup_claim_request(&failed_authorized, 504_200))
+        .unwrap();
+    let error = exact_error(
+        failed_store.apply_credential_cleanup_delete(failed_claim.permit.unwrap(), 504_300),
+    );
+    assert_eq!(error.code, MailErrorCode::SecretStoreUnavailable);
+    assert_eq!(failed_calls.load(Ordering::SeqCst), 1);
+    drop(failed_store);
+    let connection = Connection::open(failed_fixture.home.database_path()).unwrap();
+    assert_eq!(
+        connection
+            .query_row("SELECT state FROM credential_cleanup", [], |row| row
+                .get::<_, String>(0),)
+            .unwrap(),
+        "claimed"
+    );
+    assert_eq!(
+        scalar(
+            &connection,
+            "SELECT COUNT(*) FROM authority_events WHERE event_code=17"
+        ),
+        0
+    );
+    drop(connection);
+    let recovered = open_ready(&failed_fixture, deterministic(Vec::new()))
+        .claim_credential_cleanup(cleanup_claim_request(&failed_authorized, 504_400))
+        .unwrap();
+    assert!(recovered.permit.is_some());
 }
 
 #[test]

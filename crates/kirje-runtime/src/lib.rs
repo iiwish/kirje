@@ -2,7 +2,6 @@
 
 use std::{
     fs,
-    io::Write,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -19,6 +18,10 @@ use kirje_core::{
     SendAttemptError, SendPlan, SendPlanSummary, SendReceipt, SendRequest, SyncCursor, digest_json,
     operation_record,
 };
+use kirje_local_io::{
+    BoundaryError, FileObjectIdentity, ReplaceExpectation, open_existing_regular, open_parent,
+    read_bounded, replace_private,
+};
 use schemars::JsonSchema;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
@@ -27,6 +30,7 @@ use uuid::Uuid;
 const CONFIG_VERSION: u16 = 1;
 const KEYRING_SERVICE: &str = "dev.kirje.mail";
 const MAX_ACCOUNTS: usize = 100;
+const MAX_CONFIG_BYTES: usize = 1024 * 1024;
 
 /// Storage contract for non-secret account configuration.
 pub trait AccountRepository: Send + Sync {
@@ -86,6 +90,7 @@ pub trait SecretStore: Send + Sync {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 struct ConfigDocument {
     version: u16,
     #[serde(default)]
@@ -136,9 +141,40 @@ impl TomlAccountRepository {
     }
 
     fn load(&self) -> Result<ConfigDocument, MailError> {
-        match fs::read_to_string(&self.path) {
-            Ok(source) => {
-                let document: ConfigDocument = toml::from_str(&source).map_err(|_| {
+        self.load_with_identity().map(|(document, _)| document)
+    }
+
+    fn load_with_identity(
+        &self,
+    ) -> Result<(ConfigDocument, Option<FileObjectIdentity>), MailError> {
+        let parent = match open_parent(&self.path) {
+            Ok(parent) => parent,
+            Err(BoundaryError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok((ConfigDocument::default(), None));
+            }
+            Err(_) => {
+                return Err(config_read_error(
+                    "cannot open account configuration parent",
+                ));
+            }
+        };
+        match open_existing_regular(&parent) {
+            Ok(mut opened) => {
+                let identity = opened.identity();
+                let bytes = read_bounded(&mut opened, MAX_CONFIG_BYTES).map_err(|error| {
+                    if matches!(error, BoundaryError::ResourceLimit { .. }) {
+                        MailError::new(
+                            MailErrorCode::ResourceLimit,
+                            "account configuration exceeds the 1 MiB limit",
+                            false,
+                        )
+                    } else {
+                        config_read_error("cannot read account configuration")
+                    }
+                })?;
+                let source = std::str::from_utf8(&bytes)
+                    .map_err(|_| config_read_error("account configuration must be valid UTF-8"))?;
+                let document: ConfigDocument = toml::from_str(source).map_err(|_| {
                     MailError::new(
                         MailErrorCode::ConfigRead,
                         "account configuration is invalid TOML",
@@ -162,20 +198,23 @@ impl TomlAccountRepository {
                 for account in &document.accounts {
                     account.validate()?;
                 }
-                Ok(document)
+                Ok((document, Some(identity)))
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                Ok(ConfigDocument::default())
+            Err(BoundaryError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+                Ok((ConfigDocument::default(), None))
             }
-            Err(_) => Err(MailError::new(
-                MailErrorCode::ConfigRead,
-                "cannot read account configuration",
-                false,
-            )),
+            Err(BoundaryError::LinkRejected | BoundaryError::NotRegularFile) => Err(
+                config_read_error("account configuration must be a regular file, not a link"),
+            ),
+            Err(_) => Err(config_read_error("cannot read account configuration")),
         }
     }
 
-    fn save(&self, document: &ConfigDocument) -> Result<(), MailError> {
+    fn save(
+        &self,
+        document: &ConfigDocument,
+        identity: Option<FileObjectIdentity>,
+    ) -> Result<(), MailError> {
         let parent = self
             .path
             .parent()
@@ -183,25 +222,19 @@ impl TomlAccountRepository {
             .unwrap_or_else(|| Path::new("."));
         fs::create_dir_all(parent).map_err(|_| config_write_error())?;
         let serialized = toml::to_string_pretty(document).map_err(|_| config_write_error())?;
-        let mut temporary =
-            tempfile::NamedTempFile::new_in(parent).map_err(|_| config_write_error())?;
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt as _;
-            temporary
-                .as_file()
-                .set_permissions(fs::Permissions::from_mode(0o600))
-                .map_err(|_| config_write_error())?;
-        }
-
-        temporary
-            .write_all(serialized.as_bytes())
-            .and_then(|()| temporary.as_file().sync_all())
-            .map_err(|_| config_write_error())?;
-        temporary
-            .persist(&self.path)
-            .map_err(|_| config_write_error())?;
+        let opened_parent = open_parent(&self.path).map_err(|_| config_write_error())?;
+        let expected = identity.map_or(ReplaceExpectation::Missing, ReplaceExpectation::Matches);
+        replace_private(&opened_parent, expected, serialized.as_bytes()).map_err(|error| {
+            if matches!(error, BoundaryError::IdentityMismatch) {
+                MailError::new(
+                    MailErrorCode::ConfigStoreIdentityConflict,
+                    "account configuration changed during mutation",
+                    false,
+                )
+            } else {
+                config_write_error()
+            }
+        })?;
         Ok(())
     }
 }
@@ -223,7 +256,7 @@ impl AccountRepository for TomlAccountRepository {
 
     fn upsert(&self, account: MailAccountConfig) -> Result<(), MailError> {
         account.validate()?;
-        let mut document = self.load()?;
+        let (mut document, identity) = self.load_with_identity()?;
         if let Some(existing) = document
             .accounts
             .iter_mut()
@@ -243,7 +276,7 @@ impl AccountRepository for TomlAccountRepository {
         document
             .accounts
             .sort_by(|left, right| left.id.cmp(&right.id));
-        self.save(&document)
+        self.save(&document, identity)
     }
 }
 
@@ -1295,6 +1328,10 @@ fn config_write_error() -> MailError {
         "cannot write account configuration",
         false,
     )
+}
+
+fn config_read_error(message: &'static str) -> MailError {
+    MailError::new(MailErrorCode::ConfigRead, message, false)
 }
 
 fn secret_store_error() -> MailError {
