@@ -12,6 +12,7 @@ publish = false
 cap-fs-ext.workspace = true
 cap-std.workspace = true
 getrandom.workspace = true
+fs4.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

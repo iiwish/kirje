@@ -16,6 +16,7 @@ use cap_std::{
 use thiserror::Error;
 
 const READ_CHUNK: usize = 64 * 1024;
+const REPLACE_LOCK_NAME: &str = ".kirje-local-io.lock";
 
 /// Errors produced at Kirje's local file boundary.
 #[derive(Debug, Error)]
@@ -254,7 +255,9 @@ pub fn read_stream_bounded<R: Read>(
 /// Atomically replace a private regular file relative to one opened parent.
 ///
 /// The temporary file is mode `0600` on Unix and both the file and parent
-/// directory are synchronized before success is returned.
+/// directory are synchronized before success is returned. Kirje writers sharing
+/// that parent are serialized through a private advisory lock before the
+/// compare-and-swap identity is checked.
 ///
 /// # Errors
 ///
@@ -264,6 +267,16 @@ pub fn replace_private(
     expected: ReplaceExpectation,
     bytes: &[u8],
 ) -> Result<FileObjectIdentity, BoundaryError> {
+    replace_private_inner(parent, expected, bytes, || {})
+}
+
+fn replace_private_inner(
+    parent: &OpenedParent,
+    expected: ReplaceExpectation,
+    bytes: &[u8],
+    before_commit: impl FnOnce(),
+) -> Result<FileObjectIdentity, BoundaryError> {
+    let _replace_lock = acquire_replace_lock(parent)?;
     verify_expectation(parent, expected)?;
     let temporary = create_private_temporary(parent)?;
     let temporary_name = temporary.0;
@@ -273,6 +286,7 @@ pub fn replace_private(
         file.write_all(bytes).map_err(BoundaryError::Io)?;
         file.sync_all().map_err(BoundaryError::Io)?;
         verify_expectation(parent, expected)?;
+        before_commit();
         parent
             .dir
             .rename(&temporary_name, &parent.dir, &parent.final_component)
@@ -289,6 +303,37 @@ pub fn replace_private(
         let _ = parent.dir.remove_file(&temporary_name);
     }
     result
+}
+
+fn acquire_replace_lock(parent: &OpenedParent) -> Result<std::fs::File, BoundaryError> {
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .write(true)
+        .create(true)
+        .follow(FollowSymlinks::No)
+        .nonblock(true);
+    #[cfg(unix)]
+    {
+        use cap_std::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    let file = parent
+        .dir
+        .open_with(REPLACE_LOCK_NAME, &options)
+        .map_err(|error| map_open_error(&parent.dir, OsStr::new(REPLACE_LOCK_NAME), error))?;
+    if !file.metadata().map_err(BoundaryError::Io)?.is_file() {
+        return Err(BoundaryError::NotRegularFile);
+    }
+    #[cfg(unix)]
+    {
+        use cap_std::fs::{Permissions, PermissionsExt as _};
+        file.set_permissions(Permissions::from_mode(0o600))
+            .map_err(BoundaryError::Io)?;
+    }
+    let file = file.into_std();
+    fs4::FileExt::lock(&file).map_err(BoundaryError::Io)?;
+    Ok(file)
 }
 
 fn opened_regular(file: cap_std::fs::File) -> Result<OpenedRegularFile, BoundaryError> {
@@ -423,6 +468,7 @@ const fn platform_component_is_valid(_component: &OsStr) -> bool {
 mod tests {
     use super::*;
     use std::io::Cursor;
+    use std::{sync::mpsc, time::Duration};
 
     #[test]
     fn bounded_reader_accepts_exact_limit_and_rejects_one_more() {
@@ -459,10 +505,61 @@ mod tests {
             .expect("replace");
         assert_ne!(replacement, original);
         assert_eq!(std::fs::read(path).expect("read"), b"two");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode = std::fs::metadata(directory.path().join(REPLACE_LOCK_NAME))
+                .expect("lock metadata")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600);
+        }
         assert!(matches!(
             replace_private(&parent, ReplaceExpectation::Matches(original), b"stale"),
             Err(BoundaryError::IdentityMismatch)
         ));
+    }
+
+    #[test]
+    fn concurrent_replacements_have_one_compare_and_swap_winner() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let path = directory.path().join("config.toml");
+        std::fs::write(&path, b"original").expect("seed file");
+        let parent = open_parent(&path).expect("parent");
+        let original = open_existing_regular(&parent).expect("opened").identity();
+        let (at_commit_tx, at_commit_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let first_path = path.clone();
+        let first = std::thread::spawn(move || {
+            let parent = open_parent(&first_path).expect("first parent");
+            replace_private_inner(
+                &parent,
+                ReplaceExpectation::Matches(original),
+                b"first",
+                || {
+                    at_commit_tx.send(()).expect("signal first commit");
+                    release_rx.recv().expect("release first commit");
+                },
+            )
+        });
+
+        at_commit_rx.recv().expect("first reached commit");
+        let (second_tx, second_rx) = mpsc::channel();
+        let second = std::thread::spawn(move || {
+            let parent = open_parent(&path).expect("second parent");
+            let result = replace_private(&parent, ReplaceExpectation::Matches(original), b"second");
+            second_tx.send(result).expect("send second result");
+        });
+
+        assert!(second_rx.recv_timeout(Duration::from_millis(250)).is_err());
+        release_tx.send(()).expect("release first");
+        assert!(first.join().expect("first result").is_ok());
+        assert!(matches!(
+            second_rx.recv().expect("second result"),
+            Err(BoundaryError::IdentityMismatch)
+        ));
+        second.join().expect("second join");
     }
 
     #[test]
@@ -492,5 +589,29 @@ mod tests {
             open_existing_regular(&parent),
             Err(BoundaryError::LinkRejected)
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn linked_replace_lock_is_rejected() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().expect("tempdir");
+        let path = directory.path().join("config.toml");
+        let lock_target = directory.path().join("lock-target");
+        std::fs::write(&path, b"original").expect("seed file");
+        std::fs::write(&lock_target, b"target").expect("seed lock target");
+        symlink(&lock_target, directory.path().join(REPLACE_LOCK_NAME)).expect("lock symlink");
+        let parent = open_parent(&path).expect("parent");
+        let original = open_existing_regular(&parent).expect("opened").identity();
+        assert!(matches!(
+            replace_private(
+                &parent,
+                ReplaceExpectation::Matches(original),
+                b"replacement"
+            ),
+            Err(BoundaryError::LinkRejected)
+        ));
+        assert_eq!(std::fs::read(lock_target).expect("lock target"), b"target");
     }
 }

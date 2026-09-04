@@ -55,7 +55,8 @@ reject a linked or non-regular final component, validate the open handle, and
 read at most the limit plus one byte. They are bounded to 1 MiB and summarized
 with a SHA-256 digest and bounded UTF-8 preview. CLI JSON/stdin and configuration
 inputs use the same bounded reader; configuration replacement is private,
-atomic, and guarded by the previously opened file identity. Message and
+atomic, serialized across Kirje writers, and guarded by the previously opened
+file identity. Message and
 attachment output is always marked `untrusted: true`; Kirje never executes
 attachment content.
 

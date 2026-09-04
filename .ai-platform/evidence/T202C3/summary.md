@@ -36,7 +36,7 @@ The fresh release-candidate gate on macOS arm64 passed:
 
 - `cargo fmt --all --check`
 - `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`
-- `cargo test --workspace --all-features --locked` (246 tests)
+- `cargo test --workspace --all-features --locked` (248 tests on macOS)
 - `cargo build --workspace --all-features --locked`
 - `cargo build --release --locked --package kirje-cli`
 - `cargo deny check`

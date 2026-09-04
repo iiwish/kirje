@@ -1616,6 +1616,7 @@ version = "1.0.0-alpha.1"
 dependencies = [
  "cap-fs-ext",
  "cap-std",
+ "fs4",
  "getrandom 0.4.3",
  "tempfile",
  "thiserror",

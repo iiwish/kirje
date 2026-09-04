@@ -27,6 +27,8 @@ completed.
 
 - File metadata and consumed bytes come from the same opened handle.
 - Final-component links and non-regular file inputs are rejected.
+- Concurrent Kirje configuration writers are serialized before the opened-file
+  identity check, so exactly one stale compare-and-swap contender succeeds.
 - Credential cleanup does not expose credential presence or locator material.
 
 [1.0.0-alpha.1]: https://github.com/iiwish/kirje/releases/tag/v1.0.0-alpha.1

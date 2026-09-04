@@ -21,8 +21,10 @@ Local file input is capability-anchored: Kirje opens one parent, refuses to
 follow the final component, validates metadata from the opened regular-file
 handle, and retains no more than the declared limit plus one byte. Config reads
 are capped at 1 MiB and config replacement is private, atomic, and conditioned
-on the previously opened object identity. Account creation is create-only and
-cannot silently replace an existing display ID.
+on the previously opened object identity. A private advisory lock serializes
+Kirje writers before the identity check, preventing concurrent lost updates.
+Account creation is create-only and cannot silently replace an existing display
+ID.
 
 The authority store contains the signed credential-cleanup lifecycle. Grant
 consumption and `ready -> claimed` commit together, only the winner receives an
@@ -34,8 +36,8 @@ leaves `claimed` state for exact recovery; success records one terminal event.
 
 - `cargo fmt --all --check`
 - `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`
-- `cargo test --workspace --all-features --locked` (246 tests)
-- `cargo test --workspace --all-features --release --locked` (246 tests)
+- `cargo test --workspace --all-features --locked` (248 tests on macOS)
+- `cargo test --workspace --all-features --release --locked` (248 tests on macOS)
 - `cargo test --workspace --no-default-features --locked`
 - `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps --locked`
 - `cargo build --workspace --all-features --locked`
@@ -51,6 +53,10 @@ leaves `claimed` state for exact recovery; success records one terminal event.
 - A clean `cargo install --path crates/kirje-cli --locked` smoke validates the
   installed binary, schema, isolated doctor, create-only duplicate rejection,
   private `0600` account config, archive manifest, and checksum.
+- A deterministic two-writer regression test reproduces the stale-identity race
+  without serialization and proves one successful compare-and-swap winner with
+  the capability-relative lock. Unix coverage also rejects a linked lock file
+  and verifies mode `0600`.
 - CLI contract tests cover create-only account behavior, protocol-clean MCP
   startup, local attachment import, redirected secret/approval rejection, and
   the versioned JSON envelope.
