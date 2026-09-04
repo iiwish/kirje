@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  rust:
+  quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -23,8 +23,22 @@ jobs:
         run: cargo fmt --all --check
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-      - name: Run tests
-        run: cargo test --workspace --all-features --locked
       - name: Build workspace
         run: cargo build --workspace --all-features --locked
       - uses: EmbarkStudios/cargo-deny-action@v2
+
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+      - uses: Swatinem/rust-cache@v2
+      - name: Run locked workspace tests
+        run: cargo test --workspace --all-features --locked

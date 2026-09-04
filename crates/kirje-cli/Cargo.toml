@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Local-first email CLI and MCP server built for AI agents"
+publish = false
 
 [[bin]]
 name = "kirje"

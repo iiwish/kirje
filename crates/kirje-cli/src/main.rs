@@ -8,10 +8,11 @@ use anyhow::Context as _;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use clap::{Parser, Subcommand, ValueEnum};
 use kirje_core::{
-    AttachmentRead, CONTRACT_VERSION, CredentialKind, DraftInput, Endpoint, LocalMessageSearch,
-    MailAccountConfig, MailError, MailErrorCode, MailboxOperationRequest, MessageRead,
-    MessageReference, MessageSearch, Protocol, SendAttachment, SendRequest, TransportSecurity,
-    discover_account, find_provider_preset, provider_registry,
+    AttachmentRead, BoundedJsonInput, CONTRACT_VERSION, CredentialKind, DraftInput, Endpoint,
+    LocalMessageSearch, MailAccountConfig, MailError, MailErrorCode, MailboxOperationRequest,
+    MessageRead, MessageReference, MessageSearch, Protocol, SendAttachment, SendRequest,
+    TransportSecurity, discover_account, find_provider_preset, parse_bounded_json,
+    provider_registry,
 };
 use kirje_local_io::{
     BoundaryError, open_existing_regular, open_parent, read_bounded, read_stream_bounded,
@@ -21,7 +22,7 @@ use kirje_runtime::{
     resolve_outbox_path,
 };
 use secrecy::SecretString;
-use serde::{Serialize, de::DeserializeOwned};
+use serde::Serialize;
 use serde_json::Value;
 
 #[derive(Parser)]
@@ -606,7 +607,7 @@ fn handle_account(cli: &Cli, command: &AccountCommand) -> Result<Value, MailErro
                 *smtp_security,
                 *credential_kind,
             )?;
-            json_value(runtime(cli)?.upsert_account(account)?)
+            json_value(runtime(cli)?.create_account(account)?)
         }
         AccountCommand::List => json_value(runtime(cli)?.list_accounts()?),
         AccountCommand::Status { account_id } => {
@@ -934,7 +935,7 @@ fn handle_operation(cli: &Cli, command: &OperationCommand) -> Result<Value, Mail
     }
 }
 
-fn read_json_input<T: DeserializeOwned>(
+fn read_json_input<T: BoundedJsonInput>(
     input: &str,
     max_bytes: usize,
     label: &str,
@@ -950,8 +951,13 @@ fn read_json_input<T: DeserializeOwned>(
         read_bounded(&mut opened, max_bytes)
             .map_err(|error| map_local_input_error(&error, label, false))?
     };
-    serde_json::from_slice(&bytes)
-        .map_err(|_| MailError::invalid_input(format!("{label} must be valid JSON")))
+    parse_bounded_json(&bytes).map_err(|error| {
+        if error.code == MailErrorCode::InvalidInput {
+            MailError::invalid_input(format!("{label} must match the bounded JSON contract"))
+        } else {
+            error
+        }
+    })
 }
 
 fn map_local_input_error(error: &BoundaryError, label: &str, stream: bool) -> MailError {

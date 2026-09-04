@@ -23,7 +23,7 @@ pub use mail::*;
 pub use operation::*;
 pub use send::*;
 
-pub const CONTRACT_VERSION: &str = "2026-08-27.6";
+pub const CONTRACT_VERSION: &str = "2026-09-04.1";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]

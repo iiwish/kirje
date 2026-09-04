@@ -78,6 +78,23 @@ fn account_add_and_list_share_a_versioned_json_contract() {
         added_json["contract_version"]
     );
     assert_eq!(listed_json["data"][0]["id"], "personal");
+
+    let duplicate = Command::cargo_bin("kirje")
+        .expect("kirje binary")
+        .args([
+            "--config",
+            config.to_str().expect("config path"),
+            "account",
+            "add",
+            "personal",
+            "agent@163.com",
+        ])
+        .output()
+        .expect("run duplicate account add");
+    assert_eq!(duplicate.status.code(), Some(1));
+    let duplicate_json: serde_json::Value =
+        serde_json::from_slice(&duplicate.stdout).expect("duplicate JSON");
+    assert_eq!(duplicate_json["error"]["code"], "account_already_exists");
 }
 
 #[test]

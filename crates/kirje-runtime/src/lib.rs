@@ -48,12 +48,12 @@ pub trait AccountRepository: Send + Sync {
     /// Returns a stable configuration error when storage cannot be read.
     fn get(&self, account_id: &str) -> Result<Option<MailAccountConfig>, MailError>;
 
-    /// Insert or replace one validated account using an atomic write.
+    /// Insert one validated account using an atomic write.
     ///
     /// # Errors
     ///
     /// Returns a stable validation or configuration error.
-    fn upsert(&self, account: MailAccountConfig) -> Result<(), MailError>;
+    fn create(&self, account: MailAccountConfig) -> Result<(), MailError>;
 }
 
 /// Storage contract for credentials. Implementations must never expose values
@@ -254,25 +254,28 @@ impl AccountRepository for TomlAccountRepository {
             .find(|account| account.id == account_id))
     }
 
-    fn upsert(&self, account: MailAccountConfig) -> Result<(), MailError> {
+    fn create(&self, account: MailAccountConfig) -> Result<(), MailError> {
         account.validate()?;
         let (mut document, identity) = self.load_with_identity()?;
-        if let Some(existing) = document
+        if document
             .accounts
-            .iter_mut()
-            .find(|candidate| candidate.id == account.id)
+            .iter()
+            .any(|candidate| candidate.id == account.id)
         {
-            *existing = account;
-        } else {
-            if document.accounts.len() >= MAX_ACCOUNTS {
-                return Err(MailError::new(
-                    MailErrorCode::ResourceLimit,
-                    "account configuration cannot exceed 100 accounts",
-                    false,
-                ));
-            }
-            document.accounts.push(account);
+            return Err(MailError::new(
+                MailErrorCode::AccountAlreadyExists,
+                "account id is already configured",
+                false,
+            ));
         }
+        if document.accounts.len() >= MAX_ACCOUNTS {
+            return Err(MailError::new(
+                MailErrorCode::ResourceLimit,
+                "account configuration cannot exceed 100 accounts",
+                false,
+            ));
+        }
+        document.accounts.push(account);
         document
             .accounts
             .sort_by(|left, right| left.id.cmp(&right.id));
@@ -479,16 +482,16 @@ impl KirjeRuntime {
         }
     }
 
-    /// Save a validated non-secret account configuration.
+    /// Create a validated non-secret account configuration without replacement.
     ///
     /// # Errors
     ///
     /// Returns validation or configuration persistence errors.
-    pub fn upsert_account(
+    pub fn create_account(
         &self,
         account: MailAccountConfig,
     ) -> Result<MailAccountConfig, MailError> {
-        self.accounts.upsert(account.clone())?;
+        self.accounts.create(account.clone())?;
         Ok(account)
     }
 
@@ -1637,7 +1640,7 @@ mod tests {
         let accounts = Arc::new(TomlAccountRepository::new(
             directory.path().join("accounts.toml"),
         ));
-        accounts.upsert(account()).expect("account");
+        accounts.create(account()).expect("account");
         KirjeRuntime::with_services(
             accounts,
             secrets,
@@ -1662,7 +1665,7 @@ mod tests {
         let accounts = Arc::new(TomlAccountRepository::new(
             directory.path().join("accounts.toml"),
         ));
-        accounts.upsert(account()).expect("account");
+        accounts.create(account()).expect("account");
         KirjeRuntime::with_services_and_mutator(
             accounts,
             secrets,
@@ -1862,14 +1865,18 @@ mod tests {
         let repository = TomlAccountRepository::new(path.clone());
         let mut second = account();
         second.id = "zeta".to_owned();
-        repository.upsert(second).expect("save zeta");
-        repository.upsert(account()).expect("save work");
+        repository.create(second).expect("save zeta");
+        repository.create(account()).expect("save work");
 
         let accounts = repository.list().expect("load accounts");
         assert_eq!(accounts[0].id, "work");
         let source = fs::read_to_string(path).expect("read config");
         assert!(!source.contains("very-secret"));
         assert!(!source.contains("credential_value"));
+        assert_eq!(
+            repository.create(account()).expect_err("duplicate").code,
+            MailErrorCode::AccountAlreadyExists
+        );
     }
 
     #[test]
@@ -1880,7 +1887,7 @@ mod tests {
         ));
         let secrets = Arc::new(MemorySecrets::default());
         let runtime = KirjeRuntime::new(repository, secrets, Arc::new(NoopReader));
-        runtime.upsert_account(account()).expect("save account");
+        runtime.create_account(account()).expect("save account");
         runtime
             .set_secret("work", &SecretString::from("very-secret".to_owned()))
             .expect("save secret");
@@ -1921,7 +1928,7 @@ mod tests {
         let repository = Arc::new(TomlAccountRepository::new(
             directory.path().join("accounts.toml"),
         ));
-        repository.upsert(account()).expect("account");
+        repository.create(account()).expect("account");
         let index = Arc::new(
             kirje_store::SqliteMessageIndex::open(directory.path().join("index.sqlite3"))
                 .expect("index"),
@@ -1952,7 +1959,7 @@ mod tests {
         let repository = Arc::new(TomlAccountRepository::new(
             directory.path().join("accounts.toml"),
         ));
-        repository.upsert(account()).expect("account");
+        repository.create(account()).expect("account");
         let secrets = Arc::new(MemorySecrets::default());
         secrets
             .set("work", &SecretString::from("secret".to_owned()))
