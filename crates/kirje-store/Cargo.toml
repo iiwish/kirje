@@ -27,6 +27,7 @@ uuid.workspace = true
 [dev-dependencies]
 base64.workspace = true
 ed25519-dalek.workspace = true
+syn = { workspace = true, features = ["visit"] }
 tempfile.workspace = true
 
 [lints]
