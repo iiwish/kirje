@@ -1,7 +1,7 @@
 #![cfg(feature = "test-support")]
 
 use std::{
-    num::NonZeroU64,
+    num::{NonZeroU32, NonZeroU64},
     str::FromStr,
     sync::{
         Arc, Barrier,
@@ -18,9 +18,11 @@ use kirje_core::{
     AuthorizationReceiptState, BindingState, CleanupDescriptor, CleanupId, CleanupState, ConfigCas,
     CredentialCleanupManifest, CredentialId, CredentialKind, CredentialMutationManifest, Endpoint,
     EndpointSnapshot, HostKind, LocatorKind, MailAccountConfig, MailError, MailErrorCode,
-    ManifestContext, ManifestPayload, ManifestTarget, OwnerPublicKey, PlatformLocationMaterial,
-    Protocol, SensitiveAction, Sha256Digest, StoreEnrollManifest, StoreEnrollmentState, StoreId,
-    StoredCredentialState, TargetKind, TransitionId, TransportSecurity,
+    MailboxManifest, MailboxSpecialUseInput, MailboxStrategy, ManifestAddress, ManifestContext,
+    ManifestPayload, ManifestTarget, MimeBuilderVersion, OperationId, OwnerPublicKey,
+    PlatformLocationMaterial, Protocol, RemoteEffectId, SendSubmitManifest, SensitiveAction,
+    Sha256Digest, StoreEnrollManifest, StoreEnrollmentState, StoreId, StoredCredentialState,
+    TargetKind, TransitionId, TransportSecurity,
 };
 use kirje_store::{
     AccountTransitionKind, AccountTransitionObservationRequest, AccountTransitionProjection,
@@ -7504,5 +7506,176 @@ fn distinct_account_prepare_contenders_have_one_store_wide_winner() {
     assert_eq!(
         scalar(&connection, "SELECT COUNT(*) FROM registered_credentials"),
         1
+    );
+}
+
+#[allow(clippy::too_many_lines)]
+fn synthetic_remote_manifest(
+    action: SensitiveAction,
+    index: usize,
+    store_id: StoreId,
+    account_id: AccountId,
+    binding_sha256: Sha256Digest,
+    policy_sha256: Sha256Digest,
+) -> ActionManifest {
+    let operation_id = t202c3_uuid::<OperationId>(0x5600_0000, index);
+    let effect_id = t202c3_uuid::<RemoteEffectId>(0x5700_0000, index);
+    let context = ManifestContext {
+        target: ManifestTarget::Operation(operation_id),
+        store_id: Some(store_id),
+        account_id: Some(account_id),
+        account_binding_sha256: Some(binding_sha256),
+        policy_sha256: Some(policy_sha256),
+        effect_id: Some(effect_id),
+    };
+    let payload = match action {
+        SensitiveAction::SendSubmit => ManifestPayload::SendSubmit(SendSubmitManifest {
+            account_generation: NonZeroU64::new(1).unwrap(),
+            from: ManifestAddress::new(
+                Some("Sender".to_owned()),
+                "sender@example.invalid".to_owned(),
+            )
+            .unwrap(),
+            to: vec![ManifestAddress::new(None, "dest@example.invalid".to_owned()).unwrap()],
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Subject".to_owned(),
+            text: Some("Body".to_owned()),
+            html: None,
+            attachments: Vec::new(),
+            message_id: "<msg@example.invalid>".to_owned(),
+            date_unix_ms: 1_700_000_000_000,
+            mime_builder_version: MimeBuilderVersion::KirjeMimeV1,
+            mime_boundary: "boundary".to_owned(),
+            in_reply_to: None,
+            references: Vec::new(),
+            canonical_rfc822_sha256: None,
+        }),
+        SensitiveAction::MailSeen => ManifestPayload::MailSeen(MailboxManifest {
+            account_generation: NonZeroU64::new(1).unwrap(),
+            source_mailbox: "INBOX".to_owned(),
+            uid_validity: NonZeroU32::new(100).unwrap(),
+            uid: NonZeroU32::new(1).unwrap(),
+            requested_value: Some(true),
+            requested_destination: None,
+            special_use: MailboxSpecialUseInput::None,
+            resolved_destination: None,
+            strategy: MailboxStrategy::Store,
+            capability_sha256: Sha256Digest::digest(b"cap"),
+            capability_complete: true,
+        }),
+        SensitiveAction::MailStarred => ManifestPayload::MailStarred(MailboxManifest {
+            account_generation: NonZeroU64::new(1).unwrap(),
+            source_mailbox: "INBOX".to_owned(),
+            uid_validity: NonZeroU32::new(100).unwrap(),
+            uid: NonZeroU32::new(1).unwrap(),
+            requested_value: Some(true),
+            requested_destination: None,
+            special_use: MailboxSpecialUseInput::None,
+            resolved_destination: None,
+            strategy: MailboxStrategy::Store,
+            capability_sha256: Sha256Digest::digest(b"cap"),
+            capability_complete: true,
+        }),
+        SensitiveAction::MailMove => ManifestPayload::MailMove(MailboxManifest {
+            account_generation: NonZeroU64::new(1).unwrap(),
+            source_mailbox: "INBOX".to_owned(),
+            uid_validity: NonZeroU32::new(100).unwrap(),
+            uid: NonZeroU32::new(1).unwrap(),
+            requested_value: None,
+            requested_destination: Some("Other".to_owned()),
+            special_use: MailboxSpecialUseInput::None,
+            resolved_destination: Some("Other".to_owned()),
+            strategy: MailboxStrategy::UidMove,
+            capability_sha256: Sha256Digest::digest(b"cap"),
+            capability_complete: true,
+        }),
+        SensitiveAction::MailArchive => ManifestPayload::MailArchive(MailboxManifest {
+            account_generation: NonZeroU64::new(1).unwrap(),
+            source_mailbox: "INBOX".to_owned(),
+            uid_validity: NonZeroU32::new(100).unwrap(),
+            uid: NonZeroU32::new(1).unwrap(),
+            requested_value: None,
+            requested_destination: None,
+            special_use: MailboxSpecialUseInput::Archive,
+            resolved_destination: Some("Archive".to_owned()),
+            strategy: MailboxStrategy::UidMove,
+            capability_sha256: Sha256Digest::digest(b"cap"),
+            capability_complete: true,
+        }),
+        SensitiveAction::MailSafeDelete => ManifestPayload::MailSafeDelete(MailboxManifest {
+            account_generation: NonZeroU64::new(1).unwrap(),
+            source_mailbox: "INBOX".to_owned(),
+            uid_validity: NonZeroU32::new(100).unwrap(),
+            uid: NonZeroU32::new(1).unwrap(),
+            requested_value: None,
+            requested_destination: None,
+            special_use: MailboxSpecialUseInput::Trash,
+            resolved_destination: Some("Trash".to_owned()),
+            strategy: MailboxStrategy::UidMove,
+            capability_sha256: Sha256Digest::digest(b"cap"),
+            capability_complete: true,
+        }),
+        _ => panic!("unsupported remote action: {action:?}"),
+    };
+    ActionManifest::new(context, payload).unwrap()
+}
+
+#[test]
+fn remote_challenge_issuance_and_challenge_effects_are_exact() {
+    let fixture = active_account_fixture();
+    let remote_actions = [
+        SensitiveAction::SendSubmit,
+        SensitiveAction::MailSeen,
+        SensitiveAction::MailStarred,
+        SensitiveAction::MailMove,
+        SensitiveAction::MailArchive,
+        SensitiveAction::MailSafeDelete,
+    ];
+    let policy_digest = Sha256Digest::digest(b"test-policy");
+
+    for (index, action) in remote_actions.into_iter().enumerate() {
+        let manifest = synthetic_remote_manifest(
+            action,
+            index + 1,
+            store_id(0),
+            account_id(),
+            account_binding().sha256(),
+            policy_digest,
+        );
+        let entropy = deterministic(vec![u8::try_from(0x80 + index).unwrap(); 48]);
+        let request = CreateChallengeRequest {
+            manifest: manifest.clone(),
+            observed_at_unix_ms: 502_000 + i64::try_from(index).unwrap() * 100,
+            expires_at_unix_ms: 502_900 + i64::try_from(index).unwrap() * 100,
+        };
+        let store = AuthorityStore::open_isolated(
+            context(AnchorPresence::Present(fixture.snapshot.anchor.clone())),
+            fixture.home.clone(),
+            entropy.clone(),
+        )
+        .unwrap();
+        assert!(matches!(store.state(), AuthorityOpenState::Ready(_)));
+        let created = store.create_challenge(request.clone()).unwrap();
+
+        assert_eq!(created.action, action);
+        assert_eq!(created.manifest_sha256, manifest.sha256());
+    }
+
+    let connection = Connection::open(fixture.home.database_path()).unwrap();
+    assert_eq!(
+        scalar(&connection, "SELECT COUNT(*) FROM challenge_effects"),
+        6
+    );
+    assert_eq!(
+        scalar(
+            &connection,
+            "SELECT COUNT(DISTINCT ordinal) FROM challenge_effects WHERE ordinal=0"
+        ),
+        1
+    );
+    assert_eq!(
+        scalar(&connection, "SELECT COUNT(*) FROM remote_effects"),
+        0
     );
 }

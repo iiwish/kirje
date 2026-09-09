@@ -1652,6 +1652,28 @@ impl AuthorityStore {
         if inserted != 1 {
             return Err(store_write_error());
         }
+        if request.manifest.action().policy().effect_kind != kirje_core::EffectKind::None {
+            let effect_id = request
+                .manifest
+                .context()
+                .effect_id
+                .ok_or_else(authorization_context_stale_error)?;
+            let effect_kind = request.manifest.action().policy().effect_kind.code();
+            let inserted_effect = transaction
+                .execute(
+                    "INSERT INTO challenge_effects (challenge_id, ordinal, effect_id, effect_kind)
+                     VALUES (?1, 0, ?2, ?3)",
+                    params![
+                        payload.challenge_id().as_bytes(),
+                        effect_id.as_bytes(),
+                        i64::from(effect_kind),
+                    ],
+                )
+                .map_err(|_| store_write_error())?;
+            if inserted_effect != 1 {
+                return Err(store_write_error());
+            }
+        }
         self.test_hooks.fault(TestFaultPoint::ChallengeInserted)?;
         observe_clock_pair(&transaction, effective_time)?;
         self.test_hooks
@@ -4832,12 +4854,18 @@ fn ensure_supported_challenge_action(action: SensitiveAction) -> Result<(), Mail
         | SensitiveAction::CredentialCleanup
         | SensitiveAction::OwnerRotate
         | SensitiveAction::RecoveryRotate
-        | SensitiveAction::OwnerRecover => Ok(()),
+        | SensitiveAction::OwnerRecover
+        | SensitiveAction::SendSubmit
+        | SensitiveAction::MailSeen
+        | SensitiveAction::MailStarred
+        | SensitiveAction::MailMove
+        | SensitiveAction::MailArchive
+        | SensitiveAction::MailSafeDelete => Ok(()),
         SensitiveAction::PolicyUpdate | SensitiveAction::AssuranceUpdate => Err(MailError::stable(
             MailErrorCode::UnsupportedCapability,
             "authorization action is not supported",
         )),
-        _ => Err(authorization_context_stale_error()),
+        SensitiveAction::AmbiguousClose => Err(authorization_context_stale_error()),
     }
 }
 
@@ -4875,8 +4903,99 @@ fn validate_fresh_manifest_context(
         ManifestPayload::CredentialCleanup(_) => {
             validate_credential_cleanup_context(connection, authority, manifest, true)?;
         }
+        ManifestPayload::SendSubmit(_)
+        | ManifestPayload::MailSeen(_)
+        | ManifestPayload::MailStarred(_)
+        | ManifestPayload::MailMove(_)
+        | ManifestPayload::MailArchive(_)
+        | ManifestPayload::MailSafeDelete(_) => {
+            validate_fresh_remote_context(connection, manifest)?;
+        }
         _ => {}
     }
+    Ok(())
+}
+
+fn validate_fresh_remote_context(
+    connection: &Connection,
+    manifest: &ActionManifest,
+) -> Result<(), MailError> {
+    let context = manifest.context();
+    let store_id = context
+        .store_id
+        .ok_or_else(authorization_context_stale_error)?;
+    let account_id = context
+        .account_id
+        .ok_or_else(authorization_context_stale_error)?;
+    let binding_sha256 = context
+        .account_binding_sha256
+        .ok_or_else(authorization_context_stale_error)?;
+    let effect_id = context
+        .effect_id
+        .ok_or_else(authorization_context_stale_error)?;
+
+    let store = load_registered_store_by_id(connection, store_id)?
+        .ok_or_else(authorization_context_stale_error)?;
+    match store.state.as_str() {
+        "recovery_required" => return Err(recovery_error()),
+        "blocked" => return Err(account_update_conflict_error()),
+        "active" => {}
+        _ => return Err(authorization_context_stale_error()),
+    }
+
+    let active_transitions: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM account_transitions
+             WHERE store_id=?1 AND state IN ('prepared','config_committed')",
+            [store_id.as_bytes()],
+            |row| row.get(0),
+        )
+        .map_err(|_| store_read_error())?;
+    if active_transitions != 0 {
+        return Err(account_update_conflict_error());
+    }
+
+    let account = load_registered_account(connection, account_id)?
+        .ok_or_else(authorization_context_stale_error)?;
+    match account.state {
+        RegisteredAccountState::Active if account.active_transition_id.is_none() => {}
+        RegisteredAccountState::Proposed | RegisteredAccountState::Blocked => {
+            return Err(account_update_conflict_error());
+        }
+        RegisteredAccountState::Removed | RegisteredAccountState::Active => {
+            return Err(authorization_context_stale_error());
+        }
+    }
+
+    if account.store_id != store_id || account.binding_sha256 != binding_sha256 {
+        return Err(authorization_context_stale_error());
+    }
+
+    let declared_generation = match manifest.payload() {
+        ManifestPayload::SendSubmit(send) => send.account_generation,
+        ManifestPayload::MailSeen(mailbox)
+        | ManifestPayload::MailStarred(mailbox)
+        | ManifestPayload::MailMove(mailbox)
+        | ManifestPayload::MailArchive(mailbox)
+        | ManifestPayload::MailSafeDelete(mailbox) => mailbox.account_generation,
+        _ => return Err(authorization_context_stale_error()),
+    };
+    if account.account_generation != declared_generation {
+        return Err(authorization_context_stale_error());
+    }
+
+    let existing_effect: i64 = connection
+        .query_row(
+            "SELECT (SELECT COUNT(*) FROM challenge_effects WHERE effect_id=?1)
+                  + (SELECT COUNT(*) FROM remote_effects WHERE effect_id=?1)",
+            [effect_id.as_bytes()],
+            |row| row.get(0),
+        )
+        .map_err(|_| store_read_error())?;
+    if existing_effect != 0 {
+        return Err(config_store_identity_conflict_error());
+    }
+
     Ok(())
 }
 
@@ -5388,7 +5507,13 @@ fn validate_intrinsic_manifest(
         ManifestPayload::CredentialSet(value) | ManifestPayload::CredentialDelete(value) => {
             validate_credential_mutation_intrinsic(value)?;
         }
-        ManifestPayload::CredentialCleanup(_) => {}
+        ManifestPayload::CredentialCleanup(_)
+        | ManifestPayload::SendSubmit(_)
+        | ManifestPayload::MailSeen(_)
+        | ManifestPayload::MailStarred(_)
+        | ManifestPayload::MailMove(_)
+        | ManifestPayload::MailArchive(_)
+        | ManifestPayload::MailSafeDelete(_) => {}
         ManifestPayload::OwnerRotate(value) => {
             validate_rotation_manifest(authority, value, OwnerKeyRole::Owner)?;
         }
@@ -5435,7 +5560,7 @@ fn validate_intrinsic_manifest(
                 return Err(authorization_context_stale_error());
             }
         }
-        _ => return Err(authorization_context_stale_error()),
+        ManifestPayload::AmbiguousClose(_) => return Err(authorization_context_stale_error()),
     }
     Ok(())
 }
@@ -7218,7 +7343,6 @@ fn validate_t202a_initial_row_counts(connection: &Connection) -> Result<(), Mail
     let forbidden_rows: i64 = connection
         .query_row(
             "SELECT
-                (SELECT COUNT(*) FROM challenge_effects) +
                 (SELECT COUNT(*) FROM remote_effects) +
                 (SELECT COUNT(*) FROM effect_claims) +
                 (SELECT COUNT(*) FROM effect_invocations) +
@@ -7264,7 +7388,17 @@ fn validate_authorization_history(
                 |row| row.get(0),
             )
             .map_err(|_| store_read_error())?;
-        if challenge_count != 0 || receipt_count != 0 || nonce_count != 0 || registry_count != 0 {
+        let effects_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM challenge_effects", [], |row| {
+                row.get(0)
+            })
+            .map_err(|_| store_read_error())?;
+        if challenge_count != 0
+            || receipt_count != 0
+            || nonce_count != 0
+            || registry_count != 0
+            || effects_count != 0
+        {
             return Err(recovery_error());
         }
         return Ok(());
@@ -7285,7 +7419,23 @@ fn validate_authorization_history(
         validate_stored_challenge(connection, authority, &challenge, last_observed_at)?;
         seen = seen.checked_add(1).ok_or_else(recovery_error)?;
     }
-    if seen != challenge_count || receipt_count != nonce_count {
+    let remote_challenges: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM authorization_challenges
+             WHERE action IN (1, 16, 17, 18, 19, 20)",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| store_read_error())?;
+    let challenge_effects_count: i64 = connection
+        .query_row("SELECT COUNT(*) FROM challenge_effects", [], |row| {
+            row.get(0)
+        })
+        .map_err(|_| store_read_error())?;
+    if seen != challenge_count
+        || receipt_count != nonce_count
+        || challenge_effects_count != remote_challenges
+    {
         return Err(recovery_error());
     }
     validate_registry_history(connection)
@@ -7341,9 +7491,52 @@ fn validate_stored_challenge(
         || snapshot.nonce() != &challenge.nonce
         || snapshot.issued_at_unix_ms() != challenge.issued_at
         || snapshot.expires_at_unix_ms() != challenge.expires_at
-        || snapshot.effect().is_some()
     {
         return Err(recovery_error());
+    }
+    let expected_effect = match challenge.action.policy().effect_kind {
+        kirje_core::EffectKind::None => None,
+        kind => Some(kind),
+    };
+    match (snapshot.effect(), expected_effect) {
+        (None, None) => {
+            let count: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM challenge_effects WHERE challenge_id=?1",
+                    [challenge.challenge_id.as_bytes()],
+                    |row| row.get(0),
+                )
+                .map_err(|_| store_read_error())?;
+            if count != 0 {
+                return Err(recovery_error());
+            }
+        }
+        (Some(effect), Some(expected_kind)) => {
+            if effect.ordinal() != 0 || effect.kind() != expected_kind {
+                return Err(recovery_error());
+            }
+            if Some(effect.effect_id()) != manifest.context().effect_id {
+                return Err(recovery_error());
+            }
+            let effect_row: Option<(i64, Vec<u8>, i64)> = connection
+                .query_row(
+                    "SELECT ordinal, effect_id, effect_kind FROM challenge_effects WHERE challenge_id=?1",
+                    [challenge.challenge_id.as_bytes()],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .optional()
+                .map_err(|_| store_read_error())?;
+            let Some((ordinal, effect_id_bytes, stored_kind)) = effect_row else {
+                return Err(recovery_error());
+            };
+            if ordinal != 0 || stored_kind != i64::from(expected_kind.code()) {
+                return Err(recovery_error());
+            }
+            if effect_id_bytes != effect.effect_id().as_bytes() {
+                return Err(recovery_error());
+            }
+        }
+        _ => return Err(recovery_error()),
     }
     let expected_signer = match challenge.action.policy().required_role {
         OwnerKeyRole::Owner => authority.owner_key_id,
