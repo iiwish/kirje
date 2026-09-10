@@ -16,12 +16,14 @@ use std::sync::{
 use chrono::{DateTime, SecondsFormat, TimeZone as _, Utc};
 use directories::ProjectDirs;
 use kirje_core::{
-    AccountId, AccountMutationManifest, ActionManifest, AuthorizationGrantId, AuthorizationPayload,
-    AuthorizationProof, AuthorizationReceiptId, AuthorizationReceiptProjection,
-    AuthorizationReceiptState, CleanupId, CleanupState, CredentialId, JournalId, LocatorKind,
-    MailError, MailErrorCode, ManifestPayload, OwnerKeyRole, OwnerPublicKey, OwnerRealmId,
-    PlatformLocationMaterial, SensitiveAction, Sha256Digest, StoreEnrollmentState, StoreId,
-    TargetKind, TransitionId, TrustPermissionMask, owner_key_id, verify_authorization_signature,
+    AccountId, AccountMutationManifest, ActionManifest, AuthoritySessionId, AuthorizationGrantId,
+    AuthorizationPayload, AuthorizationProof, AuthorizationReceiptId,
+    AuthorizationReceiptProjection, AuthorizationReceiptState, CleanupId, CleanupState,
+    CredentialId, EffectClaimId, InvocationId, InvocationPermit, JournalId, LocatorKind, MailError,
+    MailErrorCode, ManifestPayload, ObservationCertainty, ObservationSource, OperationId,
+    OwnerKeyRole, OwnerPublicKey, OwnerRealmId, PlatformLocationMaterial, RemoteEffectId,
+    SensitiveAction, Sha256Digest, StoreEnrollmentState, StoreId, TargetKind, TransitionId,
+    TrustPermissionMask, owner_key_id, verify_authorization_signature,
 };
 use rusqlite::{
     Connection, OpenFlags, OptionalExtension as _, Transaction, TransactionBehavior, params,
@@ -39,6 +41,9 @@ const EVENT_DETAIL_DOMAIN: &[u8] = b"KIRJE-AUTHORITY-EVENT-DETAIL-V1\0";
 const AUTHORIZATION_CONTEXT_DOMAIN: &[u8] = b"KIRJE-AUTHORIZATION-CONTEXT-V1\0";
 const AUTHORIZATION_RECEIPT_DOMAIN: &[u8] = b"KIRJE-AUTHORIZATION-RECEIPT-V1\0";
 const GRANT_USE_DOMAIN: &[u8] = b"KIRJE-GRANT-USE-V1\0";
+const EFFECT_CLAIM_DOMAIN: &[u8] = b"KIRJE-EFFECT-CLAIM-V1\0";
+const INVOCATION_START_DOMAIN: &[u8] = b"KIRJE-INVOCATION-START-V1\0";
+const EFFECT_OBSERVATION_DOMAIN: &[u8] = b"KIRJE-EFFECT-OBSERVATION-V1\0";
 const STORE_ENROLLMENT_INTENT_DOMAIN: &[u8] = b"KIRJE-STORE-ENROLLMENT-INTENT-V1\0";
 const ACCOUNT_DISPLAY_ID_DOMAIN: &[u8] = b"KIRJE-ACCOUNT-DISPLAY-ID-V1\0";
 const ACCOUNT_TRANSITION_DOMAIN: &[u8] = b"KIRJE-ACCOUNT-TRANSITION-V1\0";
@@ -230,6 +235,219 @@ impl GrantUseRequest {
             manifest_sha256,
         })
     }
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct EffectClaimRequest {
+    pub grant_use: GrantUseRequest,
+    pub effect_id: RemoteEffectId,
+    pub operation_id: OperationId,
+    pub store_id: StoreId,
+    pub store_location_sha256: Sha256Digest,
+    pub account_id: AccountId,
+    pub config_generation: NonZeroU64,
+    pub config_sha256: Sha256Digest,
+    pub account_generation: NonZeroU64,
+    pub credential_id: CredentialId,
+    pub manifest_sha256: Sha256Digest,
+    pub binding_sha256: Sha256Digest,
+    pub policy_sha256: Sha256Digest,
+    pub trust_epoch: NonZeroU64,
+    pub bundle_sha256: Sha256Digest,
+    pub key_id: Sha256Digest,
+    pub claimed_at_unix_ms: i64,
+}
+
+impl EffectClaimRequest {
+    /// Bind one exact remote effect claim context.
+    ///
+    /// # Errors
+    ///
+    /// Returns invalid-input if time is negative or out of bounds.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        grant_use: GrantUseRequest,
+        effect_id: RemoteEffectId,
+        operation_id: OperationId,
+        store_id: StoreId,
+        store_location_sha256: Sha256Digest,
+        account_id: AccountId,
+        config_generation: NonZeroU64,
+        config_sha256: Sha256Digest,
+        account_generation: NonZeroU64,
+        credential_id: CredentialId,
+        manifest_sha256: Sha256Digest,
+        binding_sha256: Sha256Digest,
+        policy_sha256: Sha256Digest,
+        trust_epoch: NonZeroU64,
+        bundle_sha256: Sha256Digest,
+        key_id: Sha256Digest,
+        claimed_at_unix_ms: i64,
+    ) -> Result<Self, MailError> {
+        if claimed_at_unix_ms < 0 {
+            return Err(MailError::invalid_input(
+                "claim observation time must be nonnegative",
+            ));
+        }
+        input_utc_millis(claimed_at_unix_ms)?;
+        if grant_use.manifest_sha256 != manifest_sha256 {
+            return Err(MailError::invalid_input(
+                "grant use manifest digest does not match claim",
+            ));
+        }
+        Ok(Self {
+            grant_use,
+            effect_id,
+            operation_id,
+            store_id,
+            store_location_sha256,
+            account_id,
+            config_generation,
+            config_sha256,
+            account_generation,
+            credential_id,
+            manifest_sha256,
+            binding_sha256,
+            policy_sha256,
+            trust_epoch,
+            bundle_sha256,
+            key_id,
+            claimed_at_unix_ms,
+        })
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct BeginInvocationRequest {
+    pub effect_id: RemoteEffectId,
+    pub claim_id: EffectClaimId,
+    pub authority_session_id: AuthoritySessionId,
+    pub started_at_unix_ms: i64,
+}
+
+impl BeginInvocationRequest {
+    /// Bind one exact invocation start context.
+    ///
+    /// # Errors
+    ///
+    /// Returns invalid-input if started-at time is negative or out of bounds.
+    pub fn new(
+        effect_id: RemoteEffectId,
+        claim_id: EffectClaimId,
+        authority_session_id: AuthoritySessionId,
+        started_at_unix_ms: i64,
+    ) -> Result<Self, MailError> {
+        if started_at_unix_ms < 0 {
+            return Err(MailError::invalid_input(
+                "invocation started time must be nonnegative",
+            ));
+        }
+        input_utc_millis(started_at_unix_ms)?;
+        Ok(Self {
+            effect_id,
+            claim_id,
+            authority_session_id,
+            started_at_unix_ms,
+        })
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct RecordObservationRequest {
+    pub effect_id: RemoteEffectId,
+    pub claim_id: EffectClaimId,
+    pub invocation_id: InvocationId,
+    pub certainty: ObservationCertainty,
+    pub result_bytes: Vec<u8>,
+    pub source: ObservationSource,
+    pub observed_at_unix_ms: i64,
+}
+
+impl RecordObservationRequest {
+    /// Bind one exact observation context and bounded result bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns invalid-input if time, size, or source/certainty combination is invalid.
+    pub fn new(
+        effect_id: RemoteEffectId,
+        claim_id: EffectClaimId,
+        invocation_id: InvocationId,
+        certainty: ObservationCertainty,
+        result_bytes: Vec<u8>,
+        source: ObservationSource,
+        observed_at_unix_ms: i64,
+    ) -> Result<Self, MailError> {
+        if observed_at_unix_ms < 0 {
+            return Err(MailError::invalid_input(
+                "observation time must be nonnegative",
+            ));
+        }
+        input_utc_millis(observed_at_unix_ms)?;
+        if result_bytes.is_empty() || result_bytes.len() > 16 * 1024 * 1024 {
+            return Err(MailError::invalid_input(
+                "observation result must be 1..16MiB",
+            ));
+        }
+        match (source, certainty) {
+            (ObservationSource::PreNetworkFailure, ObservationCertainty::KnownNoEffect)
+            | (ObservationSource::InvocationRecovery, ObservationCertainty::Ambiguous)
+            | (ObservationSource::AdapterResult, _) => Ok(()),
+            _ => Err(MailError::invalid_input(
+                "observation source and certainty combination is invalid",
+            )),
+        }?;
+        Ok(Self {
+            effect_id,
+            claim_id,
+            invocation_id,
+            certainty,
+            result_bytes,
+            source,
+            observed_at_unix_ms,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EffectClaimProjection {
+    pub claim_id: EffectClaimId,
+    pub effect_id: RemoteEffectId,
+    pub grant_id: AuthorizationGrantId,
+    pub operation_id: OperationId,
+    pub store_id: StoreId,
+    pub account_id: AccountId,
+    pub claimed_at: DateTime<Utc>,
+    pub invoke_before: DateTime<Utc>,
+    pub claim_sha256: Sha256Digest,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InvocationProjection {
+    pub invocation_id: InvocationId,
+    pub effect_id: RemoteEffectId,
+    pub claim_id: EffectClaimId,
+    pub session_id: AuthoritySessionId,
+    pub started_at: DateTime<Utc>,
+    pub start_sha256: Sha256Digest,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub struct BeginInvocationResult {
+    pub projection: InvocationProjection,
+    pub permit: Option<InvocationPermit>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ObservationProjection {
+    pub observation_id: Sha256Digest,
+    pub effect_id: RemoteEffectId,
+    pub claim_id: EffectClaimId,
+    pub invocation_id: InvocationId,
+    pub certainty: ObservationCertainty,
+    pub result_sha256: Sha256Digest,
+    pub source: ObservationSource,
+    pub observed_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -3255,6 +3473,967 @@ mod credential_cleanup_delete_adapter {
             };
             cleanup_projection(&deleted, Some(grant.used_at))
         }
+
+        /// Claim one authorized remote effect, persist grant use and effect claim atomically.
+        ///
+        /// # Errors
+        ///
+        /// Returns stable authorization, claim, or store error.
+        #[allow(
+            clippy::too_many_lines,
+            clippy::needless_pass_by_value,
+            clippy::type_complexity,
+            clippy::cast_possible_wrap,
+            clippy::similar_names
+        )]
+        pub fn claim_effect(
+            &self,
+            request: EffectClaimRequest,
+        ) -> Result<EffectClaimProjection, MailError> {
+            if !matches!(self.state, AuthorityOpenState::Ready(_)) {
+                return Err(recovery_error());
+            }
+            let _apply_lock = acquire_apply_lock(&self.home)?;
+            if !authority_database_exists(&self.home.database)? {
+                return Err(recovery_error());
+            }
+            let mut connection = existing_authority_read_connection(&self.home.database)?;
+            if classify_database(&connection)? != DatabaseClass::AuthorityV1 {
+                return Err(recovery_error());
+            }
+            configure_authority_pragmas(&connection)?;
+            let transaction = connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(|_| store_write_error())?;
+            let loaded = self.validate_ready_transaction(&transaction)?;
+
+            let existing_claim: Option<(
+                Vec<u8>,
+                Vec<u8>,
+                Vec<u8>,
+                Vec<u8>,
+                Vec<u8>,
+                Vec<u8>,
+                Vec<u8>,
+                i64,
+                Vec<u8>,
+                i64,
+                Vec<u8>,
+                Vec<u8>,
+                Vec<u8>,
+                Vec<u8>,
+                i64,
+                Vec<u8>,
+                Vec<u8>,
+                Vec<u8>,
+                i64,
+                i64,
+            )> = transaction
+                .query_row(
+                    "SELECT claim_id, effect_id, grant_id, operation_id, store_id,
+                            store_location_sha256, account_id, config_generation,
+                            config_sha256, account_generation, credential_id,
+                            manifest_sha256, binding_sha256, policy_sha256,
+                            trust_epoch, bundle_sha256, key_id, claim_sha256,
+                            claimed_at, invoke_before
+                     FROM effect_claims
+                     WHERE effect_id=?1 OR grant_id=?2",
+                    params![
+                        request.effect_id.as_bytes(),
+                        request.grant_use.grant_id.as_bytes()
+                    ],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                            row.get(5)?,
+                            row.get(6)?,
+                            row.get(7)?,
+                            row.get(8)?,
+                            row.get(9)?,
+                            row.get(10)?,
+                            row.get(11)?,
+                            row.get(12)?,
+                            row.get(13)?,
+                            row.get(14)?,
+                            row.get(15)?,
+                            row.get(16)?,
+                            row.get(17)?,
+                            row.get(18)?,
+                            row.get(19)?,
+                        ))
+                    },
+                )
+                .optional()
+                .map_err(|_| store_read_error())?;
+
+            if let Some(existing) = existing_claim {
+                let existing_effect_id: RemoteEffectId =
+                    uuid_from_blob_sql(existing.1).map_err(|_| recovery_error())?;
+                let existing_grant_id: AuthorizationGrantId =
+                    uuid_from_blob_sql(existing.2).map_err(|_| recovery_error())?;
+                let existing_op_id: OperationId =
+                    uuid_from_blob_sql(existing.3).map_err(|_| recovery_error())?;
+                let existing_store_id: StoreId =
+                    uuid_from_blob_sql(existing.4).map_err(|_| recovery_error())?;
+                let existing_loc: Sha256Digest =
+                    digest_from_blob_sql(existing.5).map_err(|_| recovery_error())?;
+                let existing_account_id: AccountId =
+                    uuid_from_blob_sql(existing.6).map_err(|_| recovery_error())?;
+                let existing_cfg_sha: Sha256Digest =
+                    digest_from_blob_sql(existing.8).map_err(|_| recovery_error())?;
+                let existing_cred_id: CredentialId =
+                    uuid_from_blob_sql(existing.10).map_err(|_| recovery_error())?;
+                let existing_man_sha: Sha256Digest =
+                    digest_from_blob_sql(existing.11).map_err(|_| recovery_error())?;
+                let existing_bin_sha: Sha256Digest =
+                    digest_from_blob_sql(existing.12).map_err(|_| recovery_error())?;
+                let existing_pol_sha: Sha256Digest =
+                    digest_from_blob_sql(existing.13).map_err(|_| recovery_error())?;
+                let existing_bun_sha: Sha256Digest =
+                    digest_from_blob_sql(existing.15).map_err(|_| recovery_error())?;
+                let existing_key: Sha256Digest =
+                    digest_from_blob_sql(existing.16).map_err(|_| recovery_error())?;
+
+                if existing_effect_id == request.effect_id
+                    && existing_grant_id == request.grant_use.grant_id
+                    && existing_op_id == request.operation_id
+                    && existing_store_id == request.store_id
+                    && existing_loc == request.store_location_sha256
+                    && existing_account_id == request.account_id
+                    && existing.7 == request.config_generation.get() as i64
+                    && existing_cfg_sha == request.config_sha256
+                    && existing.9 == request.account_generation.get() as i64
+                    && existing_cred_id == request.credential_id
+                    && existing_man_sha == request.manifest_sha256
+                    && existing_bin_sha == request.binding_sha256
+                    && existing_pol_sha == request.policy_sha256
+                    && existing.14 == request.trust_epoch.get() as i64
+                    && existing_bun_sha == request.bundle_sha256
+                    && existing_key == request.key_id
+                {
+                    let effective_time =
+                        checked_clock(loaded.last_observed_at, request.claimed_at_unix_ms)?;
+                    utc_millis(effective_time)?;
+                    observe_clock_pair(&transaction, effective_time)?;
+                    transaction.commit().map_err(|_| store_write_error())?;
+                    secure_authority_files(&self.home.database)?;
+                    let claim_id: EffectClaimId =
+                        uuid_from_blob_sql(existing.0).map_err(|_| recovery_error())?;
+                    let claim_sha256 =
+                        digest_from_blob_sql(existing.17).map_err(|_| recovery_error())?;
+                    return Ok(EffectClaimProjection {
+                        claim_id,
+                        effect_id: request.effect_id,
+                        grant_id: request.grant_use.grant_id,
+                        operation_id: request.operation_id,
+                        store_id: request.store_id,
+                        account_id: request.account_id,
+                        claimed_at: DateTime::<Utc>::from_timestamp_millis(existing.18)
+                            .ok_or_else(recovery_error)?,
+                        invoke_before: DateTime::<Utc>::from_timestamp_millis(existing.19)
+                            .ok_or_else(recovery_error)?,
+                        claim_sha256,
+                    });
+                }
+                return Err(effect_already_claimed_error());
+            }
+
+            let grant_used_count: i64 = transaction
+                .query_row(
+                    "SELECT COUNT(*) FROM grant_uses WHERE grant_id=?1",
+                    [request.grant_use.grant_id.as_bytes()],
+                    |row| row.get(0),
+                )
+                .map_err(|_| store_read_error())?;
+            if grant_used_count != 0 {
+                return Err(grant_already_used_error());
+            }
+
+            let receipt = load_receipt_by_id(&transaction, request.grant_use.receipt_id)?
+                .ok_or_else(authorization_context_stale_error)?;
+            let challenge = load_challenge(&transaction, receipt.challenge_id)?;
+
+            if challenge.state != "authorized" {
+                return Err(authorization_context_stale_error());
+            }
+
+            let effective_time =
+                checked_clock(loaded.last_observed_at, request.claimed_at_unix_ms)?;
+            utc_millis(effective_time)?;
+            if effective_time > receipt.expires_at {
+                transaction
+                    .execute(
+                        "UPDATE authorization_challenges SET state='expired' WHERE challenge_id=?1 AND state='authorized'",
+                        [challenge.challenge_id.as_bytes()],
+                    )
+                    .map_err(|_| store_write_error())?;
+                insert_enrollment_expiry_event(
+                    &transaction,
+                    &challenge,
+                    &receipt,
+                    request.manifest_sha256,
+                    effective_time,
+                )?;
+                observe_clock_pair(&transaction, effective_time)?;
+                transaction.commit().map_err(|_| store_write_error())?;
+                secure_authority_files(&self.home.database)?;
+                return Err(authorization_expired_error());
+            }
+
+            if challenge.grant_id != request.grant_use.grant_id
+                || challenge.manifest_sha256 != request.manifest_sha256
+                || challenge.action != request.grant_use.action
+                || challenge.store_id != Some(request.store_id)
+                || challenge.account_id != Some(request.account_id)
+                || challenge.trust_epoch != request.trust_epoch
+                || challenge.bundle_sha256 != request.bundle_sha256
+                || challenge.key_id != request.key_id
+                || challenge.binding_sha256 != Some(request.binding_sha256)
+                || challenge.policy_sha256 != Some(request.policy_sha256)
+            {
+                return Err(authorization_context_stale_error());
+            }
+
+            let ch_eff: Option<(i64, i64)> = transaction
+                .query_row(
+                    "SELECT ordinal, effect_kind FROM challenge_effects WHERE challenge_id=?1 AND effect_id=?2",
+                    params![challenge.challenge_id.as_bytes(), request.effect_id.as_bytes()],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()
+                .map_err(|_| store_read_error())?;
+            let (ordinal, effect_kind) = ch_eff.ok_or_else(authorization_context_stale_error)?;
+            if ordinal != 0 {
+                return Err(authorization_context_stale_error());
+            }
+
+            let store = load_registered_store_by_id(&transaction, request.store_id)?
+                .ok_or_else(authorization_context_stale_error)?;
+            if store.state.as_str() != "active"
+                || store.location_sha256 != request.store_location_sha256
+            {
+                return Err(authorization_context_stale_error());
+            }
+
+            let store_ver_count: i64 = transaction
+                .query_row(
+                    "SELECT COUNT(*) FROM registered_store_versions
+                     WHERE store_id=?1 AND location_sha256=?2 AND config_generation=?3 AND config_sha256=?4",
+                    params![
+                        request.store_id.as_bytes(),
+                        request.store_location_sha256.as_bytes(),
+                        request.config_generation.get() as i64,
+                        request.config_sha256.as_bytes(),
+                    ],
+                    |row| row.get(0),
+                )
+                .map_err(|_| store_read_error())?;
+            if store_ver_count != 1 {
+                return Err(authorization_context_stale_error());
+            }
+
+            let account = load_registered_account(&transaction, request.account_id)?
+                .ok_or_else(authorization_context_stale_error)?;
+            if account.state != RegisteredAccountState::Active
+                || account.store_id != request.store_id
+            {
+                return Err(authorization_context_stale_error());
+            }
+
+            let acct_ver_count: i64 = transaction
+                .query_row(
+                    "SELECT COUNT(*) FROM registered_account_versions
+                     WHERE account_id=?1 AND store_id=?2 AND account_generation=?3 AND credential_id=?4 AND binding_sha256=?5",
+                    params![
+                        request.account_id.as_bytes(),
+                        request.store_id.as_bytes(),
+                        request.account_generation.get() as i64,
+                        request.credential_id.as_bytes(),
+                        request.binding_sha256.as_bytes(),
+                    ],
+                    |row| row.get(0),
+                )
+                .map_err(|_| store_read_error())?;
+            if acct_ver_count != 1 {
+                return Err(authorization_context_stale_error());
+            }
+
+            let use_receipt = grant_use_transcript(&request.grant_use, effective_time);
+            let use_sha256 = Sha256Digest::digest(&use_receipt);
+            transaction
+                .execute(
+                    "INSERT INTO grant_uses
+                     (grant_id,receipt_id,action,target_kind,target_id,manifest_sha256,
+                      use_receipt,use_sha256,used_at)
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+                    params![
+                        request.grant_use.grant_id.as_bytes(),
+                        request.grant_use.receipt_id.as_bytes(),
+                        i64::from(request.grant_use.action.code()),
+                        i64::from(request.grant_use.target_kind.code()),
+                        &request.grant_use.target_bytes,
+                        request.grant_use.manifest_sha256.as_bytes(),
+                        use_receipt,
+                        use_sha256.as_bytes(),
+                        effective_time,
+                    ],
+                )
+                .map_err(|_| store_write_error())?;
+            insert_grant_used_event(
+                &transaction,
+                request.grant_use.grant_id,
+                request.grant_use.receipt_id,
+                use_sha256,
+                effective_time,
+            )?;
+
+            transaction
+                .execute(
+                    "INSERT INTO remote_effects
+                     (effect_id,challenge_id,grant_id,operation_id,ordinal,effect_kind,
+                      store_id,store_location_sha256,account_id,config_generation,
+                      config_sha256,account_generation,credential_id,manifest_sha256,
+                      binding_sha256,policy_sha256,trust_epoch,bundle_sha256,key_id,created_at)
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)",
+                    params![
+                        request.effect_id.as_bytes(),
+                        challenge.challenge_id.as_bytes(),
+                        request.grant_use.grant_id.as_bytes(),
+                        request.operation_id.as_bytes(),
+                        ordinal,
+                        effect_kind,
+                        request.store_id.as_bytes(),
+                        request.store_location_sha256.as_bytes(),
+                        request.account_id.as_bytes(),
+                        request.config_generation.get() as i64,
+                        request.config_sha256.as_bytes(),
+                        request.account_generation.get() as i64,
+                        request.credential_id.as_bytes(),
+                        request.manifest_sha256.as_bytes(),
+                        request.binding_sha256.as_bytes(),
+                        request.policy_sha256.as_bytes(),
+                        request.trust_epoch.get() as i64,
+                        request.bundle_sha256.as_bytes(),
+                        request.key_id.as_bytes(),
+                        effective_time,
+                    ],
+                )
+                .map_err(|_| store_write_error())?;
+
+            let mut claim_bytes = [0_u8; 16];
+            self.entropy.fill(&mut claim_bytes)?;
+            make_uuid_v4(&mut claim_bytes);
+            let claim_id = EffectClaimId::try_from(Uuid::from_bytes(claim_bytes))?;
+            let invoke_before = receipt.expires_at;
+            let claim_receipt =
+                effect_claim_transcript(&request, claim_id, effective_time, invoke_before);
+            let claim_sha256 = Sha256Digest::digest(&claim_receipt);
+
+            transaction
+                .execute(
+                    "INSERT INTO effect_claims
+                     (claim_id,effect_id,grant_id,operation_id,store_id,store_location_sha256,
+                      account_id,config_generation,config_sha256,account_generation,
+                      credential_id,manifest_sha256,binding_sha256,policy_sha256,
+                      trust_epoch,bundle_sha256,key_id,claim_receipt,claim_sha256,
+                      claimed_at,invoke_before)
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)",
+                    params![
+                        claim_id.as_bytes(),
+                        request.effect_id.as_bytes(),
+                        request.grant_use.grant_id.as_bytes(),
+                        request.operation_id.as_bytes(),
+                        request.store_id.as_bytes(),
+                        request.store_location_sha256.as_bytes(),
+                        request.account_id.as_bytes(),
+                        request.config_generation.get() as i64,
+                        request.config_sha256.as_bytes(),
+                        request.account_generation.get() as i64,
+                        request.credential_id.as_bytes(),
+                        request.manifest_sha256.as_bytes(),
+                        request.binding_sha256.as_bytes(),
+                        request.policy_sha256.as_bytes(),
+                        request.trust_epoch.get() as i64,
+                        request.bundle_sha256.as_bytes(),
+                        request.key_id.as_bytes(),
+                        claim_receipt,
+                        claim_sha256.as_bytes(),
+                        effective_time,
+                        invoke_before,
+                    ],
+                )
+                .map_err(|_| store_write_error())?;
+
+            insert_typed_event(
+                &transaction,
+                11,
+                request.effect_id.as_bytes(),
+                18,
+                4,
+                10,
+                request.grant_use.grant_id.as_bytes(),
+                0x0a01,
+                0x0a02,
+                claim_sha256,
+                Some(request.grant_use.receipt_id),
+                effective_time,
+            )?;
+
+            observe_clock_pair(&transaction, effective_time)?;
+            transaction.commit().map_err(|_| store_write_error())?;
+            secure_authority_files(&self.home.database)?;
+
+            Ok(EffectClaimProjection {
+                claim_id,
+                effect_id: request.effect_id,
+                grant_id: request.grant_use.grant_id,
+                operation_id: request.operation_id,
+                store_id: request.store_id,
+                account_id: request.account_id,
+                claimed_at: DateTime::<Utc>::from_timestamp_millis(effective_time)
+                    .ok_or_else(recovery_error)?,
+                invoke_before: DateTime::<Utc>::from_timestamp_millis(invoke_before)
+                    .ok_or_else(recovery_error)?,
+                claim_sha256,
+            })
+        }
+
+        /// Start one remote effect invocation and issue one `InvocationPermit`.
+        ///
+        /// # Errors
+        ///
+        /// Returns stable authorization, invocation, or store error.
+        #[allow(
+            clippy::too_many_lines,
+            clippy::needless_pass_by_value,
+            clippy::type_complexity,
+            clippy::cast_possible_wrap
+        )]
+        pub fn start_invocation(
+            &self,
+            request: BeginInvocationRequest,
+        ) -> Result<BeginInvocationResult, MailError> {
+            if !matches!(self.state, AuthorityOpenState::Ready(_)) {
+                return Err(recovery_error());
+            }
+            let _apply_lock = acquire_apply_lock(&self.home)?;
+            if !authority_database_exists(&self.home.database)? {
+                return Err(recovery_error());
+            }
+            let mut connection = existing_authority_read_connection(&self.home.database)?;
+            if classify_database(&connection)? != DatabaseClass::AuthorityV1 {
+                return Err(recovery_error());
+            }
+            configure_authority_pragmas(&connection)?;
+            let transaction = connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(|_| store_write_error())?;
+            let loaded = self.validate_ready_transaction(&transaction)?;
+
+            let existing_inv: Option<(Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, i64)> = transaction
+                .query_row(
+                    "SELECT invocation_id, effect_id, claim_id, session_id, start_sha256, started_at
+                     FROM effect_invocations WHERE effect_id=?1 OR claim_id=?2",
+                    params![request.effect_id.as_bytes(), request.claim_id.as_bytes()],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
+                )
+                .optional()
+                .map_err(|_| store_read_error())?;
+
+            if let Some(existing) = existing_inv {
+                let existing_inv_id: InvocationId =
+                    uuid_from_blob_sql(existing.0).map_err(|_| recovery_error())?;
+                let existing_eff_id: RemoteEffectId =
+                    uuid_from_blob_sql(existing.1).map_err(|_| recovery_error())?;
+                let existing_clm_id: EffectClaimId =
+                    uuid_from_blob_sql(existing.2).map_err(|_| recovery_error())?;
+                let existing_ses_id: AuthoritySessionId =
+                    uuid_from_blob_sql(existing.3).map_err(|_| recovery_error())?;
+                let existing_start_sha =
+                    digest_from_blob_sql(existing.4).map_err(|_| recovery_error())?;
+
+                if existing_eff_id == request.effect_id
+                    && existing_clm_id == request.claim_id
+                    && existing_ses_id == request.authority_session_id
+                {
+                    let effective_time =
+                        checked_clock(loaded.last_observed_at, request.started_at_unix_ms)?;
+                    utc_millis(effective_time)?;
+                    observe_clock_pair(&transaction, effective_time)?;
+                    transaction.commit().map_err(|_| store_write_error())?;
+                    secure_authority_files(&self.home.database)?;
+                    return Ok(BeginInvocationResult {
+                        projection: InvocationProjection {
+                            invocation_id: existing_inv_id,
+                            effect_id: existing_eff_id,
+                            claim_id: existing_clm_id,
+                            session_id: existing_ses_id,
+                            started_at: DateTime::<Utc>::from_timestamp_millis(existing.5)
+                                .ok_or_else(recovery_error)?,
+                            start_sha256: existing_start_sha,
+                        },
+                        permit: None,
+                    });
+                }
+                return Err(effect_already_invoked_error());
+            }
+
+            let claim_row: Option<(i64, i64, Vec<u8>)> = transaction
+                .query_row(
+                    "SELECT claimed_at, invoke_before, effect_id FROM effect_claims WHERE claim_id=?1",
+                    [request.claim_id.as_bytes()],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .optional()
+                .map_err(|_| store_read_error())?;
+            let (_claimed_at, invoke_before, claim_effect_bytes) =
+                claim_row.ok_or_else(authorization_context_stale_error)?;
+            let claim_effect_id: RemoteEffectId =
+                uuid_from_blob_sql(claim_effect_bytes).map_err(|_| recovery_error())?;
+            if claim_effect_id != request.effect_id {
+                return Err(authorization_context_stale_error());
+            }
+
+            let effective_time =
+                checked_clock(loaded.last_observed_at, request.started_at_unix_ms)?;
+            utc_millis(effective_time)?;
+            if effective_time > invoke_before {
+                return Err(authorization_expired_error());
+            }
+
+            let rem_eff: (Vec<u8>, Vec<u8>, Vec<u8>) = transaction
+                .query_row(
+                    "SELECT operation_id, account_id, challenge_id FROM remote_effects WHERE effect_id=?1",
+                    [request.effect_id.as_bytes()],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .map_err(|_| store_read_error())?;
+            let operation_id: OperationId =
+                uuid_from_blob_sql(rem_eff.0).map_err(|_| recovery_error())?;
+            let account_id: AccountId =
+                uuid_from_blob_sql(rem_eff.1).map_err(|_| recovery_error())?;
+            let action_code: i64 = transaction
+                .query_row(
+                    "SELECT action FROM authorization_challenges WHERE challenge_id=?1",
+                    [rem_eff.2.as_slice()],
+                    |row| row.get(0),
+                )
+                .map_err(|_| store_read_error())?;
+            let action = SensitiveAction::from_code(
+                u16::try_from(action_code).map_err(|_| recovery_error())?,
+            )
+            .map_err(|_| recovery_error())?;
+
+            let mut inv_bytes = [0_u8; 16];
+            self.entropy.fill(&mut inv_bytes)?;
+            make_uuid_v4(&mut inv_bytes);
+            let invocation_id = InvocationId::try_from(Uuid::from_bytes(inv_bytes))?;
+            let start_receipt =
+                invocation_start_transcript(&request, invocation_id, effective_time);
+            let start_sha256 = Sha256Digest::digest(&start_receipt);
+
+            transaction
+                .execute(
+                    "INSERT INTO effect_invocations
+                     (invocation_id,effect_id,claim_id,session_id,start_receipt,start_sha256,started_at)
+                     VALUES (?1,?2,?3,?4,?5,?6,?7)",
+                    params![
+                        invocation_id.as_bytes(),
+                        request.effect_id.as_bytes(),
+                        request.claim_id.as_bytes(),
+                        request.authority_session_id.as_bytes(),
+                        start_receipt,
+                        start_sha256.as_bytes(),
+                        effective_time,
+                    ],
+                )
+                .map_err(|_| store_write_error())?;
+
+            insert_typed_event(
+                &transaction,
+                12,
+                invocation_id.as_bytes(),
+                19,
+                4,
+                11,
+                request.effect_id.as_bytes(),
+                0x0a02,
+                0x0a03,
+                start_sha256,
+                None,
+                effective_time,
+            )?;
+
+            observe_clock_pair(&transaction, effective_time)?;
+            transaction.commit().map_err(|_| store_write_error())?;
+            secure_authority_files(&self.home.database)?;
+
+            let permit = InvocationPermit::new(
+                request.effect_id,
+                request.claim_id,
+                invocation_id,
+                request.authority_session_id,
+                operation_id,
+                account_id,
+                action,
+                effective_time,
+                invoke_before,
+            );
+
+            Ok(BeginInvocationResult {
+                projection: InvocationProjection {
+                    invocation_id,
+                    effect_id: request.effect_id,
+                    claim_id: request.claim_id,
+                    session_id: request.authority_session_id,
+                    started_at: DateTime::<Utc>::from_timestamp_millis(effective_time)
+                        .ok_or_else(recovery_error)?,
+                    start_sha256,
+                },
+                permit: Some(permit),
+            })
+        }
+
+        /// Record observation of an executed remote effect invocation.
+        ///
+        /// # Errors
+        ///
+        /// Returns stable authorization, projection conflict, or store error.
+        #[allow(
+            clippy::too_many_lines,
+            clippy::needless_pass_by_value,
+            clippy::type_complexity,
+            clippy::cast_possible_wrap,
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss
+        )]
+        pub fn record_observation(
+            &self,
+            request: RecordObservationRequest,
+            permit: Option<InvocationPermit>,
+        ) -> Result<ObservationProjection, MailError> {
+            if request.result_bytes.is_empty() || request.result_bytes.len() > 16_777_216 {
+                return Err(MailError::invalid_input(
+                    "observation result bytes must be between 1 and 16777216 bytes",
+                ));
+            }
+            if !matches!(self.state, AuthorityOpenState::Ready(_)) {
+                return Err(recovery_error());
+            }
+            let _apply_lock = acquire_apply_lock(&self.home)?;
+            if !authority_database_exists(&self.home.database)? {
+                return Err(recovery_error());
+            }
+            let mut connection = existing_authority_read_connection(&self.home.database)?;
+            if classify_database(&connection)? != DatabaseClass::AuthorityV1 {
+                return Err(recovery_error());
+            }
+            configure_authority_pragmas(&connection)?;
+            let transaction = connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(|_| store_write_error())?;
+            let loaded = self.validate_ready_transaction(&transaction)?;
+
+            let result_sha256 = Sha256Digest::digest(&request.result_bytes);
+
+            let existing_obs: Option<(Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, i64, Vec<u8>, Vec<u8>, i64, i64)> = transaction
+                .query_row(
+                    "SELECT observation_id, effect_id, claim_id, invocation_id, certainty, result, result_sha256, source, observed_at
+                     FROM effect_observations
+                     WHERE invocation_id=?1 OR effect_id=?2 OR claim_id=?3",
+                    params![
+                        request.invocation_id.as_bytes(),
+                        request.effect_id.as_bytes(),
+                        request.claim_id.as_bytes()
+                    ],
+                    |row| Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                        row.get(8)?,
+                    )),
+                )
+                .optional()
+                .map_err(|_| store_read_error())?;
+
+            if let Some(existing) = existing_obs {
+                let existing_obs_id =
+                    digest_from_blob_sql(existing.0).map_err(|_| recovery_error())?;
+                let existing_eff_id: RemoteEffectId =
+                    uuid_from_blob_sql(existing.1).map_err(|_| recovery_error())?;
+                let existing_clm_id: EffectClaimId =
+                    uuid_from_blob_sql(existing.2).map_err(|_| recovery_error())?;
+                let existing_inv_id: InvocationId =
+                    uuid_from_blob_sql(existing.3).map_err(|_| recovery_error())?;
+                let existing_cert = ObservationCertainty::from_code(existing.4 as u8)
+                    .map_err(|_| recovery_error())?;
+                let existing_res_sha =
+                    digest_from_blob_sql(existing.6).map_err(|_| recovery_error())?;
+                let existing_src =
+                    ObservationSource::from_code(existing.7 as u8).map_err(|_| recovery_error())?;
+
+                if existing_eff_id == request.effect_id
+                    && existing_clm_id == request.claim_id
+                    && existing_inv_id == request.invocation_id
+                    && existing_cert == request.certainty
+                    && existing_src == request.source
+                    && existing_res_sha == result_sha256
+                    && existing.5 == request.result_bytes
+                    && existing.8 == request.observed_at_unix_ms
+                {
+                    let effective_time =
+                        checked_clock(loaded.last_observed_at, request.observed_at_unix_ms)?;
+                    utc_millis(effective_time)?;
+                    observe_clock_pair(&transaction, effective_time)?;
+                    transaction.commit().map_err(|_| store_write_error())?;
+                    secure_authority_files(&self.home.database)?;
+                    return Ok(ObservationProjection {
+                        observation_id: existing_obs_id,
+                        effect_id: request.effect_id,
+                        claim_id: request.claim_id,
+                        invocation_id: request.invocation_id,
+                        certainty: request.certainty,
+                        result_sha256,
+                        source: request.source,
+                        observed_at: DateTime::<Utc>::from_timestamp_millis(existing.8)
+                            .ok_or_else(recovery_error)?,
+                    });
+                }
+                return Err(authority_projection_conflict_error());
+            }
+
+            let permit = permit.ok_or_else(|| {
+                MailError::stable(
+                    MailErrorCode::AuthorizationRequired,
+                    "invocation permit is required to record observation",
+                )
+            })?;
+            if permit.effect_id() != request.effect_id
+                || permit.claim_id() != request.claim_id
+                || permit.invocation_id() != request.invocation_id
+            {
+                return Err(authority_projection_conflict_error());
+            }
+
+            let inv_count: i64 = transaction
+                .query_row(
+                    "SELECT COUNT(*) FROM effect_invocations WHERE invocation_id=?1 AND effect_id=?2 AND claim_id=?3",
+                    params![
+                        request.invocation_id.as_bytes(),
+                        request.effect_id.as_bytes(),
+                        request.claim_id.as_bytes(),
+                    ],
+                    |row| row.get(0),
+                )
+                .map_err(|_| store_read_error())?;
+            if inv_count != 1 {
+                return Err(authority_projection_conflict_error());
+            }
+
+            let effective_time =
+                checked_clock(loaded.last_observed_at, request.observed_at_unix_ms)?;
+            utc_millis(effective_time)?;
+
+            let observation_receipt = effect_observation_transcript(
+                request.effect_id,
+                request.claim_id,
+                request.invocation_id,
+                request.certainty,
+                result_sha256,
+                request.source,
+                effective_time,
+            );
+            let observation_id = Sha256Digest::digest(&observation_receipt);
+
+            transaction
+                .execute(
+                    "INSERT INTO effect_observations
+                     (observation_id,effect_id,claim_id,invocation_id,certainty,result,result_sha256,source,observation,observed_at)
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+                    params![
+                        observation_id.as_bytes(),
+                        request.effect_id.as_bytes(),
+                        request.claim_id.as_bytes(),
+                        request.invocation_id.as_bytes(),
+                        i64::from(request.certainty.code()),
+                        &request.result_bytes,
+                        result_sha256.as_bytes(),
+                        i64::from(request.source.code()),
+                        observation_receipt,
+                        effective_time,
+                    ],
+                )
+                .map_err(|_| store_write_error())?;
+
+            let event_source = if request.source == ObservationSource::InvocationRecovery {
+                5
+            } else {
+                4
+            };
+            insert_typed_event(
+                &transaction,
+                13,
+                observation_id.as_bytes(),
+                20,
+                event_source,
+                12,
+                request.invocation_id.as_bytes(),
+                0x0a03,
+                0x0a04,
+                observation_id,
+                None,
+                effective_time,
+            )?;
+
+            observe_clock_pair(&transaction, effective_time)?;
+            transaction.commit().map_err(|_| store_write_error())?;
+            secure_authority_files(&self.home.database)?;
+
+            Ok(ObservationProjection {
+                observation_id,
+                effect_id: request.effect_id,
+                claim_id: request.claim_id,
+                invocation_id: request.invocation_id,
+                certainty: request.certainty,
+                result_sha256,
+                source: request.source,
+                observed_at: DateTime::<Utc>::from_timestamp_millis(effective_time)
+                    .ok_or_else(recovery_error)?,
+            })
+        }
+
+        /// Recover any unobserved invocations after crash by recording Ambiguous/InvocationRecovery observations.
+        ///
+        /// # Errors
+        ///
+        /// Returns stable clock, recovery, or store errors.
+        #[allow(clippy::too_many_lines)]
+        pub fn recover_crashed_invocations(
+            &self,
+            observed_at_unix_ms: i64,
+        ) -> Result<Vec<ObservationProjection>, MailError> {
+            if !matches!(self.state, AuthorityOpenState::Ready(_)) {
+                return Err(recovery_error());
+            }
+            let _apply_lock = acquire_apply_lock(&self.home)?;
+            if !authority_database_exists(&self.home.database)? {
+                return Err(recovery_error());
+            }
+            let mut connection = existing_authority_read_connection(&self.home.database)?;
+            if classify_database(&connection)? != DatabaseClass::AuthorityV1 {
+                return Err(recovery_error());
+            }
+            configure_authority_pragmas(&connection)?;
+            let transaction = connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(|_| store_write_error())?;
+            let loaded = self.validate_ready_transaction(&transaction)?;
+            let effective_time = checked_clock(loaded.last_observed_at, observed_at_unix_ms)?;
+            utc_millis(effective_time)?;
+
+            let mut stmt = transaction
+                .prepare(
+                    "SELECT i.invocation_id, i.effect_id, i.claim_id
+                     FROM effect_invocations i
+                     LEFT JOIN effect_observations o ON i.invocation_id = o.invocation_id
+                     WHERE o.invocation_id IS NULL
+                     ORDER BY i.started_at, i.invocation_id",
+                )
+                .map_err(|_| store_read_error())?;
+            let mut rows = stmt.query([]).map_err(|_| store_read_error())?;
+            let mut unobserved = Vec::new();
+            while let Some(row) = rows.next().map_err(|_| store_read_error())? {
+                let invocation_blob: Vec<u8> = row.get(0).map_err(|_| store_read_error())?;
+                let invocation_id: InvocationId =
+                    uuid_from_blob_sql(invocation_blob).map_err(|_| recovery_error())?;
+                let effect_blob: Vec<u8> = row.get(1).map_err(|_| store_read_error())?;
+                let effect_id: RemoteEffectId =
+                    uuid_from_blob_sql(effect_blob).map_err(|_| recovery_error())?;
+                let claim_blob: Vec<u8> = row.get(2).map_err(|_| store_read_error())?;
+                let claim_id: EffectClaimId =
+                    uuid_from_blob_sql(claim_blob).map_err(|_| recovery_error())?;
+                unobserved.push((invocation_id, effect_id, claim_id));
+            }
+            drop(rows);
+            drop(stmt);
+
+            let mut projections = Vec::with_capacity(unobserved.len());
+            let recovery_bytes = b"crashed invocation recovered by authority engine\0".to_vec();
+            let result_sha256 = Sha256Digest::digest(&recovery_bytes);
+
+            for (invocation_id, effect_id, claim_id) in unobserved {
+                let observation_receipt = effect_observation_transcript(
+                    effect_id,
+                    claim_id,
+                    invocation_id,
+                    ObservationCertainty::Ambiguous,
+                    result_sha256,
+                    ObservationSource::InvocationRecovery,
+                    effective_time,
+                );
+                let observation_id = Sha256Digest::digest(&observation_receipt);
+
+                transaction
+                    .execute(
+                        "INSERT INTO effect_observations
+                         (observation_id,effect_id,claim_id,invocation_id,certainty,result,result_sha256,source,observation,observed_at)
+                         VALUES (?1,?2,?3,?4,3,?5,?6,3,?7,?8)",
+                        params![
+                            observation_id.as_bytes(),
+                            effect_id.as_bytes(),
+                            claim_id.as_bytes(),
+                            invocation_id.as_bytes(),
+                            &recovery_bytes,
+                            result_sha256.as_bytes(),
+                            observation_receipt,
+                            effective_time,
+                        ],
+                    )
+                    .map_err(|_| store_write_error())?;
+
+                insert_typed_event(
+                    &transaction,
+                    13,
+                    observation_id.as_bytes(),
+                    20,
+                    5,
+                    12,
+                    invocation_id.as_bytes(),
+                    0x0a03,
+                    0x0a04,
+                    observation_id,
+                    None,
+                    effective_time,
+                )?;
+
+                projections.push(ObservationProjection {
+                    observation_id,
+                    effect_id,
+                    claim_id,
+                    invocation_id,
+                    certainty: ObservationCertainty::Ambiguous,
+                    result_sha256,
+                    source: ObservationSource::InvocationRecovery,
+                    observed_at: DateTime::<Utc>::from_timestamp_millis(effective_time)
+                        .ok_or_else(recovery_error)?,
+                });
+            }
+
+            observe_clock_pair(&transaction, effective_time)?;
+            transaction.commit().map_err(|_| store_write_error())?;
+            secure_authority_files(&self.home.database)?;
+
+            Ok(projections)
+        }
     }
 }
 
@@ -4860,12 +6039,12 @@ fn ensure_supported_challenge_action(action: SensitiveAction) -> Result<(), Mail
         | SensitiveAction::MailStarred
         | SensitiveAction::MailMove
         | SensitiveAction::MailArchive
-        | SensitiveAction::MailSafeDelete => Ok(()),
+        | SensitiveAction::MailSafeDelete
+        | SensitiveAction::AmbiguousClose => Ok(()),
         SensitiveAction::PolicyUpdate | SensitiveAction::AssuranceUpdate => Err(MailError::stable(
             MailErrorCode::UnsupportedCapability,
             "authorization action is not supported",
         )),
-        SensitiveAction::AmbiguousClose => Err(authorization_context_stale_error()),
     }
 }
 
@@ -4911,7 +6090,66 @@ fn validate_fresh_manifest_context(
         | ManifestPayload::MailSafeDelete(_) => {
             validate_fresh_remote_context(connection, manifest)?;
         }
+        ManifestPayload::AmbiguousClose(value) => {
+            validate_fresh_ambiguous_close_context(connection, value)?;
+        }
         _ => {}
+    }
+    Ok(())
+}
+
+fn validate_fresh_ambiguous_close_context(
+    connection: &Connection,
+    ambiguous: &kirje_core::AmbiguousCloseManifest,
+) -> Result<(), MailError> {
+    if ambiguous.assertion_text.len() > 1024 {
+        return Err(MailError::invalid_input(
+            "assertion text exceeds 1024 bytes",
+        ));
+    }
+    let claim_row: Option<(Vec<u8>, Vec<u8>)> = connection
+        .query_row(
+            "SELECT manifest_sha256, claim_sha256 FROM effect_claims WHERE operation_id=?1",
+            [ambiguous.operation_id.as_bytes()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|_| store_read_error())?;
+    let (stored_manifest_sha256, stored_claim_sha256) =
+        claim_row.ok_or_else(authorization_context_stale_error)?;
+    if stored_manifest_sha256 != ambiguous.original_manifest_sha256.as_bytes()
+        || stored_claim_sha256 != ambiguous.claim_sha256.as_bytes()
+    {
+        return Err(authorization_context_stale_error());
+    }
+
+    let inv_count: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM effect_invocations WHERE invocation_id=?1",
+            [ambiguous.invocation_id.as_bytes()],
+            |row| row.get(0),
+        )
+        .map_err(|_| store_read_error())?;
+    if inv_count != 1 {
+        return Err(authorization_context_stale_error());
+    }
+
+    let obs_row: Option<(i64, Vec<u8>)> = connection
+        .query_row(
+            "SELECT certainty, observation_id FROM effect_observations WHERE invocation_id=?1",
+            [ambiguous.invocation_id.as_bytes()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|_| store_read_error())?;
+    let (certainty, observation_id) = obs_row.ok_or_else(authorization_context_stale_error)?;
+    if certainty != 3 {
+        return Err(authorization_context_stale_error());
+    }
+    if let Some(expected_obs) = ambiguous.observation_sha256
+        && observation_id != expected_obs.as_bytes()
+    {
+        return Err(authorization_context_stale_error());
     }
     Ok(())
 }
@@ -5560,7 +6798,13 @@ fn validate_intrinsic_manifest(
                 return Err(authorization_context_stale_error());
             }
         }
-        ManifestPayload::AmbiguousClose(_) => return Err(authorization_context_stale_error()),
+        ManifestPayload::AmbiguousClose(value) => {
+            if value.assertion_text.len() > 1024 {
+                return Err(MailError::invalid_input(
+                    "assertion text exceeds 1024 bytes",
+                ));
+            }
+        }
     }
     Ok(())
 }
@@ -5789,6 +7033,84 @@ fn grant_use_transcript(request: &GrantUseRequest, used_at: i64) -> Vec<u8> {
             &request.target_bytes,
             request.manifest_sha256.as_bytes(),
             &used_at,
+        ],
+    )
+}
+
+fn effect_claim_transcript(
+    request: &EffectClaimRequest,
+    claim_id: EffectClaimId,
+    claimed_at: i64,
+    invoke_before: i64,
+) -> Vec<u8> {
+    let config_generation = request.config_generation.get().to_be_bytes();
+    let account_generation = request.account_generation.get().to_be_bytes();
+    let trust_epoch = request.trust_epoch.get().to_be_bytes();
+    let claimed_at_bytes = claimed_at.to_be_bytes();
+    let invoke_before_bytes = invoke_before.to_be_bytes();
+    encode_transcript(
+        EFFECT_CLAIM_DOMAIN,
+        &[
+            claim_id.as_bytes(),
+            request.effect_id.as_bytes(),
+            request.grant_use.grant_id.as_bytes(),
+            request.operation_id.as_bytes(),
+            request.store_id.as_bytes(),
+            request.account_id.as_bytes(),
+            &config_generation,
+            &account_generation,
+            request.manifest_sha256.as_bytes(),
+            request.binding_sha256.as_bytes(),
+            request.policy_sha256.as_bytes(),
+            &trust_epoch,
+            request.bundle_sha256.as_bytes(),
+            request.key_id.as_bytes(),
+            &claimed_at_bytes,
+            &invoke_before_bytes,
+        ],
+    )
+}
+
+fn invocation_start_transcript(
+    request: &BeginInvocationRequest,
+    invocation_id: InvocationId,
+    started_at: i64,
+) -> Vec<u8> {
+    let started_at_bytes = started_at.to_be_bytes();
+    encode_transcript(
+        INVOCATION_START_DOMAIN,
+        &[
+            invocation_id.as_bytes(),
+            request.effect_id.as_bytes(),
+            request.claim_id.as_bytes(),
+            request.authority_session_id.as_bytes(),
+            &started_at_bytes,
+        ],
+    )
+}
+
+fn effect_observation_transcript(
+    effect_id: RemoteEffectId,
+    claim_id: EffectClaimId,
+    invocation_id: InvocationId,
+    certainty: ObservationCertainty,
+    result_sha256: Sha256Digest,
+    source: ObservationSource,
+    observed_at: i64,
+) -> Vec<u8> {
+    let certainty_bytes = [certainty.code()];
+    let source_bytes = [source.code()];
+    let observed_at_bytes = observed_at.to_be_bytes();
+    encode_transcript(
+        EFFECT_OBSERVATION_DOMAIN,
+        &[
+            effect_id.as_bytes(),
+            claim_id.as_bytes(),
+            invocation_id.as_bytes(),
+            &certainty_bytes,
+            result_sha256.as_bytes(),
+            &source_bytes,
+            &observed_at_bytes,
         ],
     )
 }
@@ -7340,18 +8662,7 @@ fn validate_t202a_initial_row_counts(connection: &Connection) -> Result<(), Mail
     let trust_epochs: i64 = connection
         .query_row("SELECT COUNT(*) FROM trust_epochs", [], |row| row.get(0))
         .map_err(|_| store_read_error())?;
-    let forbidden_rows: i64 = connection
-        .query_row(
-            "SELECT
-                (SELECT COUNT(*) FROM remote_effects) +
-                (SELECT COUNT(*) FROM effect_claims) +
-                (SELECT COUNT(*) FROM effect_invocations) +
-                (SELECT COUNT(*) FROM effect_observations)",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|_| store_read_error())?;
-    if authority_keys != 2 || trust_epochs != 1 || forbidden_rows != 0 {
+    if authority_keys != 2 || trust_epochs != 1 {
         return Err(recovery_error());
     }
     Ok(())
@@ -7389,9 +8700,15 @@ fn validate_authorization_history(
             )
             .map_err(|_| store_read_error())?;
         let effects_count: i64 = connection
-            .query_row("SELECT COUNT(*) FROM challenge_effects", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM challenge_effects)
+                      + (SELECT COUNT(*) FROM remote_effects)
+                      + (SELECT COUNT(*) FROM effect_claims)
+                      + (SELECT COUNT(*) FROM effect_invocations)
+                      + (SELECT COUNT(*) FROM effect_observations)",
+                [],
+                |row| row.get(0),
+            )
             .map_err(|_| store_read_error())?;
         if challenge_count != 0
             || receipt_count != 0
@@ -7438,7 +8755,348 @@ fn validate_authorization_history(
     {
         return Err(recovery_error());
     }
-    validate_registry_history(connection)
+    validate_registry_history(connection)?;
+    validate_effects_history(connection)
+}
+
+struct StoredRemoteEffect {
+    effect_id: RemoteEffectId,
+    challenge_id: Sha256Digest,
+    grant_id: AuthorizationGrantId,
+    ordinal: i64,
+    effect_kind: i64,
+    created_at: i64,
+}
+
+fn stored_remote_effect_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredRemoteEffect> {
+    Ok(StoredRemoteEffect {
+        effect_id: uuid_from_blob_sql(row.get(0)?)?,
+        challenge_id: digest_from_blob_sql(row.get(1)?)?,
+        grant_id: uuid_from_blob_sql(row.get(2)?)?,
+        ordinal: row.get(4)?,
+        effect_kind: row.get(5)?,
+        created_at: row.get(19)?,
+    })
+}
+
+struct StoredEffectClaim {
+    claim_id: EffectClaimId,
+    effect_id: RemoteEffectId,
+    grant_id: AuthorizationGrantId,
+    operation_id: OperationId,
+    store_id: StoreId,
+    account_id: AccountId,
+    config_generation: NonZeroU64,
+    account_generation: NonZeroU64,
+    manifest_sha256: Sha256Digest,
+    binding_sha256: Sha256Digest,
+    policy_sha256: Sha256Digest,
+    trust_epoch: NonZeroU64,
+    bundle_sha256: Sha256Digest,
+    key_id: Sha256Digest,
+    claim_receipt: Vec<u8>,
+    claim_sha256: Sha256Digest,
+    claimed_at: i64,
+    invoke_before: i64,
+}
+
+fn stored_effect_claim_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredEffectClaim> {
+    let config_generation = u64::try_from(row.get::<_, i64>(7)?)
+        .ok()
+        .and_then(NonZeroU64::new)
+        .ok_or(rusqlite::Error::InvalidQuery)?;
+    let account_generation = u64::try_from(row.get::<_, i64>(9)?)
+        .ok()
+        .and_then(NonZeroU64::new)
+        .ok_or(rusqlite::Error::InvalidQuery)?;
+    let trust_epoch = u64::try_from(row.get::<_, i64>(14)?)
+        .ok()
+        .and_then(NonZeroU64::new)
+        .ok_or(rusqlite::Error::InvalidQuery)?;
+    Ok(StoredEffectClaim {
+        claim_id: uuid_from_blob_sql(row.get(0)?)?,
+        effect_id: uuid_from_blob_sql(row.get(1)?)?,
+        grant_id: uuid_from_blob_sql(row.get(2)?)?,
+        operation_id: uuid_from_blob_sql(row.get(3)?)?,
+        store_id: uuid_from_blob_sql(row.get(4)?)?,
+        account_id: uuid_from_blob_sql(row.get(6)?)?,
+        config_generation,
+        account_generation,
+        manifest_sha256: digest_from_blob_sql(row.get(11)?)?,
+        binding_sha256: digest_from_blob_sql(row.get(12)?)?,
+        policy_sha256: digest_from_blob_sql(row.get(13)?)?,
+        trust_epoch,
+        bundle_sha256: digest_from_blob_sql(row.get(15)?)?,
+        key_id: digest_from_blob_sql(row.get(16)?)?,
+        claim_receipt: row.get(17)?,
+        claim_sha256: digest_from_blob_sql(row.get(18)?)?,
+        claimed_at: row.get(19)?,
+        invoke_before: row.get(20)?,
+    })
+}
+
+struct StoredEffectInvocation {
+    invocation_id: InvocationId,
+    effect_id: RemoteEffectId,
+    claim_id: EffectClaimId,
+    session_id: AuthoritySessionId,
+    start_receipt: Vec<u8>,
+    start_sha256: Sha256Digest,
+    started_at: i64,
+}
+
+fn stored_effect_invocation_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<StoredEffectInvocation> {
+    Ok(StoredEffectInvocation {
+        invocation_id: uuid_from_blob_sql(row.get(0)?)?,
+        effect_id: uuid_from_blob_sql(row.get(1)?)?,
+        claim_id: uuid_from_blob_sql(row.get(2)?)?,
+        session_id: uuid_from_blob_sql(row.get(3)?)?,
+        start_receipt: row.get(4)?,
+        start_sha256: digest_from_blob_sql(row.get(5)?)?,
+        started_at: row.get(6)?,
+    })
+}
+
+struct StoredEffectObservation {
+    observation_id: Sha256Digest,
+    effect_id: RemoteEffectId,
+    claim_id: EffectClaimId,
+    invocation_id: InvocationId,
+    certainty: ObservationCertainty,
+    result: Vec<u8>,
+    result_sha256: Sha256Digest,
+    source: ObservationSource,
+    observation: Vec<u8>,
+    observed_at: i64,
+}
+
+fn stored_effect_observation_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<StoredEffectObservation> {
+    let certainty_code = row.get::<_, i64>(4)?;
+    let certainty_u8 = u8::try_from(certainty_code).map_err(|_| rusqlite::Error::InvalidQuery)?;
+    let certainty =
+        ObservationCertainty::from_code(certainty_u8).map_err(|_| rusqlite::Error::InvalidQuery)?;
+    let source_code = row.get::<_, i64>(7)?;
+    let source_u8 = u8::try_from(source_code).map_err(|_| rusqlite::Error::InvalidQuery)?;
+    let source =
+        ObservationSource::from_code(source_u8).map_err(|_| rusqlite::Error::InvalidQuery)?;
+    Ok(StoredEffectObservation {
+        observation_id: digest_from_blob_sql(row.get(0)?)?,
+        effect_id: uuid_from_blob_sql(row.get(1)?)?,
+        claim_id: uuid_from_blob_sql(row.get(2)?)?,
+        invocation_id: uuid_from_blob_sql(row.get(3)?)?,
+        certainty,
+        result: row.get(5)?,
+        result_sha256: digest_from_blob_sql(row.get(6)?)?,
+        source,
+        observation: row.get(8)?,
+        observed_at: row.get(9)?,
+    })
+}
+
+#[allow(clippy::too_many_lines)]
+fn validate_effects_history(connection: &Connection) -> Result<(), MailError> {
+    let (remote_effects_count, claims_count, invocations_count, observations_count): (
+        i64,
+        i64,
+        i64,
+        i64,
+    ) = connection
+        .query_row(
+            "SELECT
+                (SELECT COUNT(*) FROM remote_effects),
+                (SELECT COUNT(*) FROM effect_claims),
+                (SELECT COUNT(*) FROM effect_invocations),
+                (SELECT COUNT(*) FROM effect_observations)",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .map_err(|_| store_read_error())?;
+
+    if claims_count > remote_effects_count
+        || invocations_count > claims_count
+        || observations_count > invocations_count
+    {
+        return Err(recovery_error());
+    }
+
+    // 1. 验证 remote_effects
+    let mut stmt = connection
+        .prepare(
+            "SELECT effect_id, challenge_id, grant_id, operation_id, ordinal,
+                    effect_kind, store_id, store_location_sha256, account_id,
+                    config_generation, config_sha256, account_generation,
+                    credential_id, manifest_sha256, binding_sha256, policy_sha256,
+                    trust_epoch, bundle_sha256, key_id, created_at
+             FROM remote_effects ORDER BY effect_id",
+        )
+        .map_err(|_| store_read_error())?;
+    let mut rows = stmt.query([]).map_err(|_| store_read_error())?;
+    let mut seen_effects = 0_i64;
+    while let Some(row) = rows.next().map_err(|_| store_read_error())? {
+        let eff = stored_remote_effect_from_row(row).map_err(|_| recovery_error())?;
+        utc_millis(eff.created_at)?;
+
+        let ch_eff_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM challenge_effects WHERE challenge_id=?1 AND ordinal=?2 AND effect_id=?3 AND effect_kind=?4",
+                params![eff.challenge_id.as_bytes(), eff.ordinal, eff.effect_id.as_bytes(), eff.effect_kind],
+                |r| r.get(0),
+            )
+            .map_err(|_| store_read_error())?;
+        if ch_eff_count != 1 {
+            return Err(recovery_error());
+        }
+        let grant = load_grant_use(connection, eff.grant_id)?.ok_or_else(recovery_error)?;
+        if grant.used_at != eff.created_at {
+            return Err(recovery_error());
+        }
+        seen_effects += 1;
+    }
+    if seen_effects != remote_effects_count {
+        return Err(recovery_error());
+    }
+
+    // 2. 验证 effect_claims
+    let mut stmt = connection
+        .prepare(
+            "SELECT claim_id, effect_id, grant_id, operation_id, store_id,
+                    store_location_sha256, account_id, config_generation,
+                    config_sha256, account_generation, credential_id,
+                    manifest_sha256, binding_sha256, policy_sha256,
+                    trust_epoch, bundle_sha256, key_id, claim_receipt,
+                    claim_sha256, claimed_at, invoke_before
+             FROM effect_claims ORDER BY claim_id",
+        )
+        .map_err(|_| store_read_error())?;
+    let mut rows = stmt.query([]).map_err(|_| store_read_error())?;
+    let mut seen_claims = 0_i64;
+    while let Some(row) = rows.next().map_err(|_| store_read_error())? {
+        let clm = stored_effect_claim_from_row(row).map_err(|_| recovery_error())?;
+        utc_millis(clm.claimed_at)?;
+        utc_millis(clm.invoke_before)?;
+        if clm.invoke_before < clm.claimed_at {
+            return Err(recovery_error());
+        }
+        if clm.claim_sha256 != Sha256Digest::digest(&clm.claim_receipt) {
+            return Err(recovery_error());
+        }
+        let expected_receipt = encode_transcript(
+            EFFECT_CLAIM_DOMAIN,
+            &[
+                clm.claim_id.as_bytes(),
+                clm.effect_id.as_bytes(),
+                clm.grant_id.as_bytes(),
+                clm.operation_id.as_bytes(),
+                clm.store_id.as_bytes(),
+                clm.account_id.as_bytes(),
+                &clm.config_generation.get().to_be_bytes(),
+                &clm.account_generation.get().to_be_bytes(),
+                clm.manifest_sha256.as_bytes(),
+                clm.binding_sha256.as_bytes(),
+                clm.policy_sha256.as_bytes(),
+                &clm.trust_epoch.get().to_be_bytes(),
+                clm.bundle_sha256.as_bytes(),
+                clm.key_id.as_bytes(),
+                &clm.claimed_at.to_be_bytes(),
+                &clm.invoke_before.to_be_bytes(),
+            ],
+        );
+        if clm.claim_receipt != expected_receipt {
+            return Err(recovery_error());
+        }
+        seen_claims += 1;
+    }
+    if seen_claims != claims_count {
+        return Err(recovery_error());
+    }
+
+    // 3. 验证 effect_invocations
+    let mut stmt = connection
+        .prepare(
+            "SELECT invocation_id, effect_id, claim_id, session_id,
+                    start_receipt, start_sha256, started_at
+             FROM effect_invocations ORDER BY invocation_id",
+        )
+        .map_err(|_| store_read_error())?;
+    let mut rows = stmt.query([]).map_err(|_| store_read_error())?;
+    let mut seen_inv = 0_i64;
+    while let Some(row) = rows.next().map_err(|_| store_read_error())? {
+        let inv = stored_effect_invocation_from_row(row).map_err(|_| recovery_error())?;
+        utc_millis(inv.started_at)?;
+        if inv.start_sha256 != Sha256Digest::digest(&inv.start_receipt) {
+            return Err(recovery_error());
+        }
+        let expected_receipt = encode_transcript(
+            INVOCATION_START_DOMAIN,
+            &[
+                inv.invocation_id.as_bytes(),
+                inv.effect_id.as_bytes(),
+                inv.claim_id.as_bytes(),
+                inv.session_id.as_bytes(),
+                &inv.started_at.to_be_bytes(),
+            ],
+        );
+        if inv.start_receipt != expected_receipt {
+            return Err(recovery_error());
+        }
+        seen_inv += 1;
+    }
+    if seen_inv != invocations_count {
+        return Err(recovery_error());
+    }
+
+    // 4. 验证 effect_observations
+    let mut stmt = connection
+        .prepare(
+            "SELECT observation_id, effect_id, claim_id, invocation_id,
+                    certainty, result, result_sha256, source, observation, observed_at
+             FROM effect_observations ORDER BY observation_id",
+        )
+        .map_err(|_| store_read_error())?;
+    let mut rows = stmt.query([]).map_err(|_| store_read_error())?;
+    let mut seen_obs = 0_i64;
+    while let Some(row) = rows.next().map_err(|_| store_read_error())? {
+        let obs = stored_effect_observation_from_row(row).map_err(|_| recovery_error())?;
+        utc_millis(obs.observed_at)?;
+
+        if obs.result.is_empty() || obs.result.len() > 16_777_216 {
+            return Err(recovery_error());
+        }
+        if obs.result_sha256 != Sha256Digest::digest(&obs.result) {
+            return Err(recovery_error());
+        }
+        if obs.observation_id != Sha256Digest::digest(&obs.observation) {
+            return Err(recovery_error());
+        }
+        match (obs.source, obs.certainty) {
+            (ObservationSource::PreNetworkFailure, ObservationCertainty::KnownNoEffect)
+            | (ObservationSource::InvocationRecovery, ObservationCertainty::Ambiguous)
+            | (ObservationSource::AdapterResult, _) => {}
+            _ => return Err(recovery_error()),
+        }
+        let expected_observation = effect_observation_transcript(
+            obs.effect_id,
+            obs.claim_id,
+            obs.invocation_id,
+            obs.certainty,
+            obs.result_sha256,
+            obs.source,
+            obs.observed_at,
+        );
+        if obs.observation != expected_observation {
+            return Err(recovery_error());
+        }
+        seen_obs += 1;
+    }
+    if seen_obs != observations_count {
+        return Err(recovery_error());
+    }
+
+    Ok(())
 }
 
 #[allow(clippy::too_many_lines)]
@@ -7567,6 +9225,9 @@ fn validate_stored_challenge(
         validate_credential_cleanup_context(connection, authority, &manifest, false)
             .map_err(|_| recovery_error())?;
     }
+    if let ManifestPayload::AmbiguousClose(ambiguous) = manifest.payload() {
+        validate_fresh_ambiguous_close_context(connection, ambiguous)?;
+    }
     let receipt = load_receipt_for_challenge(connection, challenge.challenge_id)?;
     let nonce = load_nonce_use(connection, challenge.challenge_id)?;
     match challenge.state.as_str() {
@@ -7661,6 +9322,7 @@ fn validate_registry_history(connection: &Connection) -> Result<(), MailError> {
         create_count,
         unattached_cleanup_count,
         claimed_cleanup_count,
+        effect_claim_count,
     ) = connection
         .query_row(
             "SELECT
@@ -7683,7 +9345,8 @@ fn validate_registry_history(connection: &Connection) -> Result<(), MailError> {
                 (SELECT COUNT(*) FROM account_transitions WHERE kind='account_create'),
                 (SELECT COUNT(*) FROM credential_cleanup WHERE transition_id IS NULL),
                 (SELECT COUNT(*) FROM credential_cleanup
-                 WHERE state IN ('claimed','deleted'))",
+                 WHERE state IN ('claimed','deleted')),
+                (SELECT COUNT(*) FROM effect_claims)",
             [],
             |row| {
                 Ok((
@@ -7700,11 +9363,12 @@ fn validate_registry_history(connection: &Connection) -> Result<(), MailError> {
                     row.get::<_, i64>(10)?,
                     row.get::<_, i64>(11)?,
                     row.get::<_, i64>(12)?,
+                    row.get::<_, i64>(13)?,
                 ))
             },
         )
         .map_err(|_| store_read_error())?;
-    if grant_count != store_count + transition_count + claimed_cleanup_count
+    if grant_count != store_count + transition_count + claimed_cleanup_count + effect_claim_count
         || credential_count != credential_transition_count
         || account_count != create_count
         || version_count != store_count + committed_count
@@ -7794,6 +9458,7 @@ fn validate_registry_history(connection: &Connection) -> Result<(), MailError> {
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 fn validate_stored_grant(connection: &Connection, grant: &StoredGrantUse) -> Result<(), MailError> {
     utc_millis(grant.used_at)?;
     if !matches!(
@@ -7810,6 +9475,16 @@ fn validate_stored_grant(connection: &Connection, grant: &StoredGrantUse) -> Res
                 TargetKind::Credential
             )
             | (SensitiveAction::CredentialCleanup, TargetKind::Cleanup)
+            | (
+                SensitiveAction::SendSubmit
+                    | SensitiveAction::MailSeen
+                    | SensitiveAction::MailStarred
+                    | SensitiveAction::MailMove
+                    | SensitiveAction::MailArchive
+                    | SensitiveAction::MailSafeDelete
+                    | SensitiveAction::AmbiguousClose,
+                TargetKind::Operation,
+            )
     ) || !valid_target_shape(grant.target_kind, &grant.target_id)
         || grant.use_receipt != grant_use_transcript_from_row(grant)
         || grant.use_sha256 != Sha256Digest::digest(&grant.use_receipt)
@@ -7858,6 +9533,28 @@ fn validate_stored_grant(connection: &Connection, grant: &StoredGrantUse) -> Res
             || cleanup.claim_grant_id != Some(grant.grant_id)
             || !matches!(cleanup.state, CleanupState::Claimed | CleanupState::Deleted)
         {
+            return Err(recovery_error());
+        }
+        return Ok(());
+    }
+    if matches!(
+        grant.action,
+        SensitiveAction::SendSubmit
+            | SensitiveAction::MailSeen
+            | SensitiveAction::MailStarred
+            | SensitiveAction::MailMove
+            | SensitiveAction::MailArchive
+            | SensitiveAction::MailSafeDelete
+            | SensitiveAction::AmbiguousClose
+    ) {
+        let effect_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM remote_effects WHERE grant_id=?1",
+                [grant.grant_id.as_bytes()],
+                |row| row.get(0),
+            )
+            .map_err(|_| store_read_error())?;
+        if effect_count != 1 {
             return Err(recovery_error());
         }
         return Ok(());
@@ -9059,7 +10756,7 @@ fn validate_events(
             )?,
             sequence if sequence > expected_prefix => match row.entity_kind {
                 8 => validate_challenge_event(connection, &row, last_observed_at)?,
-                4 | 6 | 7 | 10 => validate_registry_event_row(connection, &row)?,
+                4 | 6 | 7 | 10 | 11 | 12 | 13 => validate_registry_event_row(connection, &row)?,
                 _ => return Err(recovery_error()),
             },
             _ => return Err(recovery_error()),
@@ -9423,6 +11120,122 @@ fn validate_registry_event_row(
             );
             if row.source != 4
                 || row.occurred_at != grant.used_at
+                || row.detail != expected
+                || row.detail_sha256.as_slice() != Sha256::digest(&expected).as_slice()
+            {
+                return Err(recovery_error());
+            }
+        }
+        (11, 18, 16) => {
+            let effect_id: RemoteEffectId =
+                uuid_from_blob_sql(row.entity_id.clone()).map_err(|_| recovery_error())?;
+            record_validation_query(ValidationQueryKind::BoundedKeyed);
+            let claim: Option<(Vec<u8>, Vec<u8>, i64)> = connection
+                .query_row(
+                    "SELECT grant_id, claim_sha256, claimed_at FROM effect_claims WHERE effect_id=?1",
+                    [effect_id.as_bytes()],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .optional()
+                .map_err(|_| store_read_error())?;
+            let (grant_id_bytes, claim_sha256_bytes, claimed_at) =
+                claim.ok_or_else(recovery_error)?;
+            let grant_id: AuthorizationGrantId =
+                uuid_from_blob_sql(grant_id_bytes).map_err(|_| recovery_error())?;
+            let grant = load_grant_use(connection, grant_id)?.ok_or_else(recovery_error)?;
+            let claim_sha256 =
+                digest_from_blob_sql(claim_sha256_bytes).map_err(|_| recovery_error())?;
+            let expected = authority_event_detail(
+                18,
+                11,
+                effect_id.as_bytes(),
+                4,
+                10,
+                grant_id.as_bytes(),
+                0x0a01,
+                0x0a02,
+                claim_sha256,
+                Some(grant.receipt_id),
+                claimed_at,
+            );
+            if row.source != 4
+                || row.occurred_at != claimed_at
+                || row.detail != expected
+                || row.detail_sha256.as_slice() != Sha256::digest(&expected).as_slice()
+            {
+                return Err(recovery_error());
+            }
+        }
+        (12, 19, 16) => {
+            let invocation_id: InvocationId =
+                uuid_from_blob_sql(row.entity_id.clone()).map_err(|_| recovery_error())?;
+            record_validation_query(ValidationQueryKind::BoundedKeyed);
+            let inv: Option<(Vec<u8>, Vec<u8>, i64)> = connection
+                .query_row(
+                    "SELECT effect_id, start_sha256, started_at FROM effect_invocations WHERE invocation_id=?1",
+                    [invocation_id.as_bytes()],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .optional()
+                .map_err(|_| store_read_error())?;
+            let (effect_id_bytes, start_sha256_bytes, started_at) =
+                inv.ok_or_else(recovery_error)?;
+            let effect_id: RemoteEffectId =
+                uuid_from_blob_sql(effect_id_bytes).map_err(|_| recovery_error())?;
+            let start_sha256 =
+                digest_from_blob_sql(start_sha256_bytes).map_err(|_| recovery_error())?;
+            let expected = authority_event_detail(
+                19,
+                12,
+                invocation_id.as_bytes(),
+                4,
+                11,
+                effect_id.as_bytes(),
+                0x0a02,
+                0x0a03,
+                start_sha256,
+                None,
+                started_at,
+            );
+            if row.source != 4
+                || row.occurred_at != started_at
+                || row.detail != expected
+                || row.detail_sha256.as_slice() != Sha256::digest(&expected).as_slice()
+            {
+                return Err(recovery_error());
+            }
+        }
+        (13, 20, 32) => {
+            let observation_id =
+                digest_from_blob_sql(row.entity_id.clone()).map_err(|_| recovery_error())?;
+            record_validation_query(ValidationQueryKind::BoundedKeyed);
+            let obs: Option<(Vec<u8>, i64, i64)> = connection
+                .query_row(
+                    "SELECT invocation_id, source, observed_at FROM effect_observations WHERE observation_id=?1",
+                    [observation_id.as_bytes()],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .optional()
+                .map_err(|_| store_read_error())?;
+            let (inv_id_bytes, obs_source, observed_at) = obs.ok_or_else(recovery_error)?;
+            let invocation_id: InvocationId =
+                uuid_from_blob_sql(inv_id_bytes).map_err(|_| recovery_error())?;
+            let expected_event_source: u8 = if obs_source == 3 { 5 } else { 4 };
+            let expected = authority_event_detail(
+                20,
+                13,
+                observation_id.as_bytes(),
+                expected_event_source,
+                12,
+                invocation_id.as_bytes(),
+                0x0a03,
+                0x0a04,
+                observation_id,
+                None,
+                observed_at,
+            );
+            if row.source != i64::from(expected_event_source)
+                || row.occurred_at != observed_at
                 || row.detail != expected
                 || row.detail_sha256.as_slice() != Sha256::digest(&expected).as_slice()
             {
@@ -10729,6 +12542,27 @@ fn credential_delete_error() -> MailError {
     MailError::stable(
         MailErrorCode::SecretStoreUnavailable,
         "OS credential store is unavailable",
+    )
+}
+
+fn effect_already_claimed_error() -> MailError {
+    MailError::stable(
+        MailErrorCode::EffectAlreadyClaimed,
+        "remote effect was already claimed with different identity",
+    )
+}
+
+fn effect_already_invoked_error() -> MailError {
+    MailError::stable(
+        MailErrorCode::EffectAlreadyInvoked,
+        "remote effect was already invoked with different identity",
+    )
+}
+
+fn authority_projection_conflict_error() -> MailError {
+    MailError::stable(
+        MailErrorCode::AuthorityProjectionConflict,
+        "authority projection conflicts with immutable evidence",
     )
 }
 

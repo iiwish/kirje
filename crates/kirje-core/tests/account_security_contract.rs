@@ -1,9 +1,9 @@
 use std::str::FromStr;
 
 use kirje_core::{
-    AccountBinding, AccountId, CredentialId, CredentialKind, Endpoint, MailAccountConfig,
-    OwnerRealmId, PlatformLocationMaterial, Protocol, PublicCredentialState, StoreId,
-    StoredCredentialState, TransportSecurity,
+    AccountBinding, AccountId, AuthoritySessionId, CredentialId, CredentialKind, EffectClaimId,
+    Endpoint, MailAccountConfig, OwnerRealmId, PlatformLocationMaterial, Protocol,
+    PublicCredentialState, StoreId, StoredCredentialState, TransportSecurity,
 };
 use uuid::Uuid;
 
@@ -155,6 +155,11 @@ fn stable_identities_reject_noncanonical_or_non_v4_text() {
     assert_eq!(StoreId::try_from(v4).unwrap().to_string(), canonical);
     assert_eq!(AccountId::from_str(canonical).unwrap().as_uuid(), v4);
     assert_eq!(CredentialId::from_str(canonical).unwrap().as_uuid(), v4);
+    assert_eq!(EffectClaimId::from_str(canonical).unwrap().as_uuid(), v4);
+    assert_eq!(
+        AuthoritySessionId::from_str(canonical).unwrap().as_uuid(),
+        v4
+    );
 
     for invalid in [
         "11111111111141118111111111111111",

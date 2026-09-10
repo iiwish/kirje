@@ -10,11 +10,12 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, de};
 
 use crate::{
-    AccountBinding, AccountId, AccountStateReason, AuthorizationGrantId, AuthorizationReceiptId,
-    BindingState, CleanupId, CredentialId, CredentialKind, Endpoint, InvocationId, JournalId,
-    KeyFingerprint, MailAccountConfig, MailError, MailErrorCode, OperationId, OwnerRealmId,
-    Protocol, RemoteEffectId, Sha256Digest, StoreId, StoredCredentialState, TransitionId,
-    TransportSecurity, encode_fields, protocol_code, security_code,
+    AccountBinding, AccountId, AccountStateReason, AuthoritySessionId, AuthorizationGrantId,
+    AuthorizationReceiptId, BindingState, CleanupId, CredentialId, CredentialKind, EffectClaimId,
+    Endpoint, InvocationId, JournalId, KeyFingerprint, MailAccountConfig, MailError, MailErrorCode,
+    OperationId, OwnerRealmId, Protocol, RemoteEffectId, Sha256Digest, StoreId,
+    StoredCredentialState, TransitionId, TransportSecurity, encode_fields, protocol_code,
+    security_code,
 };
 
 const MANIFEST_DOMAIN: &[u8] = b"KIRJE-MANIFEST-V1\0";
@@ -3340,6 +3341,166 @@ pub struct GovernedOperationAuthorization {
     pub challenge_id: Option<Sha256Digest>,
     pub receipt_id: Option<AuthorizationReceiptId>,
     pub expires_at: Option<DateTime<Utc>>,
+}
+
+/// Single-use execution permit granted to the process that successfully claimed
+/// and began an authorized remote effect.
+///
+/// Intentionally does not implement `Clone`, `Serialize`, or `Deserialize`, and
+/// contains no secret bytes. Must be consumed by the executing adapter.
+#[derive(Debug, Eq, PartialEq)]
+pub struct InvocationPermit {
+    effect_id: RemoteEffectId,
+    claim_id: EffectClaimId,
+    invocation_id: InvocationId,
+    session_id: AuthoritySessionId,
+    operation_id: OperationId,
+    account_id: AccountId,
+    action: SensitiveAction,
+    started_at_unix_ms: i64,
+    invoke_before_unix_ms: i64,
+}
+
+impl InvocationPermit {
+    /// Construct a new single-use invocation permit.
+    #[must_use]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        effect_id: RemoteEffectId,
+        claim_id: EffectClaimId,
+        invocation_id: InvocationId,
+        session_id: AuthoritySessionId,
+        operation_id: OperationId,
+        account_id: AccountId,
+        action: SensitiveAction,
+        started_at_unix_ms: i64,
+        invoke_before_unix_ms: i64,
+    ) -> Self {
+        Self {
+            effect_id,
+            claim_id,
+            invocation_id,
+            session_id,
+            operation_id,
+            account_id,
+            action,
+            started_at_unix_ms,
+            invoke_before_unix_ms,
+        }
+    }
+
+    #[must_use]
+    pub const fn effect_id(&self) -> RemoteEffectId {
+        self.effect_id
+    }
+
+    #[must_use]
+    pub const fn claim_id(&self) -> EffectClaimId {
+        self.claim_id
+    }
+
+    #[must_use]
+    pub const fn invocation_id(&self) -> InvocationId {
+        self.invocation_id
+    }
+
+    #[must_use]
+    pub const fn session_id(&self) -> AuthoritySessionId {
+        self.session_id
+    }
+
+    #[must_use]
+    pub const fn operation_id(&self) -> OperationId {
+        self.operation_id
+    }
+
+    #[must_use]
+    pub const fn account_id(&self) -> AccountId {
+        self.account_id
+    }
+
+    #[must_use]
+    pub const fn action(&self) -> SensitiveAction {
+        self.action
+    }
+
+    #[must_use]
+    pub const fn started_at_unix_ms(&self) -> i64 {
+        self.started_at_unix_ms
+    }
+
+    #[must_use]
+    pub const fn invoke_before_unix_ms(&self) -> i64 {
+        self.invoke_before_unix_ms
+    }
+}
+
+/// Durable observation certainty for an invoked remote effect.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservationCertainty {
+    Succeeded,
+    KnownNoEffect,
+    Ambiguous,
+}
+
+impl ObservationCertainty {
+    #[must_use]
+    pub const fn code(self) -> u8 {
+        match self {
+            Self::Succeeded => 1,
+            Self::KnownNoEffect => 2,
+            Self::Ambiguous => 3,
+        }
+    }
+
+    /// Convert from canonical 1-byte code.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidInput` for unrecognized codes.
+    pub fn from_code(code: u8) -> Result<Self, MailError> {
+        match code {
+            1 => Ok(Self::Succeeded),
+            2 => Ok(Self::KnownNoEffect),
+            3 => Ok(Self::Ambiguous),
+            _ => Err(MailError::invalid_input("unknown observation certainty")),
+        }
+    }
+}
+
+/// Source that produced the durable observation.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservationSource {
+    AdapterResult,
+    PreNetworkFailure,
+    InvocationRecovery,
+}
+
+impl ObservationSource {
+    #[must_use]
+    pub const fn code(self) -> u8 {
+        match self {
+            Self::AdapterResult => 1,
+            Self::PreNetworkFailure => 2,
+            Self::InvocationRecovery => 3,
+        }
+    }
+
+    /// Convert from canonical 1-byte code.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidInput` for unrecognized codes.
+    pub fn from_code(code: u8) -> Result<Self, MailError> {
+        match code {
+            1 => Ok(Self::AdapterResult),
+            2 => Ok(Self::PreNetworkFailure),
+            3 => Ok(Self::InvocationRecovery),
+            _ => Err(MailError::invalid_input("unknown observation source")),
+        }
+    }
 }
 
 fn parse_fields<'a>(

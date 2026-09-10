@@ -119,6 +119,8 @@ uuid_v4_id!(OperationId);
 uuid_v4_id!(CleanupId);
 uuid_v4_id!(TransitionId);
 uuid_v4_id!(InvocationId);
+uuid_v4_id!(EffectClaimId);
+uuid_v4_id!(AuthoritySessionId);
 uuid_v4_id!(JournalId);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
