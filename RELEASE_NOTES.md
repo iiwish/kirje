@@ -1,3 +1,40 @@
+# Kirje v1.0.0: General Availability (GA)
+
+Kirje 1.0.0 is the first production-ready, stable release of the local-first
+email CLI and MCP server built for autonomous AI agents.
+
+This release represents the complete execution and acceptance of the
+program roadmap (T101 through T121), establishing a deterministic, safe,
+and protocol-clean bridge between email systems and agent runtimes.
+
+### Core Architecture & Delivery Highlights
+- **Universal Local-First Infrastructure**: Unified runtime powering both CLI
+  automation and Model Context Protocol (MCP stdio). Excludes graphical UI,
+  in-memory relays, embedded LLMs, and hosted middleware.
+- **Provider-Neutral Operations**: Native IMAP and SMTP support across NetEase
+  (163/126/Yeah), Tencent (QQ/Foxmail), Aliyun, Fastmail, iCloud, and standard
+  enterprise/self-hosted servers with source-backed provider presets.
+- **Two-Phase Plan / Approve / Apply Engine**: Destructive operations and sending
+  require explicit multi-phase execution. Sensitive actions require interactive
+  human TTY approval. MCP stdio mode is architecturally barred from approval bypass.
+- **Robust Outbox & Unambiguous Recovery**: SQLite outbox and unified operation
+  ledger with deterministic crash recovery. Uncertain remote states enter terminal
+  `Ambiguous` states and are never automatically replayed.
+- **Offline Delivery Reconciliation**: Governed `NeedsAttention` filing alerts,
+  immutable audit events, and manual offline reconciliation via `kirje send reconcile`.
+- **Two-Phase Account Policy**: Default-deny read-only security model (FR-014)
+  with transactional double-check policy validation during plan and apply phases (FR-013).
+- **Transactional SQLite Index & Thread Reconstruction**: Local metadata index
+  with incremental sync cursors, soft tombstones, and deterministic header-based
+  conversation graph reconstruction.
+- **25 Stable MCP Tools**: Compact, typed MCP toolset with explicit safety
+  annotations and strict boundary budgets.
+- **Zero-Secret Distribution**: Release archives contain solely the binary,
+  documentation, license, and notice without bundling private user data. Full
+  `cargo deny check` compliance across advisories, bans, licenses, and sources.
+
+---
+
 # Kirje v1.0.0-rc.2
 
 This is the second Release Candidate for Kirje 1.0.0, completing deep hardening,
