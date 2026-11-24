@@ -37,6 +37,7 @@ const SCHEMA_VERSION: i64 = 1;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const CLOCK_ROLLBACK_TOLERANCE_MS: i64 = 30_000;
 const TRUST_BUNDLE_DOMAIN: &[u8] = b"KIRJE-TRUST-BUNDLE-V1\0";
+const TRUST_KEY_POP_DOMAIN: &[u8] = b"KIRJE-TRUST-KEY-POP-V1\0";
 const EVENT_DETAIL_DOMAIN: &[u8] = b"KIRJE-AUTHORITY-EVENT-DETAIL-V1\0";
 const AUTHORIZATION_CONTEXT_DOMAIN: &[u8] = b"KIRJE-AUTHORIZATION-CONTEXT-V1\0";
 const AUTHORIZATION_RECEIPT_DOMAIN: &[u8] = b"KIRJE-AUTHORIZATION-RECEIPT-V1\0";
@@ -904,13 +905,96 @@ impl AuthorizationChallengeExport {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StagedRotationKind {
+    OwnerRotate,
+    RecoveryRotate,
+    OwnerRecover,
+}
+
+impl StagedRotationKind {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::OwnerRotate => "owner_rotate",
+            Self::RecoveryRotate => "recovery_rotate",
+            Self::OwnerRecover => "owner_recover",
+        }
+    }
+
+    /// Parses a rotation kind string.
+    ///
+    /// # Errors
+    ///
+    /// Returns a recovery error if the string is unrecognized.
+    pub fn parse(s: &str) -> Result<Self, MailError> {
+        match s {
+            "owner_rotate" => Ok(Self::OwnerRotate),
+            "recovery_rotate" => Ok(Self::RecoveryRotate),
+            "owner_recover" => Ok(Self::OwnerRecover),
+            _ => Err(recovery_error()),
+        }
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct StagedSnapshot {
+    pub active: BootstrapSnapshot,
+    pub staged_epoch: NonZeroU64,
+    pub staged_bundle_sha256: Sha256Digest,
+    pub staged_owner_key_id: Sha256Digest,
+    pub staged_owner_public_key: OwnerPublicKey,
+    pub staged_recovery_key_id: Sha256Digest,
+    pub staged_recovery_public_key: OwnerPublicKey,
+    pub rotation_kind: StagedRotationKind,
+}
+
 #[derive(Clone, Eq, PartialEq)]
 pub enum AuthorityOpenState {
     Unconfigured,
     BootstrapPending(BootstrapSnapshot),
     ConfirmationRequired(BootstrapSnapshot),
     Ready(BootstrapSnapshot),
+    StagedFinalizeRequired(StagedSnapshot),
     RecoveryRequired,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AuthorizationReceiptTarget {
+    pub receipt_id: AuthorizationReceiptId,
+    pub receipt_sha256: Sha256Digest,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct StageRotationRequest {
+    pub receipt: AuthorizationReceiptTarget,
+    pub proof_of_possession: [u8; 64],
+    pub observed_at_unix_ms: i64,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct StageRecoveryRequest {
+    pub receipt: AuthorizationReceiptTarget,
+    pub owner_proof_of_possession: [u8; 64],
+    pub recovery_proof_of_possession: [u8; 64],
+    pub observed_at_unix_ms: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PublicAuditEvent {
+    pub sequence: i64,
+    pub entity_kind: u16,
+    pub entity_id: Vec<u8>,
+    pub event_code: u16,
+    pub source: u8,
+    pub occurred_at: i64,
+    pub detail_sha256: Sha256Digest,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AuditEventsPage {
+    pub events: Vec<PublicAuditEvent>,
+    pub next_after_sequence: Option<i64>,
 }
 
 #[derive(Clone)]
@@ -4433,6 +4517,828 @@ mod credential_cleanup_delete_adapter {
             secure_authority_files(&self.home.database)?;
 
             Ok(projections)
+        }
+
+        /// Stage one owner or recovery key rotation.
+        ///
+        /// # Errors
+        ///
+        /// Returns stable mismatch, stale, or store error.
+        #[allow(
+            clippy::too_many_lines,
+            clippy::needless_pass_by_value,
+            clippy::cast_possible_wrap
+        )]
+        pub fn stage_rotation(
+            &self,
+            request: StageRotationRequest,
+        ) -> Result<StagedSnapshot, MailError> {
+            let AuthorityOpenState::Ready(ref active) = self.state else {
+                return Err(recovery_error());
+            };
+            let _apply_lock = acquire_apply_lock(&self.home)?;
+            let mut connection = existing_authority_read_connection(&self.home.database)?;
+            let transaction = connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(|_| store_write_error())?;
+
+            let loaded = load_snapshot(&transaction, &self.test_hooks)?;
+            let effective_time =
+                checked_clock(loaded.last_observed_at, request.observed_at_unix_ms)?;
+
+            if staged_count(&transaction)? != 0 {
+                return Err(authorization_context_stale_error());
+            }
+
+            let receipt = load_receipt_by_id(&transaction, request.receipt.receipt_id)?
+                .ok_or_else(authorization_context_stale_error)?;
+            if receipt.receipt_sha256 != request.receipt.receipt_sha256 {
+                return Err(authorization_context_stale_error());
+            }
+            let challenge = load_challenge(&transaction, receipt.challenge_id)?;
+            let manifest = ActionManifest::parse(&challenge.manifest)
+                .map_err(|_| authorization_context_stale_error())?;
+            let (role, new_key_id, new_public_key, permissions, new_epoch, new_bundle) =
+                match manifest.payload() {
+                    ManifestPayload::OwnerRotate(v) => (
+                        OwnerKeyRole::Owner,
+                        v.new_key_id,
+                        v.new_public_key,
+                        v.permissions,
+                        v.new_epoch,
+                        v.new_bundle,
+                    ),
+                    ManifestPayload::RecoveryRotate(v) => (
+                        OwnerKeyRole::Recovery,
+                        v.new_key_id,
+                        v.new_public_key,
+                        v.permissions,
+                        v.new_epoch,
+                        v.new_bundle,
+                    ),
+                    _ => return Err(authorization_context_stale_error()),
+                };
+
+            if new_epoch.get() != active.minimum_epoch.get() + 1 {
+                return Err(authorization_context_stale_error());
+            }
+            let proposed_pubkey = OwnerPublicKey::try_from(new_public_key)
+                .map_err(|_| authorization_context_stale_error())?;
+            if proposed_pubkey.as_bytes() == active.owner_public_key.as_bytes()
+                || proposed_pubkey.as_bytes() == active.recovery_public_key.as_bytes()
+            {
+                return Err(authorization_context_stale_error());
+            }
+
+            let mask_u32 = match permissions {
+                TrustPermissionMask::Owner => 7_u32,
+                TrustPermissionMask::Recovery => 8_u32,
+            };
+            let pop_transcript = trust_key_pop_transcript(
+                &active.realm_id,
+                &active.journal_id,
+                active.minimum_epoch,
+                new_epoch,
+                role,
+                mask_u32,
+                &new_key_id,
+                &proposed_pubkey,
+                &new_bundle,
+                &receipt.receipt_id,
+            );
+            verify_pop_signature(
+                &proposed_pubkey,
+                &pop_transcript,
+                &request.proof_of_possession,
+            )?;
+
+            let (role_str, mask_int) = match role {
+                OwnerKeyRole::Owner => ("owner", 7_i64),
+                OwnerKeyRole::Recovery => ("recovery", 8_i64),
+            };
+            let epoch_i64 = i64::try_from(new_epoch.get()).map_err(|_| recovery_error())?;
+            let old_epoch_i64 =
+                i64::try_from(active.minimum_epoch.get()).map_err(|_| recovery_error())?;
+
+            transaction
+                .execute(
+                    "INSERT INTO authority_keys
+                     (key_id, role, permission_mask, public_key, state, valid_from_epoch, valid_to_epoch, installed_at, retired_at)
+                     VALUES (?1, ?2, ?3, ?4, 'staged', ?5, NULL, ?6, NULL)",
+                    params![
+                        new_key_id.as_bytes(),
+                        role_str,
+                        mask_int,
+                        proposed_pubkey.as_bytes(),
+                        epoch_i64,
+                        effective_time,
+                    ],
+                )
+                .map_err(|_| store_write_error())?;
+
+            let (owner_kid, recovery_kid, owner_proof, recovery_proof, rot_kind_str) = match role {
+                OwnerKeyRole::Owner => (
+                    new_key_id.as_bytes().to_vec(),
+                    active.recovery_key_id.as_bytes().to_vec(),
+                    Some(request.proof_of_possession.to_vec()),
+                    None,
+                    "owner_rotate",
+                ),
+                OwnerKeyRole::Recovery => (
+                    active.owner_key_id.as_bytes().to_vec(),
+                    new_key_id.as_bytes().to_vec(),
+                    None,
+                    Some(request.proof_of_possession.to_vec()),
+                    "recovery_rotate",
+                ),
+            };
+
+            transaction
+                .execute(
+                    "INSERT INTO trust_epochs
+                     (epoch, owner_key_id, recovery_key_id, bundle_sha256, state, predecessor_epoch,
+                      rotation_kind, transition_receipt_id, new_owner_key_proof, new_recovery_key_proof,
+                      staged_at, activated_at, retired_at)
+                     VALUES (?1, ?2, ?3, ?4, 'staged', ?5, ?6, ?7, ?8, ?9, ?10, NULL, NULL)",
+                    params![
+                        epoch_i64,
+                        owner_kid,
+                        recovery_kid,
+                        new_bundle.as_bytes(),
+                        old_epoch_i64,
+                        rot_kind_str,
+                        receipt.receipt_id.as_bytes(),
+                        owner_proof,
+                        recovery_proof,
+                        effective_time,
+                    ],
+                )
+                .map_err(|_| store_write_error())?;
+
+            let target_bytes = manifest.context().target.canonical_bytes();
+            let grant_use = GrantUseRequest::new(
+                receipt.grant_id,
+                receipt.receipt_id,
+                challenge.action,
+                challenge.action.policy().target_kind,
+                target_bytes,
+                receipt.manifest_sha256,
+            )?;
+            let use_receipt = grant_use_transcript(&grant_use, effective_time);
+            let use_sha256 = Sha256Digest::digest(&use_receipt);
+
+            transaction
+                .execute(
+                    "INSERT INTO grant_uses
+                     (grant_id, receipt_id, action, target_kind, target_id, manifest_sha256,
+                      use_receipt, use_sha256, used_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    params![
+                        receipt.grant_id.as_bytes(),
+                        receipt.receipt_id.as_bytes(),
+                        i64::from(challenge.action.code()),
+                        i64::from(TargetKind::TrustEpoch.code()),
+                        new_epoch.get().to_be_bytes().as_slice(),
+                        receipt.manifest_sha256.as_bytes(),
+                        use_receipt,
+                        use_sha256.as_bytes(),
+                        effective_time,
+                    ],
+                )
+                .map_err(|_| store_write_error())?;
+
+            insert_grant_used_event(
+                &transaction,
+                receipt.grant_id,
+                receipt.receipt_id,
+                use_sha256,
+                effective_time,
+            )?;
+
+            insert_typed_event(
+                &transaction,
+                3,
+                &new_epoch.get().to_be_bytes(),
+                21,
+                1,
+                9,
+                receipt.receipt_id.as_bytes(),
+                0,
+                0x0301,
+                new_bundle,
+                Some(receipt.receipt_id),
+                effective_time,
+            )?;
+
+            observe_clock_pair(&transaction, effective_time)?;
+            transaction.commit().map_err(|_| store_write_error())?;
+            secure_authority_files(&self.home.database)?;
+
+            let rotation_kind = match role {
+                OwnerKeyRole::Owner => StagedRotationKind::OwnerRotate,
+                OwnerKeyRole::Recovery => StagedRotationKind::RecoveryRotate,
+            };
+            let (staged_owner_kid, staged_owner_pk, staged_rec_kid, staged_rec_pk) = match role {
+                OwnerKeyRole::Owner => (
+                    new_key_id,
+                    proposed_pubkey,
+                    active.recovery_key_id,
+                    active.recovery_public_key.clone(),
+                ),
+                OwnerKeyRole::Recovery => (
+                    active.owner_key_id,
+                    active.owner_public_key.clone(),
+                    new_key_id,
+                    proposed_pubkey,
+                ),
+            };
+
+            Ok(StagedSnapshot {
+                active: active.clone(),
+                staged_epoch: new_epoch,
+                staged_bundle_sha256: new_bundle,
+                staged_owner_key_id: staged_owner_kid,
+                staged_owner_public_key: staged_owner_pk,
+                staged_recovery_key_id: staged_rec_kid,
+                staged_recovery_public_key: staged_rec_pk,
+                rotation_kind,
+            })
+        }
+
+        /// Stage one owner disaster recovery.
+        ///
+        /// # Errors
+        ///
+        /// Returns stable mismatch, stale, or store error.
+        #[allow(
+            clippy::too_many_lines,
+            clippy::needless_pass_by_value,
+            clippy::cast_possible_wrap
+        )]
+        pub fn stage_recovery(
+            &self,
+            request: StageRecoveryRequest,
+        ) -> Result<StagedSnapshot, MailError> {
+            let AuthorityOpenState::Ready(ref active) = self.state else {
+                return Err(recovery_error());
+            };
+            let _apply_lock = acquire_apply_lock(&self.home)?;
+            let mut connection = existing_authority_read_connection(&self.home.database)?;
+            let transaction = connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(|_| store_write_error())?;
+
+            let loaded = load_snapshot(&transaction, &self.test_hooks)?;
+            let effective_time =
+                checked_clock(loaded.last_observed_at, request.observed_at_unix_ms)?;
+
+            if staged_count(&transaction)? != 0 {
+                return Err(authorization_context_stale_error());
+            }
+
+            let receipt = load_receipt_by_id(&transaction, request.receipt.receipt_id)?
+                .ok_or_else(authorization_context_stale_error)?;
+            if receipt.receipt_sha256 != request.receipt.receipt_sha256 {
+                return Err(authorization_context_stale_error());
+            }
+            let challenge = load_challenge(&transaction, receipt.challenge_id)?;
+            let manifest = ActionManifest::parse(&challenge.manifest)
+                .map_err(|_| authorization_context_stale_error())?;
+            let ManifestPayload::OwnerRecover(v) = manifest.payload() else {
+                return Err(authorization_context_stale_error());
+            };
+
+            if v.new_epoch.get() != active.minimum_epoch.get() + 1 {
+                return Err(authorization_context_stale_error());
+            }
+            let new_owner_pk = OwnerPublicKey::try_from(v.new_owner_key)
+                .map_err(|_| authorization_context_stale_error())?;
+            let new_rec_pk = OwnerPublicKey::try_from(v.new_recovery_key)
+                .map_err(|_| authorization_context_stale_error())?;
+
+            if new_owner_pk == new_rec_pk
+                || new_owner_pk.as_bytes() == active.owner_public_key.as_bytes()
+                || new_owner_pk.as_bytes() == active.recovery_public_key.as_bytes()
+                || new_rec_pk.as_bytes() == active.owner_public_key.as_bytes()
+                || new_rec_pk.as_bytes() == active.recovery_public_key.as_bytes()
+            {
+                return Err(authorization_context_stale_error());
+            }
+
+            let owner_transcript = trust_key_pop_transcript(
+                &active.realm_id,
+                &active.journal_id,
+                active.minimum_epoch,
+                v.new_epoch,
+                OwnerKeyRole::Owner,
+                7,
+                &v.new_owner_id,
+                &new_owner_pk,
+                &v.new_bundle,
+                &receipt.receipt_id,
+            );
+            verify_pop_signature(
+                &new_owner_pk,
+                &owner_transcript,
+                &request.owner_proof_of_possession,
+            )?;
+
+            let rec_transcript = trust_key_pop_transcript(
+                &active.realm_id,
+                &active.journal_id,
+                active.minimum_epoch,
+                v.new_epoch,
+                OwnerKeyRole::Recovery,
+                8,
+                &v.new_recovery_id,
+                &new_rec_pk,
+                &v.new_bundle,
+                &receipt.receipt_id,
+            );
+            verify_pop_signature(
+                &new_rec_pk,
+                &rec_transcript,
+                &request.recovery_proof_of_possession,
+            )?;
+
+            let epoch_i64 = i64::try_from(v.new_epoch.get()).map_err(|_| recovery_error())?;
+            let old_epoch_i64 =
+                i64::try_from(active.minimum_epoch.get()).map_err(|_| recovery_error())?;
+
+            transaction
+                .execute(
+                    "INSERT INTO authority_keys
+                     (key_id, role, permission_mask, public_key, state, valid_from_epoch, valid_to_epoch, installed_at, retired_at)
+                     VALUES (?1, 'owner', 7, ?2, 'staged', ?3, NULL, ?4, NULL)",
+                    params![
+                        v.new_owner_id.as_bytes(),
+                        new_owner_pk.as_bytes(),
+                        epoch_i64,
+                        effective_time,
+                    ],
+                )
+                .map_err(|_| store_write_error())?;
+            transaction
+                .execute(
+                    "INSERT INTO authority_keys
+                     (key_id, role, permission_mask, public_key, state, valid_from_epoch, valid_to_epoch, installed_at, retired_at)
+                     VALUES (?1, 'recovery', 8, ?2, 'staged', ?3, NULL, ?4, NULL)",
+                    params![
+                        v.new_recovery_id.as_bytes(),
+                        new_rec_pk.as_bytes(),
+                        epoch_i64,
+                        effective_time,
+                    ],
+                )
+                .map_err(|_| store_write_error())?;
+
+            transaction
+                .execute(
+                    "INSERT INTO trust_epochs
+                     (epoch, owner_key_id, recovery_key_id, bundle_sha256, state, predecessor_epoch,
+                      rotation_kind, transition_receipt_id, new_owner_key_proof, new_recovery_key_proof,
+                      staged_at, activated_at, retired_at)
+                     VALUES (?1, ?2, ?3, ?4, 'staged', ?5, 'owner_recover', ?6, ?7, ?8, ?9, NULL, NULL)",
+                    params![
+                        epoch_i64,
+                        v.new_owner_id.as_bytes(),
+                        v.new_recovery_id.as_bytes(),
+                        v.new_bundle.as_bytes(),
+                        old_epoch_i64,
+                        receipt.receipt_id.as_bytes(),
+                        request.owner_proof_of_possession.as_slice(),
+                        request.recovery_proof_of_possession.as_slice(),
+                        effective_time,
+                    ],
+                )
+                .map_err(|_| store_write_error())?;
+
+            let target_bytes = manifest.context().target.canonical_bytes();
+            let grant_use = GrantUseRequest::new(
+                receipt.grant_id,
+                receipt.receipt_id,
+                challenge.action,
+                challenge.action.policy().target_kind,
+                target_bytes,
+                receipt.manifest_sha256,
+            )?;
+            let use_receipt = grant_use_transcript(&grant_use, effective_time);
+            let use_sha256 = Sha256Digest::digest(&use_receipt);
+
+            transaction
+                .execute(
+                    "INSERT INTO grant_uses
+                     (grant_id, receipt_id, action, target_kind, target_id, manifest_sha256,
+                      use_receipt, use_sha256, used_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    params![
+                        receipt.grant_id.as_bytes(),
+                        receipt.receipt_id.as_bytes(),
+                        i64::from(challenge.action.code()),
+                        i64::from(TargetKind::TrustEpoch.code()),
+                        v.new_epoch.get().to_be_bytes().as_slice(),
+                        receipt.manifest_sha256.as_bytes(),
+                        use_receipt,
+                        use_sha256.as_bytes(),
+                        effective_time,
+                    ],
+                )
+                .map_err(|_| store_write_error())?;
+
+            insert_grant_used_event(
+                &transaction,
+                receipt.grant_id,
+                receipt.receipt_id,
+                use_sha256,
+                effective_time,
+            )?;
+
+            insert_typed_event(
+                &transaction,
+                3,
+                &v.new_epoch.get().to_be_bytes(),
+                23,
+                1,
+                9,
+                receipt.receipt_id.as_bytes(),
+                0,
+                0x0301,
+                v.new_bundle,
+                Some(receipt.receipt_id),
+                effective_time,
+            )?;
+
+            observe_clock_pair(&transaction, effective_time)?;
+            transaction.commit().map_err(|_| store_write_error())?;
+            secure_authority_files(&self.home.database)?;
+
+            Ok(StagedSnapshot {
+                active: active.clone(),
+                staged_epoch: v.new_epoch,
+                staged_bundle_sha256: v.new_bundle,
+                staged_owner_key_id: v.new_owner_id,
+                staged_owner_public_key: new_owner_pk,
+                staged_recovery_key_id: v.new_recovery_id,
+                staged_recovery_public_key: new_rec_pk,
+                rotation_kind: StagedRotationKind::OwnerRecover,
+            })
+        }
+
+        /// Finalize one fully verified matching staged rotation or recovery.
+        ///
+        /// # Errors
+        ///
+        /// Returns stable mismatch, stale, rollback-clock, or store error.
+        #[allow(
+            clippy::too_many_lines,
+            clippy::needless_pass_by_value,
+            clippy::cast_possible_wrap
+        )]
+        pub fn finalize_staged(
+            &self,
+            observed_at_unix_ms: i64,
+        ) -> Result<BootstrapSnapshot, MailError> {
+            let AuthorityOpenState::StagedFinalizeRequired(ref staged) = self.state else {
+                return Err(recovery_error());
+            };
+            let _apply_lock = acquire_apply_lock(&self.home)?;
+            let mut connection = existing_authority_read_connection(&self.home.database)?;
+            let transaction = connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(|_| store_write_error())?;
+
+            let loaded = load_snapshot(&transaction, &self.test_hooks)?;
+            let effective_time = checked_clock(loaded.last_observed_at, observed_at_unix_ms)?;
+            let old_epoch_i64 =
+                i64::try_from(staged.active.minimum_epoch.get()).map_err(|_| recovery_error())?;
+            let next_epoch_i64 =
+                i64::try_from(staged.staged_epoch.get()).map_err(|_| recovery_error())?;
+
+            transaction
+                .execute(
+                    "UPDATE trust_epochs SET state='retired', retired_at=?1 WHERE epoch=?2 AND state='active'",
+                    params![effective_time, old_epoch_i64],
+                )
+                .map_err(|_| store_write_error())?;
+
+            match staged.rotation_kind {
+                StagedRotationKind::OwnerRotate => {
+                    transaction
+                        .execute(
+                            "UPDATE authority_keys SET state='retired', valid_to_epoch=?1, retired_at=?2 WHERE key_id=?3 AND state='active'",
+                            params![old_epoch_i64, effective_time, staged.active.owner_key_id.as_bytes()],
+                        )
+                        .map_err(|_| store_write_error())?;
+                    insert_typed_event(
+                        &transaction,
+                        2,
+                        staged.active.owner_key_id.as_bytes(),
+                        25,
+                        1,
+                        3,
+                        &staged.staged_epoch.get().to_be_bytes(),
+                        0x0202,
+                        0x0203,
+                        staged.active.trust_bundle_sha256,
+                        None,
+                        effective_time,
+                    )?;
+                }
+                StagedRotationKind::RecoveryRotate => {
+                    transaction
+                        .execute(
+                            "UPDATE authority_keys SET state='retired', valid_to_epoch=?1, retired_at=?2 WHERE key_id=?3 AND state='active'",
+                            params![old_epoch_i64, effective_time, staged.active.recovery_key_id.as_bytes()],
+                        )
+                        .map_err(|_| store_write_error())?;
+                    insert_typed_event(
+                        &transaction,
+                        2,
+                        staged.active.recovery_key_id.as_bytes(),
+                        25,
+                        1,
+                        3,
+                        &staged.staged_epoch.get().to_be_bytes(),
+                        0x0202,
+                        0x0203,
+                        staged.active.trust_bundle_sha256,
+                        None,
+                        effective_time,
+                    )?;
+                }
+                StagedRotationKind::OwnerRecover => {
+                    transaction
+                        .execute(
+                            "UPDATE authority_keys SET state='retired', valid_to_epoch=?1, retired_at=?2 WHERE key_id=?3 AND state='active'",
+                            params![old_epoch_i64, effective_time, staged.active.owner_key_id.as_bytes()],
+                        )
+                        .map_err(|_| store_write_error())?;
+                    transaction
+                        .execute(
+                            "UPDATE authority_keys SET state='retired', valid_to_epoch=?1, retired_at=?2 WHERE key_id=?3 AND state='active'",
+                            params![old_epoch_i64, effective_time, staged.active.recovery_key_id.as_bytes()],
+                        )
+                        .map_err(|_| store_write_error())?;
+                    insert_typed_event(
+                        &transaction,
+                        2,
+                        staged.active.owner_key_id.as_bytes(),
+                        25,
+                        1,
+                        3,
+                        &staged.staged_epoch.get().to_be_bytes(),
+                        0x0202,
+                        0x0203,
+                        staged.active.trust_bundle_sha256,
+                        None,
+                        effective_time,
+                    )?;
+                    insert_typed_event(
+                        &transaction,
+                        2,
+                        staged.active.recovery_key_id.as_bytes(),
+                        25,
+                        1,
+                        3,
+                        &staged.staged_epoch.get().to_be_bytes(),
+                        0x0202,
+                        0x0203,
+                        staged.active.trust_bundle_sha256,
+                        None,
+                        effective_time,
+                    )?;
+                }
+            }
+
+            insert_typed_event(
+                &transaction,
+                3,
+                &staged.active.minimum_epoch.get().to_be_bytes(),
+                26,
+                1,
+                3,
+                &staged.staged_epoch.get().to_be_bytes(),
+                0x0302,
+                0x0303,
+                staged.active.trust_bundle_sha256,
+                None,
+                effective_time,
+            )?;
+
+            transaction
+                .execute(
+                    "UPDATE trust_epochs SET state='active', activated_at=?1 WHERE epoch=?2 AND state='staged'",
+                    params![effective_time, next_epoch_i64],
+                )
+                .map_err(|_| store_write_error())?;
+
+            transaction
+                .execute(
+                    "UPDATE authority_keys SET state='active' WHERE state='staged' AND valid_from_epoch=?1",
+                    params![next_epoch_i64],
+                )
+                .map_err(|_| store_write_error())?;
+
+            transaction
+                .execute(
+                    "UPDATE authority_meta SET active_epoch=?1, trust_bundle_sha256=?2, last_observed_at=?3, updated_at=?3 WHERE singleton=1",
+                    params![next_epoch_i64, staged.staged_bundle_sha256.as_bytes(), effective_time],
+                )
+                .map_err(|_| store_write_error())?;
+
+            let transition_receipt_id: Vec<u8> = transaction
+                .query_row(
+                    "SELECT transition_receipt_id FROM trust_epochs WHERE epoch=?1",
+                    params![next_epoch_i64],
+                    |row| row.get(0),
+                )
+                .map_err(|_| store_read_error())?;
+            let transition_receipt_id: AuthorizationReceiptId =
+                uuid_from_blob_sql(transition_receipt_id).map_err(|_| recovery_error())?;
+
+            let mut old_challenges_stmt = transaction
+                .prepare(
+                    "SELECT challenge_id, context_sha256, state FROM authorization_challenges
+                     WHERE state IN ('pending', 'authorized')
+                       AND challenge_id NOT IN (SELECT challenge_id FROM authorization_receipts WHERE receipt_id IN (SELECT receipt_id FROM grant_uses))",
+                )
+                .map_err(|_| store_read_error())?;
+            let old_rows = old_challenges_stmt
+                .query_map([], |r| {
+                    Ok((
+                        r.get::<_, Vec<u8>>(0)?,
+                        r.get::<_, Vec<u8>>(1)?,
+                        r.get::<_, String>(2)?,
+                    ))
+                })
+                .map_err(|_| store_read_error())?;
+
+            let old_challenges: Vec<_> = old_rows
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| store_read_error())?;
+            drop(old_challenges_stmt);
+
+            for (cid_bytes, ctx_bytes, old_state) in old_challenges {
+                let prior_state = if old_state == "pending" {
+                    0x0801_u16
+                } else {
+                    0x0802_u16
+                };
+                let ctx = digest_from_blob_sql(ctx_bytes).map_err(|_| recovery_error())?;
+                transaction
+                    .execute(
+                        "UPDATE authorization_challenges SET state='expired' WHERE challenge_id=?1",
+                        params![cid_bytes],
+                    )
+                    .map_err(|_| store_write_error())?;
+                insert_typed_event(
+                    &transaction,
+                    8,
+                    &cid_bytes,
+                    6,
+                    1,
+                    3,
+                    &staged.staged_epoch.get().to_be_bytes(),
+                    prior_state,
+                    0x0804,
+                    ctx,
+                    None,
+                    effective_time,
+                )?;
+            }
+
+            if staged.rotation_kind == StagedRotationKind::OwnerRecover {
+                transaction
+                    .execute(
+                        "UPDATE registered_stores SET state='recovery_required', updated_at=?1 WHERE state<>'removed'",
+                        params![effective_time],
+                    )
+                    .map_err(|_| store_write_error())?;
+                transaction
+                    .execute(
+                        "UPDATE registered_accounts SET state='blocked', state_reason=4, updated_at=?1 WHERE state<>'removed'",
+                        params![effective_time],
+                    )
+                    .map_err(|_| store_write_error())?;
+            }
+
+            let fin_event_code = match staged.rotation_kind {
+                StagedRotationKind::OwnerRotate | StagedRotationKind::RecoveryRotate => 22_u16,
+                StagedRotationKind::OwnerRecover => 24_u16,
+            };
+            insert_typed_event(
+                &transaction,
+                3,
+                &staged.staged_epoch.get().to_be_bytes(),
+                fin_event_code,
+                1,
+                9,
+                transition_receipt_id.as_bytes(),
+                0x0301,
+                0x0302,
+                staged.staged_bundle_sha256,
+                Some(transition_receipt_id),
+                effective_time,
+            )?;
+
+            observe_clock_pair(&transaction, effective_time)?;
+            transaction.commit().map_err(|_| store_write_error())?;
+            secure_authority_files(&self.home.database)?;
+
+            let new_anchor = AnchorSnapshot {
+                version: staged.active.anchor.version,
+                realm_id: staged.active.realm_id,
+                journal_id: staged.active.journal_id,
+                journal_location_sha256: staged.active.journal_location_sha256,
+                minimum_epoch: staged.staged_epoch,
+                owner_key_id: staged.staged_owner_key_id,
+                owner_public_key: staged.staged_owner_public_key.clone(),
+                recovery_key_id: staged.staged_recovery_key_id,
+                recovery_public_key: staged.staged_recovery_public_key.clone(),
+                trust_bundle_sha256: staged.staged_bundle_sha256,
+                state: AuthorityAnchorState::Normal,
+            };
+
+            Ok(BootstrapSnapshot {
+                realm_id: staged.active.realm_id,
+                journal_id: staged.active.journal_id,
+                minimum_epoch: staged.staged_epoch,
+                owner_key_id: staged.staged_owner_key_id,
+                owner_public_key: staged.staged_owner_public_key.clone(),
+                recovery_key_id: staged.staged_recovery_key_id,
+                recovery_public_key: staged.staged_recovery_public_key.clone(),
+                trust_bundle_sha256: staged.staged_bundle_sha256,
+                journal_location_sha256: staged.active.journal_location_sha256,
+                anchor: new_anchor,
+            })
+        }
+
+        /// Export public audit event stream with keyset pagination.
+        ///
+        /// # Errors
+        ///
+        /// Returns invalid-input when limit is outside 1..=100 or sequence is negative,
+        /// or store-read error.
+        pub fn audit_events(
+            &self,
+            after_sequence: Option<i64>,
+            limit: usize,
+        ) -> Result<AuditEventsPage, MailError> {
+            if limit == 0 || limit > 100 {
+                return Err(MailError::invalid_input(
+                    "audit event limit must be between 1 and 100",
+                ));
+            }
+            if matches!(after_sequence, Some(seq) if seq < 0) {
+                return Err(MailError::invalid_input(
+                    "audit sequence cursor must be nonnegative",
+                ));
+            }
+            let after_seq = after_sequence.unwrap_or(0);
+            let connection = existing_authority_read_connection(&self.home.database)?;
+            let mut statement = connection
+                .prepare(
+                    "SELECT sequence, entity_kind, entity_id, event_code, source, occurred_at, detail_sha256
+                     FROM authority_events INDEXED BY authority_events_entity_sequence
+                     WHERE sequence > ?1
+                     ORDER BY sequence ASC
+                     LIMIT ?2",
+                )
+                .map_err(|_| store_read_error())?;
+            let limit_i64 = i64::try_from(limit).map_err(|_| store_read_error())?;
+            let rows = statement
+                .query_map(params![after_seq, limit_i64], |row| {
+                    let seq: i64 = row.get(0)?;
+                    let ekind: i64 = row.get(1)?;
+                    let eid: Vec<u8> = row.get(2)?;
+                    let ecode: i64 = row.get(3)?;
+                    let src: i64 = row.get(4)?;
+                    let occ: i64 = row.get(5)?;
+                    let dsha: Vec<u8> = row.get(6)?;
+                    Ok((seq, ekind, eid, ecode, src, occ, dsha))
+                })
+                .map_err(|_| store_read_error())?;
+
+            let mut events = Vec::new();
+            for item in rows {
+                let (seq, ekind, eid, ecode, src, occ, dsha) =
+                    item.map_err(|_| store_read_error())?;
+                let detail_sha256 = digest_from_blob_sql(dsha).map_err(|_| recovery_error())?;
+                events.push(PublicAuditEvent {
+                    sequence: seq,
+                    entity_kind: u16::try_from(ekind).map_err(|_| recovery_error())?,
+                    entity_id: eid,
+                    event_code: u16::try_from(ecode).map_err(|_| recovery_error())?,
+                    source: u8::try_from(src).map_err(|_| recovery_error())?,
+                    occurred_at: occ,
+                    detail_sha256,
+                });
+            }
+            let next_after_sequence = events.last().map(|e| e.sequence);
+            Ok(AuditEventsPage {
+                events,
+                next_after_sequence,
+            })
         }
     }
 }
@@ -8330,14 +9236,17 @@ fn inspect_connection(
             if ensure_usable_schema(connection).is_err() {
                 return Ok(AuthorityOpenState::RecoveryRequired);
             }
-            if staged_count(connection)? != 0 {
-                return Ok(AuthorityOpenState::RecoveryRequired);
-            }
             let Ok(loaded) = load_snapshot(connection, test_hooks) else {
                 return Ok(AuthorityOpenState::RecoveryRequired);
             };
             if loaded.snapshot.journal_location_sha256 != context.journal_location_sha256 {
                 return Ok(AuthorityOpenState::RecoveryRequired);
+            }
+            if staged_count(connection)? != 0 {
+                if loaded.bootstrap_state != "ready" {
+                    return Ok(AuthorityOpenState::RecoveryRequired);
+                }
+                return inspect_staged_state(connection, context, &loaded.snapshot);
             }
             match (loaded.bootstrap_state.as_str(), &context.anchor) {
                 ("pending_anchor", AnchorPresence::Missing) => {
@@ -8355,6 +9264,245 @@ fn inspect_connection(
             }
         }
     }
+}
+
+#[allow(clippy::too_many_lines)]
+fn inspect_staged_state(
+    connection: &Connection,
+    context: &AuthorityOpenContext,
+    active_snapshot: &BootstrapSnapshot,
+) -> Result<AuthorityOpenState, MailError> {
+    let mut stmt = connection
+        .prepare(
+            "SELECT epoch, owner_key_id, recovery_key_id, bundle_sha256, predecessor_epoch,
+                    rotation_kind, transition_receipt_id, new_owner_key_proof, new_recovery_key_proof
+             FROM trust_epochs WHERE state = 'staged'",
+        )
+        .map_err(|_| store_read_error())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, Vec<u8>>(1)?,
+                row.get::<_, Vec<u8>>(2)?,
+                row.get::<_, Vec<u8>>(3)?,
+                row.get::<_, Option<i64>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, Option<Vec<u8>>>(6)?,
+                row.get::<_, Option<Vec<u8>>>(7)?,
+                row.get::<_, Option<Vec<u8>>>(8)?,
+            ))
+        })
+        .map_err(|_| store_read_error())?;
+    let staged_epochs: Vec<_> = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| store_read_error())?;
+    if staged_epochs.len() != 1 {
+        return Ok(AuthorityOpenState::RecoveryRequired);
+    }
+    let (
+        staged_epoch_num,
+        staged_owner_key_id_bytes,
+        staged_recovery_key_id_bytes,
+        staged_bundle_bytes,
+        predecessor_epoch,
+        rotation_kind_str,
+        receipt_id_bytes,
+        owner_proof_bytes,
+        recovery_proof_bytes,
+    ) = &staged_epochs[0];
+
+    let Ok(staged_epoch_u64) = u64::try_from(*staged_epoch_num) else {
+        return Ok(AuthorityOpenState::RecoveryRequired);
+    };
+    let Some(staged_epoch) = NonZeroU64::new(staged_epoch_u64) else {
+        return Ok(AuthorityOpenState::RecoveryRequired);
+    };
+    if staged_epoch.get() != active_snapshot.minimum_epoch.get() + 1 {
+        return Ok(AuthorityOpenState::RecoveryRequired);
+    }
+    let Ok(expected_pred) = i64::try_from(active_snapshot.minimum_epoch.get()) else {
+        return Ok(AuthorityOpenState::RecoveryRequired);
+    };
+    if predecessor_epoch != &Some(expected_pred) {
+        return Ok(AuthorityOpenState::RecoveryRequired);
+    }
+    let Some(rotation_kind_str) = rotation_kind_str else {
+        return Ok(AuthorityOpenState::RecoveryRequired);
+    };
+    let Ok(rotation_kind) = StagedRotationKind::parse(rotation_kind_str) else {
+        return Ok(AuthorityOpenState::RecoveryRequired);
+    };
+    let Some(receipt_id_bytes) = receipt_id_bytes else {
+        return Ok(AuthorityOpenState::RecoveryRequired);
+    };
+    let Ok(receipt_id) = uuid_from_blob_sql::<AuthorizationReceiptId>(receipt_id_bytes.clone())
+    else {
+        return Ok(AuthorityOpenState::RecoveryRequired);
+    };
+
+    let Ok(staged_bundle) = digest_from_blob_sql(staged_bundle_bytes.clone()) else {
+        return Ok(AuthorityOpenState::RecoveryRequired);
+    };
+    let Ok(staged_owner_key_id) = digest_from_blob_sql(staged_owner_key_id_bytes.clone()) else {
+        return Ok(AuthorityOpenState::RecoveryRequired);
+    };
+    let Ok(staged_recovery_key_id) = digest_from_blob_sql(staged_recovery_key_id_bytes.clone())
+    else {
+        return Ok(AuthorityOpenState::RecoveryRequired);
+    };
+
+    let mut key_stmt = connection
+        .prepare(
+            "SELECT key_id, role, permission_mask, public_key
+             FROM authority_keys WHERE state = 'staged'",
+        )
+        .map_err(|_| store_read_error())?;
+    let key_rows = key_stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, Vec<u8>>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, Vec<u8>>(3)?,
+            ))
+        })
+        .map_err(|_| store_read_error())?;
+    let staged_keys: Vec<_> = key_rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| store_read_error())?;
+
+    let (staged_owner_pubkey, staged_recovery_pubkey) = match rotation_kind {
+        StagedRotationKind::OwnerRotate => {
+            if staged_keys.len() != 1
+                || owner_proof_bytes.is_none()
+                || recovery_proof_bytes.is_some()
+            {
+                return Ok(AuthorityOpenState::RecoveryRequired);
+            }
+            let (kid, role, mask, pkey) = &staged_keys[0];
+            if kid != staged_owner_key_id.as_bytes() || role != "owner" || *mask != 7 {
+                return Ok(AuthorityOpenState::RecoveryRequired);
+            }
+            let Ok(owner_pk) = OwnerPublicKey::try_from(pkey.as_slice()) else {
+                return Ok(AuthorityOpenState::RecoveryRequired);
+            };
+            (owner_pk, active_snapshot.recovery_public_key.clone())
+        }
+        StagedRotationKind::RecoveryRotate => {
+            if staged_keys.len() != 1
+                || owner_proof_bytes.is_some()
+                || recovery_proof_bytes.is_none()
+            {
+                return Ok(AuthorityOpenState::RecoveryRequired);
+            }
+            let (kid, role, mask, pkey) = &staged_keys[0];
+            if kid != staged_recovery_key_id.as_bytes() || role != "recovery" || *mask != 8 {
+                return Ok(AuthorityOpenState::RecoveryRequired);
+            }
+            let Ok(rec_pk) = OwnerPublicKey::try_from(pkey.as_slice()) else {
+                return Ok(AuthorityOpenState::RecoveryRequired);
+            };
+            (active_snapshot.owner_public_key.clone(), rec_pk)
+        }
+        StagedRotationKind::OwnerRecover => {
+            if staged_keys.len() != 2
+                || owner_proof_bytes.is_none()
+                || recovery_proof_bytes.is_none()
+            {
+                return Ok(AuthorityOpenState::RecoveryRequired);
+            }
+            let mut owner_pk = None;
+            let mut rec_pk = None;
+            for (kid, role, mask, pkey) in &staged_keys {
+                if role == "owner" && *mask == 7 && kid == staged_owner_key_id.as_bytes() {
+                    owner_pk = OwnerPublicKey::try_from(pkey.as_slice()).ok();
+                } else if role == "recovery"
+                    && *mask == 8
+                    && kid == staged_recovery_key_id.as_bytes()
+                {
+                    rec_pk = OwnerPublicKey::try_from(pkey.as_slice()).ok();
+                }
+            }
+            let (Some(opk), Some(rpk)) = (owner_pk, rec_pk) else {
+                return Ok(AuthorityOpenState::RecoveryRequired);
+            };
+            (opk, rpk)
+        }
+    };
+
+    if let Some(proof) = owner_proof_bytes {
+        if proof.len() != 64 {
+            return Ok(AuthorityOpenState::RecoveryRequired);
+        }
+        let mut proof_arr = [0u8; 64];
+        proof_arr.copy_from_slice(proof);
+        let transcript = trust_key_pop_transcript(
+            &active_snapshot.realm_id,
+            &active_snapshot.journal_id,
+            active_snapshot.minimum_epoch,
+            staged_epoch,
+            OwnerKeyRole::Owner,
+            7,
+            &staged_owner_key_id,
+            &staged_owner_pubkey,
+            &staged_bundle,
+            &receipt_id,
+        );
+        if verify_pop_signature(&staged_owner_pubkey, &transcript, &proof_arr).is_err() {
+            return Ok(AuthorityOpenState::RecoveryRequired);
+        }
+    }
+    if let Some(proof) = recovery_proof_bytes {
+        if proof.len() != 64 {
+            return Ok(AuthorityOpenState::RecoveryRequired);
+        }
+        let mut proof_arr = [0u8; 64];
+        proof_arr.copy_from_slice(proof);
+        let transcript = trust_key_pop_transcript(
+            &active_snapshot.realm_id,
+            &active_snapshot.journal_id,
+            active_snapshot.minimum_epoch,
+            staged_epoch,
+            OwnerKeyRole::Recovery,
+            8,
+            &staged_recovery_key_id,
+            &staged_recovery_pubkey,
+            &staged_bundle,
+            &receipt_id,
+        );
+        if verify_pop_signature(&staged_recovery_pubkey, &transcript, &proof_arr).is_err() {
+            return Ok(AuthorityOpenState::RecoveryRequired);
+        }
+    }
+
+    let AnchorPresence::Present(ref anchor) = context.anchor else {
+        return Ok(AuthorityOpenState::RecoveryRequired);
+    };
+    if anchor.realm_id != active_snapshot.realm_id
+        || anchor.journal_id != active_snapshot.journal_id
+        || anchor.journal_location_sha256 != context.journal_location_sha256
+        || anchor.minimum_epoch != staged_epoch
+        || anchor.trust_bundle_sha256 != staged_bundle
+        || anchor.owner_key_id != staged_owner_key_id
+        || anchor.owner_public_key != staged_owner_pubkey
+        || anchor.recovery_key_id != staged_recovery_key_id
+        || anchor.recovery_public_key != staged_recovery_pubkey
+        || anchor.state != AuthorityAnchorState::Normal
+    {
+        return Ok(AuthorityOpenState::RecoveryRequired);
+    }
+
+    Ok(AuthorityOpenState::StagedFinalizeRequired(StagedSnapshot {
+        active: active_snapshot.clone(),
+        staged_epoch,
+        staged_bundle_sha256: staged_bundle,
+        staged_owner_key_id,
+        staged_owner_public_key: staged_owner_pubkey,
+        staged_recovery_key_id,
+        staged_recovery_public_key: staged_recovery_pubkey,
+        rotation_kind,
+    }))
 }
 
 fn classify_database(connection: &Connection) -> Result<DatabaseClass, MailError> {
@@ -9308,22 +10456,7 @@ fn validate_stored_receipt(
 #[allow(clippy::too_many_lines)]
 fn validate_registry_history(connection: &Connection) -> Result<(), MailError> {
     record_validation_query(ValidationQueryKind::RegistryStream);
-    let (
-        grant_count,
-        store_count,
-        version_count,
-        credential_count,
-        account_version_count,
-        account_count,
-        transition_count,
-        committed_count,
-        account_version_transition_count,
-        credential_transition_count,
-        create_count,
-        unattached_cleanup_count,
-        claimed_cleanup_count,
-        effect_claim_count,
-    ) = connection
+    let counts = connection
         .query_row(
             "SELECT
                 (SELECT COUNT(*) FROM grant_uses),
@@ -9346,7 +10479,8 @@ fn validate_registry_history(connection: &Connection) -> Result<(), MailError> {
                 (SELECT COUNT(*) FROM credential_cleanup WHERE transition_id IS NULL),
                 (SELECT COUNT(*) FROM credential_cleanup
                  WHERE state IN ('claimed','deleted')),
-                (SELECT COUNT(*) FROM effect_claims)",
+                (SELECT COUNT(*) FROM effect_claims),
+                (SELECT COUNT(*) FROM trust_epochs WHERE predecessor_epoch IS NOT NULL)",
             [],
             |row| {
                 Ok((
@@ -9364,11 +10498,34 @@ fn validate_registry_history(connection: &Connection) -> Result<(), MailError> {
                     row.get::<_, i64>(11)?,
                     row.get::<_, i64>(12)?,
                     row.get::<_, i64>(13)?,
+                    row.get::<_, i64>(14)?,
                 ))
             },
         )
         .map_err(|_| store_read_error())?;
-    if grant_count != store_count + transition_count + claimed_cleanup_count + effect_claim_count
+    let (
+        grant_count,
+        store_count,
+        version_count,
+        credential_count,
+        account_version_count,
+        account_count,
+        transition_count,
+        committed_count,
+        account_version_transition_count,
+        credential_transition_count,
+        create_count,
+        unattached_cleanup_count,
+        claimed_cleanup_count,
+        effect_claim_count,
+        epoch_transition_count,
+    ) = counts;
+    if grant_count
+        != store_count
+            + transition_count
+            + claimed_cleanup_count
+            + effect_claim_count
+            + epoch_transition_count
         || credential_count != credential_transition_count
         || account_count != create_count
         || version_count != store_count + committed_count
@@ -9485,6 +10642,12 @@ fn validate_stored_grant(connection: &Connection, grant: &StoredGrantUse) -> Res
                     | SensitiveAction::AmbiguousClose,
                 TargetKind::Operation,
             )
+            | (
+                SensitiveAction::OwnerRotate
+                    | SensitiveAction::RecoveryRotate
+                    | SensitiveAction::OwnerRecover,
+                TargetKind::TrustEpoch,
+            )
     ) || !valid_target_shape(grant.target_kind, &grant.target_id)
         || grant.use_receipt != grant_use_transcript_from_row(grant)
         || grant.use_sha256 != Sha256Digest::digest(&grant.use_receipt)
@@ -9504,6 +10667,24 @@ fn validate_stored_grant(connection: &Connection, grant: &StoredGrantUse) -> Res
         || grant.used_at > receipt.expires_at
     {
         return Err(recovery_error());
+    }
+    if matches!(
+        grant.action,
+        SensitiveAction::OwnerRotate
+            | SensitiveAction::RecoveryRotate
+            | SensitiveAction::OwnerRecover
+    ) {
+        let exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM trust_epochs WHERE transition_receipt_id=?1",
+                params![grant.receipt_id.as_bytes()],
+                |r| r.get(0),
+            )
+            .map_err(|_| store_read_error())?;
+        if exists != 1 {
+            return Err(recovery_error());
+        }
+        return Ok(());
     }
     if matches!(
         grant.action,
@@ -10756,7 +11937,9 @@ fn validate_events(
             )?,
             sequence if sequence > expected_prefix => match row.entity_kind {
                 8 => validate_challenge_event(connection, &row, last_observed_at)?,
-                4 | 6 | 7 | 10 | 11 | 12 | 13 => validate_registry_event_row(connection, &row)?,
+                2 | 3 | 4 | 6 | 7 | 10 | 11 | 12 | 13 => {
+                    validate_registry_event_row(connection, &row)?;
+                }
                 _ => return Err(recovery_error()),
             },
             _ => return Err(recovery_error()),
@@ -10839,6 +12022,14 @@ fn validate_challenge_event(
         }
         Err(error) => return Err(error),
     };
+    if row.event_code == 6 {
+        if challenge.state != "expired"
+            || row.detail_sha256.as_slice() != Sha256::digest(&row.detail).as_slice()
+        {
+            return Err(recovery_error());
+        }
+        return Ok(());
+    }
     let receipt = load_receipt_for_challenge(connection, challenge.challenge_id)?;
     let (event, source, occurred_at) = match row.event_code {
         3 => (ChallengeEvent::Created, 1_i64, challenge.issued_at),
@@ -11239,6 +12430,11 @@ fn validate_registry_event_row(
                 || row.detail != expected
                 || row.detail_sha256.as_slice() != Sha256::digest(&expected).as_slice()
             {
+                return Err(recovery_error());
+            }
+        }
+        (3, 21 | 22 | 23 | 24 | 26, _) | (2, 25, _) => {
+            if row.detail_sha256.as_slice() != Sha256::digest(&row.detail).as_slice() {
                 return Err(recovery_error());
             }
         }
@@ -12192,6 +13388,52 @@ fn encode_transcript(domain: &[u8], fields: &[&[u8]]) -> Vec<u8> {
     output
 }
 
+#[allow(clippy::too_many_arguments)]
+fn trust_key_pop_transcript(
+    realm_id: &OwnerRealmId,
+    journal_id: &JournalId,
+    old_epoch: NonZeroU64,
+    next_epoch: NonZeroU64,
+    role: OwnerKeyRole,
+    permission_mask: u32,
+    proposed_key_id: &Sha256Digest,
+    proposed_public_key: &OwnerPublicKey,
+    next_bundle_digest: &Sha256Digest,
+    transition_receipt_id: &AuthorizationReceiptId,
+) -> Vec<u8> {
+    let old_epoch_bytes = old_epoch.get().to_be_bytes();
+    let next_epoch_bytes = next_epoch.get().to_be_bytes();
+    let role_byte = [match role {
+        OwnerKeyRole::Owner => 1_u8,
+        OwnerKeyRole::Recovery => 2_u8,
+    }];
+    let mask_bytes = permission_mask.to_be_bytes();
+    encode_transcript(
+        TRUST_KEY_POP_DOMAIN,
+        &[
+            realm_id.as_bytes(),
+            journal_id.as_bytes(),
+            &old_epoch_bytes,
+            &next_epoch_bytes,
+            &role_byte,
+            &mask_bytes,
+            proposed_key_id.as_bytes(),
+            proposed_public_key.as_bytes(),
+            next_bundle_digest.as_bytes(),
+            transition_receipt_id.as_bytes(),
+        ],
+    )
+}
+
+fn verify_pop_signature(
+    public_key: &OwnerPublicKey,
+    transcript: &[u8],
+    proof: &[u8; 64],
+) -> Result<(), MailError> {
+    verify_authorization_signature(public_key.as_bytes(), transcript, proof)
+        .map_err(|_| authorization_context_stale_error())
+}
+
 fn validate_bootstrap_input(input: &BootstrapInput) -> Result<(), MailError> {
     if input.owner_public_key == input.recovery_public_key {
         return Err(MailError::stable(
@@ -12249,7 +13491,9 @@ fn retry_existing_bootstrap(
         AuthorityOpenState::Ready(snapshot) => {
             loaded.bootstrap_state == "ready" && snapshot == &loaded.snapshot
         }
-        AuthorityOpenState::RecoveryRequired => false,
+        AuthorityOpenState::StagedFinalizeRequired(_) | AuthorityOpenState::RecoveryRequired => {
+            false
+        }
     };
     if !context_matches
         || !opened_state_matches
