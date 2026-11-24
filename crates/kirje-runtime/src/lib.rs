@@ -388,6 +388,182 @@ impl SecretStore for KeyringSecretStore {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct CredentialsDocument {
+    version: u16,
+    #[serde(default)]
+    credentials: std::collections::BTreeMap<String, String>,
+}
+
+/// Private, local-first credentials store protected by 0600 POSIX permissions.
+/// Avoids macOS Keychain access-control prompts and operates without D-Bus in headless environments.
+#[derive(Clone, Debug)]
+pub struct FileSecretStore {
+    path: PathBuf,
+}
+
+impl FileSecretStore {
+    #[must_use]
+    pub fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    fn read(&self) -> Result<(CredentialsDocument, Option<FileObjectIdentity>), MailError> {
+        let parent = match open_parent(self.path.as_path()) {
+            Ok(parent) => parent,
+            Err(BoundaryError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok((
+                    CredentialsDocument {
+                        version: 1,
+                        credentials: std::collections::BTreeMap::new(),
+                    },
+                    None,
+                ));
+            }
+            Err(_) => return Err(secret_store_error()),
+        };
+        match open_existing_regular(&parent) {
+            Ok(mut opened) => {
+                let identity = opened.identity();
+                let bytes = read_bounded(&mut opened, MAX_CONFIG_BYTES)
+                    .map_err(|_| secret_store_error())?;
+                let source = std::str::from_utf8(&bytes).map_err(|_| secret_store_error())?;
+                let doc: CredentialsDocument =
+                    toml::from_str(source).map_err(|_| secret_store_error())?;
+                Ok((doc, Some(identity)))
+            }
+            Err(BoundaryError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => Ok((
+                CredentialsDocument {
+                    version: 1,
+                    credentials: std::collections::BTreeMap::new(),
+                },
+                None,
+            )),
+            Err(_) => Err(secret_store_error()),
+        }
+    }
+
+    fn save(
+        &self,
+        doc: &CredentialsDocument,
+        identity: Option<FileObjectIdentity>,
+    ) -> Result<(), MailError> {
+        let parent = open_parent(self.path.as_path()).map_err(|_| secret_store_error())?;
+        let serialized = toml::to_string(doc).map_err(|_| secret_store_error())?;
+        let expectation = match identity {
+            Some(id) => ReplaceExpectation::Matches(id),
+            None => ReplaceExpectation::Missing,
+        };
+        replace_private(&parent, expectation, serialized.as_bytes())
+            .map_err(|_| secret_store_error())?;
+        Ok(())
+    }
+}
+
+impl SecretStore for FileSecretStore {
+    fn set(&self, account_id: &str, secret: &SecretString) -> Result<(), MailError> {
+        let (mut doc, identity) = self.read()?;
+        doc.credentials
+            .insert(account_id.to_owned(), secret.expose_secret().to_owned());
+        self.save(&doc, identity)
+    }
+
+    fn get(&self, account_id: &str) -> Result<SecretString, MailError> {
+        let (doc, _) = self.read()?;
+        doc.credentials
+            .get(account_id)
+            .map(|secret| SecretString::from(secret.clone()))
+            .ok_or_else(|| {
+                MailError::new(
+                    MailErrorCode::SecretMissing,
+                    "no credential is stored for this account",
+                    false,
+                )
+            })
+    }
+
+    fn contains(&self, account_id: &str) -> Result<bool, MailError> {
+        let (doc, _) = self.read()?;
+        Ok(doc.credentials.contains_key(account_id))
+    }
+
+    fn delete(&self, account_id: &str) -> Result<(), MailError> {
+        let (mut doc, identity) = self.read()?;
+        if doc.credentials.remove(account_id).is_some() {
+            self.save(&doc, identity)
+        } else {
+            Err(MailError::new(
+                MailErrorCode::SecretMissing,
+                "no credential is stored for this account",
+                false,
+            ))
+        }
+    }
+}
+
+/// Composite store providing zero-prompt local private credentials first,
+/// with fallback to the OS keyring for backward compatibility.
+#[derive(Clone, Debug)]
+pub struct CompositeSecretStore {
+    file_store: FileSecretStore,
+    keyring_store: KeyringSecretStore,
+}
+
+impl CompositeSecretStore {
+    #[must_use]
+    pub fn new(credentials_path: PathBuf) -> Self {
+        Self {
+            file_store: FileSecretStore::new(credentials_path),
+            keyring_store: KeyringSecretStore,
+        }
+    }
+
+    #[must_use]
+    pub fn available(&self) -> bool {
+        true
+    }
+}
+
+impl SecretStore for CompositeSecretStore {
+    fn set(&self, account_id: &str, secret: &SecretString) -> Result<(), MailError> {
+        self.file_store.set(account_id, secret)?;
+        // Best-effort sync to OS keyring; ignore error so it never blocks or fails
+        let _ = self.keyring_store.set(account_id, secret);
+        Ok(())
+    }
+
+    fn get(&self, account_id: &str) -> Result<SecretString, MailError> {
+        // Priority 1: local private file store (silent, 0600 permission, zero OS keychain prompt)
+        if let Ok(secret) = self.file_store.get(account_id) {
+            return Ok(secret);
+        }
+        // Priority 2: fallback to OS keyring
+        self.keyring_store.get(account_id)
+    }
+
+    fn contains(&self, account_id: &str) -> Result<bool, MailError> {
+        if self.file_store.contains(account_id).unwrap_or(false) {
+            return Ok(true);
+        }
+        self.keyring_store.contains(account_id)
+    }
+
+    fn delete(&self, account_id: &str) -> Result<(), MailError> {
+        let res_file = self.file_store.delete(account_id);
+        let res_keyring = self.keyring_store.delete(account_id);
+        if res_file.is_ok() || res_keyring.is_ok() {
+            Ok(())
+        } else {
+            Err(MailError::new(
+                MailErrorCode::SecretMissing,
+                "no credential is stored for this account",
+                false,
+            ))
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 pub struct AccountStatus {
     pub account: MailAccountConfig,
@@ -446,9 +622,13 @@ impl KirjeRuntime {
         let index_path = resolve_index_path(custom_config.then_some(path.as_path()), index_path)?;
         let outbox_path =
             resolve_outbox_path(custom_config.then_some(path.as_path()), outbox_path)?;
+        let credentials_path = path.parent().map_or_else(
+            || PathBuf::from("credentials.toml"),
+            |parent| parent.join("credentials.toml"),
+        );
         Ok(Self::with_services_and_mutator(
             Arc::new(TomlAccountRepository::new(path)),
-            Arc::new(KeyringSecretStore),
+            Arc::new(CompositeSecretStore::new(credentials_path)),
             Arc::new(kirje_protocol::PimalayaImapReader),
             Arc::new(kirje_protocol::PimalayaImapReader),
             Arc::new(kirje_store::SqliteMessageIndex::open(index_path)?),
@@ -2454,5 +2634,44 @@ mod tests {
             result.last_error.expect("last error").code,
             MailErrorCode::UnsupportedCapability
         );
+    }
+
+    #[test]
+    fn file_secret_store_round_trips_with_private_permissions() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let creds_path = directory.path().join("credentials.toml");
+        let store = FileSecretStore::new(creds_path.clone());
+
+        assert!(!store.contains("demo").expect("contains"));
+        assert!(matches!(
+            store.get("demo"),
+            Err(MailError {
+                code: MailErrorCode::SecretMissing,
+                ..
+            })
+        ));
+
+        let secret = SecretString::from("safe_auth_token_123");
+        store.set("demo", &secret).expect("set secret");
+
+        assert!(store.contains("demo").expect("contains"));
+        assert_eq!(
+            store.get("demo").expect("get secret").expose_secret(),
+            "safe_auth_token_123"
+        );
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode = std::fs::metadata(&creds_path)
+                .expect("metadata")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600, "credentials file must be private 0600");
+        }
+
+        store.delete("demo").expect("delete secret");
+        assert!(!store.contains("demo").expect("contains"));
     }
 }
