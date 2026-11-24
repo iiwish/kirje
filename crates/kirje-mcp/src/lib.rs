@@ -754,21 +754,39 @@ mod tests {
     #[test]
     fn tool_router_exposes_governed_send_without_approval() {
         let tools = KirjeMcp::tool_router().list_all();
-        let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_ref()).collect();
-        assert!(names.contains(&"mailbox_list"));
-        assert!(names.contains(&"message_search"));
-        assert!(names.contains(&"message_read"));
-        assert!(names.contains(&"mailbox_sync"));
-        assert!(names.contains(&"index_status"));
-        assert!(names.contains(&"message_search_local"));
-        assert!(names.contains(&"attachment_read"));
-        assert!(names.contains(&"message_send_plan"));
-        assert!(names.contains(&"message_send_status"));
-        assert!(names.contains(&"message_send_apply"));
+        let mut names: Vec<&str> = tools.iter().map(|tool| tool.name.as_ref()).collect();
+        names.sort_unstable();
+
+        let expected_tools = [
+            "account_discover",
+            "account_status",
+            "attachment_read",
+            "draft_create",
+            "draft_discard",
+            "draft_list",
+            "draft_status",
+            "draft_update",
+            "index_status",
+            "mail_operation_apply",
+            "mail_operation_audit",
+            "mail_operation_list",
+            "mail_operation_plan",
+            "mail_operation_status",
+            "mailbox_list",
+            "mailbox_sync",
+            "message_read",
+            "message_search",
+            "message_search_local",
+            "message_send_apply",
+            "message_send_plan",
+            "message_send_plan_draft",
+            "message_send_status",
+            "message_thread",
+            "system_status",
+        ];
+
+        assert_eq!(names, expected_tools);
         assert!(!names.iter().any(|name| name.contains("approve")));
-        assert!(names.contains(&"draft_create"));
-        assert!(names.contains(&"mail_operation_plan"));
-        assert!(names.contains(&"mail_operation_apply"));
     }
 
     #[test]

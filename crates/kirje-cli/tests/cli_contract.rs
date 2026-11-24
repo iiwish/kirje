@@ -413,3 +413,54 @@ fn attachment_import_is_local_and_returns_a_bounded_summary() {
     assert_eq!(json["data"]["summary"]["text_preview"], "hello from a file");
     assert_eq!(json["data"]["untrusted"], true);
 }
+
+#[test]
+fn schema_command_matches_stable_contract_golden() {
+    let output = Command::cargo_bin("kirje")
+        .expect("kirje binary")
+        .args(["schema"])
+        .output()
+        .expect("schema");
+    assert!(output.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).expect("schema JSON");
+    assert_eq!(json["contract_version"], "2026-09-04.1");
+    assert_eq!(json["ok"], true);
+    assert_eq!(json["data"]["name"], "kirje");
+    assert_eq!(json["data"]["version"], env!("CARGO_PKG_VERSION"));
+
+    let commands = json["data"]["commands"].as_array().expect("commands array");
+    let names: Vec<&str> = commands
+        .iter()
+        .map(|cmd| cmd["name"].as_str().expect("name"))
+        .collect();
+
+    assert!(names.contains(&"schema"));
+    assert!(names.contains(&"doctor"));
+    assert!(names.contains(&"account discover <email>"));
+    assert!(names.contains(&"provider list|show <id-or-domain>"));
+    assert!(names.contains(&"account add|list|status|check"));
+    assert!(names.contains(&"secret set|delete <account-id>"));
+    assert!(names.contains(&"mailbox list"));
+    assert!(names.contains(&"message search|read"));
+    assert!(names.contains(&"message search-local"));
+    assert!(names.contains(&"sync run|status"));
+    assert!(names.contains(&"attachment import|read"));
+    assert!(names.contains(&"send plan|from-draft|show|list"));
+    assert!(names.contains(&"send approve <plan-id>"));
+    assert!(names.contains(&"send apply <plan-id>"));
+    assert!(names.contains(&"send reconcile <plan-id> --assertion <text>"));
+    assert!(names.contains(&"draft create|show|list|update|discard"));
+    assert!(names.contains(&"operation plan|show|list|audit"));
+    assert!(names.contains(&"operation approve|apply"));
+    assert!(names.contains(&"policy show|set|enable <account>"));
+    assert!(names.contains(&"mcp serve"));
+
+    let exit_codes = json["data"]["stable_exit_codes"]
+        .as_array()
+        .expect("exit codes");
+    let codes: Vec<i64> = exit_codes
+        .iter()
+        .map(|ec| ec["code"].as_i64().expect("code"))
+        .collect();
+    assert_eq!(codes, vec![0, 1, 2]);
+}

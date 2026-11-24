@@ -70,3 +70,10 @@ and permanent deletion fit behind these boundaries but are outside
 
 The project intentionally excludes React, Tauri, an embedded LLM, and a hosted
 mail relay from the core architecture.
+
+## Stable Contract and Compatibility
+
+For details on the 1.x version matrix, JSON schema stability, SQLite schema versions
+(`authority` v1, `index` v2, `outbox` v3), downgrade rejection, and backup/restore
+procedures, see [compatibility.md](file:///Users/iiwish/self/kirje/docs/compatibility.md).
+

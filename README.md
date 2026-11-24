@@ -7,11 +7,12 @@ email accounts. The project targets IMAP, SMTP, and JMAP across consumer,
 enterprise, and self-hosted providers without routing mailbox data through a
 Kirje cloud service.
 
-> Status: `v1.0.0-alpha.1` Security Alpha. Kirje provides bounded IMAP reads,
+> Status: `1.0.0` Release Candidate. Kirje provides bounded IMAP reads,
 > private local drafts, multipart SMTP sending, governed IMAP mailbox
-> operations, capability-anchored local input, and an auditable local operation
-> ledger. This is a prerelease; see [RELEASE_NOTES.md](RELEASE_NOTES.md) before
-> using it with an important mailbox.
+> operations, capability-anchored local input, two-phase policy enforcement,
+> deterministic thread graph reconstruction, and an auditable local operation
+> ledger with offline reconciliation. See [compatibility.md](docs/compatibility.md)
+> and [RELEASE_NOTES.md](RELEASE_NOTES.md) for the 1.x stable contract guarantees.
 
 ## Why Kirje
 
@@ -39,6 +40,8 @@ cargo build --release
 ./target/release/kirje account add personal agent@163.com --pretty
 ./target/release/kirje secret set personal
 ./target/release/kirje account check personal --pretty
+./target/release/kirje policy show personal --pretty
+./target/release/kirje policy enable personal --pretty
 ./target/release/kirje mailbox list --account personal --pretty
 ./target/release/kirje message search --account personal --mailbox INBOX --limit 10 --pretty
 ./target/release/kirje sync run --account personal --mailbox INBOX --pretty
@@ -46,6 +49,7 @@ cargo build --release
 ./target/release/kirje send plan --input ./send-request.json --pretty
 ./target/release/kirje send approve <plan-id> --pretty
 ./target/release/kirje send apply <plan-id> --pretty
+./target/release/kirje send reconcile <plan-id> --assertion "provider verified sent" --pretty
 ./target/release/kirje draft create --input ./draft.json --pretty
 ./target/release/kirje send from-draft <draft-id> --pretty
 ./target/release/kirje operation plan --input ./mail-operation.json --pretty
@@ -132,7 +136,8 @@ The core product invariants are:
 5. Unknown providers remain unknown; Kirje does not guess unsafe endpoints.
 6. Local operation never requires a Kirje account or Kirje-hosted relay.
 
-See [docs/architecture.md](docs/architecture.md) and
+See [docs/architecture.md](docs/architecture.md),
+[docs/compatibility.md](docs/compatibility.md), and
 [docs/security.md](docs/security.md) for the full technical boundary. Provider
 testing is documented in [docs/conformance.md](docs/conformance.md).
 Registry ownership and source policy are documented in
@@ -143,12 +148,15 @@ Registry ownership and source policy are documented in
 Kirje stores envelope metadata only. It does not persist message bodies,
 attachments, credentials, or raw MIME. The first sync imports the newest
 bounded window; later runs request UIDs above the stored cursor. Use `sync run
---refresh` to rebuild that window after flags or deletions change. Full archive
-backfill and background `IDLE` watching are outside the current scope. The
-private `outbox.sqlite3` database contains the unified operation ledger. Schema
-version 2 migrates legacy send rows transactionally and records operation
-events. Stale `applying` operations become `ambiguous`; Kirje never retries
-them automatically.
+--refresh` to rebuild that window after flags or deletions change. Historical
+backfill advances downward to index older messages, and disappearing messages
+are marked with soft tombstones.
+
+The private `outbox.sqlite3` database contains the unified operation ledger
+(schema version 3) with full transactional migration, atomic claim, crash
+recovery, `needs_attention` filing alerts, and operator reconciliation.
+Stale `applying` operations become `ambiguous`; Kirje never retries them
+automatically.
 
 ## Governed Send
 

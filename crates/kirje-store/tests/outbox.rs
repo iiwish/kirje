@@ -374,6 +374,20 @@ fn v1_send_plans_migrate_into_the_unified_ledger() {
     );
 }
 
+#[test]
+fn newer_schema_is_rejected_without_downgrade() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let path = directory.path().join("future.sqlite3");
+    let connection = Connection::open(&path).expect("sqlite");
+    connection
+        .pragma_update(None, "user_version", 99)
+        .expect("version");
+    drop(connection);
+
+    let error = SqliteOutbox::open(path).expect_err("reject future schema");
+    assert_eq!(error.code, MailErrorCode::StoreMigration);
+}
+
 #[cfg(unix)]
 #[test]
 fn outbox_files_are_private_and_symbolic_links_are_rejected() {
