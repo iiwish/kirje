@@ -1,3 +1,22 @@
+# Kirje v1.0.0-rc.2
+
+This is the second Release Candidate for Kirje 1.0.0, completing deep hardening,
+fault injection, crash recovery, and disaster recovery verification.
+
+Highlights of this Hardening Release Candidate:
+- **Comprehensive Crash and Fault Injection**: Full verification that uncertain
+  SMTP and IMAP remote operations transition to terminal `Ambiguous` states and
+  are never automatically replayed.
+- **Downgrade Rejection & Disaster Recovery**: Verified multi-database migration
+  paths (`authority`, `index`, `outbox`) with non-negotiable downgrade blocks and
+  documented offline backup/restore procedures.
+- **Rigorous Zero-Secret Audit**: Verified CLI, MCP, and error envelopes contain
+  strictly zero leaked credentials, tokens, or plaintext keys.
+- **Passing All Dependency & Security Gates**: `cargo deny check` completely clean
+  (zero advisories, bans, license violations, or untrusted sources).
+
+---
+
 # Kirje v1.0.0-rc.1
 
 This is the first Release Candidate for Kirje 1.0.0, finalizing the stable

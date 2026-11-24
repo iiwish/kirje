@@ -1815,6 +1815,7 @@ mod tests {
     #[derive(Default)]
     struct RecordingMutator {
         calls: AtomicUsize,
+        ambiguous: bool,
     }
 
     impl MailboxMutator for RecordingMutator {
@@ -1826,16 +1827,24 @@ mod tests {
             operation: &MailboxOperationRequest,
         ) -> Result<MailboxOperationReceipt, RemoteAttemptError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(MailboxOperationReceipt {
-                operation_id: operation_id.to_owned(),
-                kind: operation.kind,
-                account_id: operation.account_id.clone(),
-                reference: operation.reference.clone(),
-                destination: operation.destination.clone(),
-                changed: true,
-                applied_at: Utc::now(),
-                untrusted: true,
-            })
+            if self.ambiguous {
+                Err(RemoteAttemptError::after_mutation(MailError::new(
+                    MailErrorCode::Network,
+                    "unknown IMAP mutation result",
+                    true,
+                )))
+            } else {
+                Ok(MailboxOperationReceipt {
+                    operation_id: operation_id.to_owned(),
+                    kind: operation.kind,
+                    account_id: operation.account_id.clone(),
+                    reference: operation.reference.clone(),
+                    destination: operation.destination.clone(),
+                    changed: true,
+                    applied_at: Utc::now(),
+                    untrusted: true,
+                })
+            }
         }
     }
 
@@ -2009,6 +2018,46 @@ mod tests {
         runtime.approve_operation(&operation.id).expect("approve");
         let applied = runtime.apply_mail_operation(&operation.id).expect("apply");
         assert_eq!(applied.status, kirje_core::OperationStatus::Succeeded);
+        assert_eq!(mutator.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            runtime
+                .apply_mail_operation(&operation.id)
+                .unwrap_err()
+                .code,
+            MailErrorCode::SendPlanState
+        );
+    }
+
+    #[test]
+    fn failure_after_imap_invocation_becomes_ambiguous_and_never_replayed() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let secrets = Arc::new(MemorySecrets::default());
+        secrets
+            .set("work", &SecretString::from("secret"))
+            .expect("secret");
+        let mutator = Arc::new(RecordingMutator {
+            calls: AtomicUsize::new(0),
+            ambiguous: true,
+        });
+        let runtime = mailbox_runtime(&directory, secrets, mutator.clone());
+
+        let operation = runtime
+            .plan_mail_operation(MailboxOperationRequest {
+                account_id: "work".to_owned(),
+                kind: MailOperationKind::Move,
+                reference: MessageReference {
+                    account_id: "work".to_owned(),
+                    mailbox: "INBOX".to_owned(),
+                    uid_validity: Some(7),
+                    uid: 42,
+                },
+                value: None,
+                destination: Some("Archive".to_owned()),
+            })
+            .expect("operation");
+        runtime.approve_operation(&operation.id).expect("approve");
+        let applied = runtime.apply_mail_operation(&operation.id).expect("apply");
+        assert_eq!(applied.status, kirje_core::OperationStatus::Ambiguous);
         assert_eq!(mutator.calls.load(Ordering::SeqCst), 1);
         assert_eq!(
             runtime
