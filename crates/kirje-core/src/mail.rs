@@ -306,12 +306,22 @@ pub struct MessagePage {
     pub untrusted: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncDirection {
+    #[default]
+    Forward,
+    Backfill,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SyncCursor {
     #[schemars(range(min = 1))]
     pub uid_validity: u32,
     pub highest_uid: Option<u32>,
+    #[serde(default)]
+    pub lowest_uid: Option<u32>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -320,6 +330,8 @@ pub struct MailboxSyncRequest {
     pub account_id: String,
     pub mailbox: String,
     pub cursor: Option<SyncCursor>,
+    #[serde(default)]
+    pub direction: SyncDirection,
     #[serde(default = "default_sync_limit")]
     #[schemars(range(min = 1, max = 500))]
     pub limit: u16,
@@ -353,9 +365,15 @@ pub struct MailboxSyncBatch {
     #[schemars(range(min = 1))]
     pub uid_validity: u32,
     pub messages: Vec<MessageEnvelope>,
+    #[serde(default)]
+    pub tombstones: Vec<u32>,
+    #[serde(default)]
+    pub lowest_uid: Option<u32>,
     pub remote_total: Option<u64>,
     pub has_more: bool,
     pub reset_required: bool,
+    #[serde(default)]
+    pub backfill_complete: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -365,8 +383,12 @@ pub struct MailboxSyncState {
     #[schemars(range(min = 1))]
     pub uid_validity: u32,
     pub highest_uid: Option<u32>,
+    #[serde(default)]
+    pub lowest_uid: Option<u32>,
     pub indexed_messages: u64,
     pub initial_window_complete: bool,
+    #[serde(default)]
+    pub backfill_complete: bool,
     pub remote_total: Option<u64>,
     pub last_synced_at: DateTime<Utc>,
 }
@@ -1050,6 +1072,7 @@ mod tests {
             account_id: "personal".to_owned(),
             mailbox: "INBOX".to_owned(),
             cursor: None,
+            direction: SyncDirection::Forward,
             limit: MAX_SYNC_LIMIT + 1,
         };
         assert_eq!(

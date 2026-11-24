@@ -237,6 +237,7 @@ impl MailboxReader for PimalayaImapReader {
         parse_message(&read.reference, &raw, read.max_body_chars)
     }
 
+    #[allow(clippy::too_many_lines)]
     fn sync_mailbox(
         &self,
         account: &MailAccountConfig,
@@ -265,19 +266,75 @@ impl MailboxReader for PimalayaImapReader {
             .as_ref()
             .filter(|_| !reset_required)
             .and_then(|cursor| cursor.highest_uid);
+        let lowest_uid = request
+            .cursor
+            .as_ref()
+            .filter(|_| !reset_required)
+            .and_then(|cursor| cursor.lowest_uid);
 
-        let mut uids = if highest_uid == Some(u32::MAX) {
-            Vec::new()
-        } else {
-            client
-                .search(
-                    sync_search_keys(highest_uid)?,
-                    ImapMessageSearchOptions { uid: true },
-                )
-                .map_err(|error| classify_error(&error))?
-        };
-        let incremental = highest_uid.is_some();
+        let (mut uids, incremental, initial_backfill_complete, is_backfill) =
+            match request.direction {
+                kirje_core::SyncDirection::Backfill => match lowest_uid {
+                    Some(1) => (Vec::new(), false, true, true),
+                    Some(lowest) => {
+                        let found = client
+                            .search(
+                                backfill_search_keys(lowest)?,
+                                ImapMessageSearchOptions { uid: true },
+                            )
+                            .map_err(|error| classify_error(&error))?;
+                        let is_empty = found.is_empty();
+                        (found, false, is_empty, true)
+                    }
+                    None => {
+                        if let Some(highest) = highest_uid {
+                            if highest <= 1 {
+                                (Vec::new(), false, true, true)
+                            } else {
+                                let found = client
+                                    .search(
+                                        backfill_search_keys(highest)?,
+                                        ImapMessageSearchOptions { uid: true },
+                                    )
+                                    .map_err(|error| classify_error(&error))?;
+                                let is_empty = found.is_empty();
+                                (found, false, is_empty, true)
+                            }
+                        } else {
+                            let found = client
+                                .search(
+                                    sync_search_keys(None)?,
+                                    ImapMessageSearchOptions { uid: true },
+                                )
+                                .map_err(|error| classify_error(&error))?;
+                            (found, false, false, false)
+                        }
+                    }
+                },
+                kirje_core::SyncDirection::Forward => {
+                    if highest_uid == Some(u32::MAX) {
+                        (Vec::new(), true, false, false)
+                    } else {
+                        let found = client
+                            .search(
+                                sync_search_keys(highest_uid)?,
+                                ImapMessageSearchOptions { uid: true },
+                            )
+                            .map_err(|error| classify_error(&error))?;
+                        (found, highest_uid.is_some(), false, false)
+                    }
+                }
+            };
+
         let has_more = select_sync_uids(&mut uids, request.limit, incremental);
+        let backfill_complete = if is_backfill {
+            initial_backfill_complete || !has_more || uids.last().is_some_and(|uid| uid.get() == 1)
+        } else if highest_uid.is_none() {
+            !has_more
+        } else {
+            false
+        };
+
         let messages = if uids.is_empty() {
             Vec::new()
         } else {
@@ -311,14 +368,23 @@ impl MailboxReader for PimalayaImapReader {
                 .collect()
         };
 
+        let batch_lowest = messages
+            .iter()
+            .map(|message| message.reference.uid)
+            .min()
+            .or(lowest_uid);
+
         Ok(MailboxSyncBatch {
             account_id: request.account_id.clone(),
             mailbox: request.mailbox.clone(),
             uid_validity,
             messages,
+            tombstones: Vec::new(),
+            lowest_uid: batch_lowest,
             remote_total: selected.exists.map(u64::from),
             has_more,
             reset_required,
+            backfill_complete,
         })
     }
 
@@ -764,6 +830,14 @@ fn sync_search_keys(highest_uid: Option<u32>) -> Result<Vec1<SearchKey<'static>>
         }
         None => SearchKey::All,
     };
+    Ok(Vec1::from(key))
+}
+
+fn backfill_search_keys(lowest_uid: u32) -> Result<Vec1<SearchKey<'static>>, MailError> {
+    let end = NonZeroU32::new(lowest_uid.saturating_sub(1))
+        .ok_or_else(|| MailError::invalid_input("sync cursor cannot backfill below UID 1"))?;
+    let start = NonZeroU32::new(1).expect("1 is non-zero");
+    let key = SearchKey::Uid(SequenceSet::from(start..=end));
     Ok(Vec1::from(key))
 }
 
@@ -1288,6 +1362,42 @@ mod tests {
         assert_eq!(
             ids.iter().map(|uid| uid.get()).collect::<Vec<_>>(),
             vec![42, 43]
+        );
+    }
+
+    #[test]
+    fn backfill_sync_search_round_trips_a_bounded_uid_range_transcript() {
+        let mut coroutine = ImapMessageSearch::new(
+            backfill_search_keys(42).expect("backfill keys"),
+            ImapMessageSearchOptions { uid: true },
+        );
+        let mut fragmentizer = Fragmentizer::new(1024);
+        let transcript = b"* SEARCH 10 20 30\r\nA001 OK SEARCH completed\r\n";
+        let mut input = None;
+        let mut fed = false;
+        let mut command = Vec::new();
+
+        let ids = loop {
+            match coroutine.resume(&mut fragmentizer, input.take()) {
+                ImapCoroutineState::Yielded(ImapYield::WantsWrite(bytes)) => {
+                    command.extend(bytes);
+                }
+                ImapCoroutineState::Yielded(ImapYield::WantsRead) => {
+                    input = Some(if fed { b"" } else { transcript });
+                    fed = true;
+                }
+                ImapCoroutineState::Complete(Ok(ids)) => break ids,
+                ImapCoroutineState::Complete(Err(error)) => {
+                    panic!("transcript failed: {error}")
+                }
+            }
+        };
+
+        let wire = String::from_utf8(command).expect("ASCII command");
+        assert!(wire.contains("UID SEARCH UID 1:41"));
+        assert_eq!(
+            ids.iter().map(|uid| uid.get()).collect::<Vec<_>>(),
+            vec![10, 20, 30]
         );
     }
 

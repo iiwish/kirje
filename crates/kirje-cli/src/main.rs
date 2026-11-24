@@ -241,6 +241,9 @@ enum SyncCommand {
         /// Rebuild the indexed newest window for this mailbox.
         #[arg(long)]
         refresh: bool,
+        /// Backfill older historical messages instead of advancing forward.
+        #[arg(long)]
+        backfill: bool,
     },
     /// Inspect local mailbox coverage without network or credentials.
     Status {
@@ -733,7 +736,18 @@ fn handle_sync(cli: &Cli, command: &SyncCommand) -> Result<Value, MailError> {
             mailbox,
             limit,
             refresh,
-        } => json_value(runtime(cli)?.sync_mailbox(account, mailbox, *limit, *refresh)?),
+            backfill,
+        } => {
+            let direction = if *backfill {
+                kirje_core::SyncDirection::Backfill
+            } else {
+                kirje_core::SyncDirection::Forward
+            };
+            json_value(
+                runtime(cli)?
+                    .sync_mailbox_directed(account, mailbox, *limit, direction, *refresh)?,
+            )
+        }
         SyncCommand::Status { account, mailbox } => {
             json_value(runtime(cli)?.index_status(account, mailbox)?)
         }

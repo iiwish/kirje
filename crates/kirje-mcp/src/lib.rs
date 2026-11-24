@@ -52,6 +52,9 @@ pub struct MailboxSyncParams {
     /// Rebuild the newest indexed window instead of using the stored cursor.
     #[serde(default)]
     pub refresh: bool,
+    /// Sync direction: forward (newer messages) or backfill (older historical messages).
+    #[serde(default)]
+    pub direction: kirje_core::SyncDirection,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -267,7 +270,13 @@ impl KirjeMcp {
         let runtime = self.runtime()?;
         let limit = params.limit.unwrap_or(kirje_core::DEFAULT_SYNC_LIMIT);
         run_blocking(move || {
-            runtime.sync_mailbox(&params.account_id, &params.mailbox, limit, params.refresh)
+            runtime.sync_mailbox_directed(
+                &params.account_id,
+                &params.mailbox,
+                limit,
+                params.direction,
+                params.refresh,
+            )
         })
         .await
     }

@@ -607,6 +607,28 @@ impl KirjeRuntime {
         limit: u16,
         refresh: bool,
     ) -> Result<MailboxSyncReport, MailError> {
+        self.sync_mailbox_directed(
+            account_id,
+            mailbox,
+            limit,
+            kirje_core::SyncDirection::Forward,
+            refresh,
+        )
+    }
+
+    /// Fetch one bounded mailbox batch in an explicit direction and transactionally update the index.
+    ///
+    /// # Errors
+    ///
+    /// Returns account, credential, protocol, validation, or store errors.
+    pub fn sync_mailbox_directed(
+        &self,
+        account_id: &str,
+        mailbox: &str,
+        limit: u16,
+        direction: kirje_core::SyncDirection,
+        refresh: bool,
+    ) -> Result<MailboxSyncReport, MailError> {
         let previous = if refresh {
             None
         } else {
@@ -615,11 +637,13 @@ impl KirjeRuntime {
         let cursor = previous.as_ref().map(|state| SyncCursor {
             uid_validity: state.uid_validity,
             highest_uid: state.highest_uid,
+            lowest_uid: state.lowest_uid,
         });
         let request = MailboxSyncRequest {
             account_id: account_id.to_owned(),
             mailbox: mailbox.to_owned(),
             cursor,
+            direction,
             limit,
         };
         request.validate()?;
@@ -1522,9 +1546,12 @@ mod tests {
                 mailbox: request.mailbox.clone(),
                 uid_validity: 7,
                 messages: vec![message(uid)],
+                tombstones: Vec::new(),
+                lowest_uid: Some(uid),
                 remote_total: Some(u64::from(uid)),
                 has_more: false,
                 reset_required: false,
+                backfill_complete: false,
             })
         }
 
@@ -1997,5 +2024,39 @@ mod tests {
         assert!(refreshed.reset);
         assert_eq!(refreshed.state.highest_uid, Some(10));
         assert_eq!(refreshed.state.indexed_messages, 1);
+    }
+
+    #[test]
+    fn backfill_sync_passes_lowest_uid_and_tracks_coverage() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let repository = Arc::new(TomlAccountRepository::new(
+            directory.path().join("accounts.toml"),
+        ));
+        repository.create(account()).expect("account");
+        let secrets = Arc::new(MemorySecrets::default());
+        secrets
+            .set("work", &SecretString::from("secret".to_owned()))
+            .expect("secret");
+        let reader = Arc::new(SyncReader::default());
+        let runtime = KirjeRuntime::with_index(
+            repository,
+            secrets,
+            reader.clone(),
+            Arc::new(
+                kirje_store::SqliteMessageIndex::open(directory.path().join("index.sqlite3"))
+                    .expect("index"),
+            ),
+        );
+
+        let report = runtime
+            .sync_mailbox_directed(
+                "work",
+                "INBOX",
+                20,
+                kirje_core::SyncDirection::Backfill,
+                false,
+            )
+            .expect("backfill sync");
+        assert_eq!(report.state.lowest_uid, Some(10));
     }
 }

@@ -21,7 +21,7 @@ use rusqlite::{
     Connection, OptionalExtension as _, Transaction, params, params_from_iter, types::Value,
 };
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Debug)]
@@ -126,10 +126,10 @@ impl MessageIndex for SqliteMessageIndex {
         let connection = self.connection()?;
         let stored = connection
             .query_row(
-                "SELECT s.uid_validity, s.highest_uid,
+                "SELECT s.uid_validity, s.highest_uid, s.lowest_uid,
                         (SELECT COUNT(*) FROM messages m
-                         WHERE m.account_id = s.account_id AND m.mailbox = s.mailbox),
-                        s.initial_window_complete, s.remote_total, s.last_synced_at
+                         WHERE m.account_id = s.account_id AND m.mailbox = s.mailbox AND m.is_deleted = 0),
+                        s.initial_window_complete, s.backfill_complete, s.remote_total, s.last_synced_at
                  FROM mailbox_sync_state s
                  WHERE s.account_id = ?1 AND s.mailbox = ?2",
                 params![account_id, mailbox],
@@ -142,6 +142,7 @@ impl MessageIndex for SqliteMessageIndex {
             .transpose()
     }
 
+    #[allow(clippy::too_many_lines)]
     fn apply_sync(
         &self,
         batch: &MailboxSyncBatch,
@@ -171,11 +172,28 @@ impl MessageIndex for SqliteMessageIndex {
             upsert_message(&transaction, message, &indexed_at)?;
         }
 
+        for uid in &batch.tombstones {
+            transaction
+                .execute(
+                    "UPDATE messages SET is_deleted = 1
+                     WHERE account_id = ?1 AND mailbox = ?2 AND uid_validity = ?3 AND uid = ?4",
+                    params![batch.account_id, batch.mailbox, batch.uid_validity, uid],
+                )
+                .map_err(|_| store_write_error())?;
+        }
+
         let batch_highest = batch
             .messages
             .iter()
             .map(|message| message.reference.uid)
             .max();
+        let batch_lowest = batch
+            .messages
+            .iter()
+            .map(|message| message.reference.uid)
+            .min()
+            .or(batch.lowest_uid);
+
         let highest_uid = if reset {
             batch_highest
         } else {
@@ -186,6 +204,16 @@ impl MessageIndex for SqliteMessageIndex {
                 .chain(batch_highest)
                 .max()
         };
+        let lowest_uid = if reset {
+            batch_lowest
+        } else {
+            previous
+                .as_ref()
+                .and_then(|state| state.lowest_uid)
+                .into_iter()
+                .chain(batch_lowest)
+                .min()
+        };
         let initial_window_complete = if reset || previous.is_none() {
             !batch.has_more
         } else {
@@ -193,17 +221,27 @@ impl MessageIndex for SqliteMessageIndex {
                 .as_ref()
                 .is_some_and(|state| state.initial_window_complete)
         };
+        let backfill_complete = if reset {
+            batch.backfill_complete
+        } else {
+            previous
+                .as_ref()
+                .is_some_and(|state| state.backfill_complete)
+                || batch.backfill_complete
+        };
 
         transaction
             .execute(
                 "INSERT INTO mailbox_sync_state (
-                    account_id, mailbox, uid_validity, highest_uid,
-                    initial_window_complete, remote_total, last_synced_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                    account_id, mailbox, uid_validity, highest_uid, lowest_uid,
+                    initial_window_complete, backfill_complete, remote_total, last_synced_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                  ON CONFLICT(account_id, mailbox) DO UPDATE SET
                     uid_validity = excluded.uid_validity,
                     highest_uid = excluded.highest_uid,
+                    lowest_uid = excluded.lowest_uid,
                     initial_window_complete = excluded.initial_window_complete,
+                    backfill_complete = excluded.backfill_complete,
                     remote_total = excluded.remote_total,
                     last_synced_at = excluded.last_synced_at",
                 params![
@@ -211,7 +249,9 @@ impl MessageIndex for SqliteMessageIndex {
                     batch.mailbox,
                     batch.uid_validity,
                     highest_uid,
+                    lowest_uid,
                     initial_window_complete,
+                    backfill_complete,
                     batch.remote_total,
                     indexed_at,
                 ],
@@ -220,7 +260,7 @@ impl MessageIndex for SqliteMessageIndex {
 
         let indexed_messages: u64 = transaction
             .query_row(
-                "SELECT COUNT(*) FROM messages WHERE account_id = ?1 AND mailbox = ?2",
+                "SELECT COUNT(*) FROM messages WHERE account_id = ?1 AND mailbox = ?2 AND is_deleted = 0",
                 params![batch.account_id, batch.mailbox],
                 |row| row.get(0),
             )
@@ -234,8 +274,10 @@ impl MessageIndex for SqliteMessageIndex {
                 mailbox: batch.mailbox.clone(),
                 uid_validity: batch.uid_validity,
                 highest_uid,
+                lowest_uid,
                 indexed_messages,
                 initial_window_complete,
+                backfill_complete,
                 remote_total: batch.remote_total,
                 last_synced_at: parse_timestamp(&indexed_at)?,
             },
@@ -253,7 +295,7 @@ impl MessageIndex for SqliteMessageIndex {
             "SELECT uid_validity, uid, message_id, in_reply_to_json, subject,
                     from_json, to_json, sent_at, size, is_read, is_starred,
                     has_attachment, truncated
-             FROM messages WHERE account_id = ? AND mailbox = ?",
+             FROM messages WHERE account_id = ? AND mailbox = ? AND is_deleted = 0",
         );
         let mut values = vec![
             Value::Text(search.account_id.clone()),
@@ -309,42 +351,56 @@ fn migrate(connection: &mut Connection) -> Result<(), MailError> {
     }
 
     let transaction = connection.transaction().map_err(|_| migration_error())?;
-    transaction
-        .execute_batch(
-            "CREATE TABLE mailbox_sync_state (
-                account_id TEXT NOT NULL,
-                mailbox TEXT NOT NULL,
-                uid_validity INTEGER NOT NULL CHECK(uid_validity > 0),
-                highest_uid INTEGER,
-                initial_window_complete INTEGER NOT NULL,
-                remote_total INTEGER,
-                last_synced_at TEXT NOT NULL,
-                PRIMARY KEY(account_id, mailbox)
-             );
-             CREATE TABLE messages (
-                account_id TEXT NOT NULL,
-                mailbox TEXT NOT NULL,
-                uid_validity INTEGER NOT NULL CHECK(uid_validity > 0),
-                uid INTEGER NOT NULL CHECK(uid > 0),
-                message_id TEXT,
-                in_reply_to_json TEXT NOT NULL,
-                subject TEXT NOT NULL,
-                from_json TEXT NOT NULL,
-                to_json TEXT NOT NULL,
-                sent_at TEXT,
-                size INTEGER NOT NULL,
-                is_read INTEGER NOT NULL,
-                is_starred INTEGER NOT NULL,
-                has_attachment INTEGER,
-                truncated INTEGER NOT NULL,
-                indexed_at TEXT NOT NULL,
-                PRIMARY KEY(account_id, mailbox, uid_validity, uid)
-             );
-             CREATE INDEX messages_search_order
-                ON messages(account_id, mailbox, sent_at DESC, uid DESC);
-             PRAGMA user_version = 1;",
-        )
-        .map_err(|_| migration_error())?;
+    if version == 0 {
+        transaction
+            .execute_batch(
+                "CREATE TABLE mailbox_sync_state (
+                    account_id TEXT NOT NULL,
+                    mailbox TEXT NOT NULL,
+                    uid_validity INTEGER NOT NULL CHECK(uid_validity > 0),
+                    highest_uid INTEGER,
+                    lowest_uid INTEGER,
+                    initial_window_complete INTEGER NOT NULL,
+                    backfill_complete INTEGER NOT NULL DEFAULT 0,
+                    remote_total INTEGER,
+                    last_synced_at TEXT NOT NULL,
+                    PRIMARY KEY(account_id, mailbox)
+                 );
+                 CREATE TABLE messages (
+                    account_id TEXT NOT NULL,
+                    mailbox TEXT NOT NULL,
+                    uid_validity INTEGER NOT NULL CHECK(uid_validity > 0),
+                    uid INTEGER NOT NULL CHECK(uid > 0),
+                    message_id TEXT,
+                    in_reply_to_json TEXT NOT NULL,
+                    subject TEXT NOT NULL,
+                    from_json TEXT NOT NULL,
+                    to_json TEXT NOT NULL,
+                    sent_at TEXT,
+                    size INTEGER NOT NULL,
+                    is_read INTEGER NOT NULL,
+                    is_starred INTEGER NOT NULL,
+                    has_attachment INTEGER,
+                    truncated INTEGER NOT NULL,
+                    is_deleted INTEGER NOT NULL DEFAULT 0,
+                    indexed_at TEXT NOT NULL,
+                    PRIMARY KEY(account_id, mailbox, uid_validity, uid)
+                 );
+                 CREATE INDEX messages_search_order
+                    ON messages(account_id, mailbox, sent_at DESC, uid DESC);
+                 PRAGMA user_version = 2;",
+            )
+            .map_err(|_| migration_error())?;
+    } else if version == 1 {
+        transaction
+            .execute_batch(
+                "ALTER TABLE mailbox_sync_state ADD COLUMN lowest_uid INTEGER;
+                 ALTER TABLE mailbox_sync_state ADD COLUMN backfill_complete INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE messages ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0;
+                 PRAGMA user_version = 2;",
+            )
+            .map_err(|_| migration_error())?;
+    }
     transaction.commit().map_err(|_| migration_error())
 }
 
@@ -389,10 +445,10 @@ fn state_in_transaction(
 ) -> Result<Option<MailboxSyncState>, MailError> {
     let stored = transaction
         .query_row(
-            "SELECT s.uid_validity, s.highest_uid,
+            "SELECT s.uid_validity, s.highest_uid, s.lowest_uid,
                     (SELECT COUNT(*) FROM messages m
-                     WHERE m.account_id = s.account_id AND m.mailbox = s.mailbox),
-                    s.initial_window_complete, s.remote_total, s.last_synced_at
+                     WHERE m.account_id = s.account_id AND m.mailbox = s.mailbox AND m.is_deleted = 0),
+                    s.initial_window_complete, s.backfill_complete, s.remote_total, s.last_synced_at
              FROM mailbox_sync_state s WHERE s.account_id = ?1 AND s.mailbox = ?2",
             params![account_id, mailbox],
             stored_state_from_row,
@@ -407,8 +463,10 @@ fn state_in_transaction(
 struct StoredSyncState {
     uid_validity: u32,
     highest_uid: Option<u32>,
+    lowest_uid: Option<u32>,
     indexed_messages: u64,
     initial_window_complete: bool,
+    backfill_complete: bool,
     remote_total: Option<u64>,
     last_synced_at: String,
 }
@@ -420,8 +478,10 @@ impl StoredSyncState {
             mailbox: mailbox.to_owned(),
             uid_validity: self.uid_validity,
             highest_uid: self.highest_uid,
+            lowest_uid: self.lowest_uid,
             indexed_messages: self.indexed_messages,
             initial_window_complete: self.initial_window_complete,
+            backfill_complete: self.backfill_complete,
             remote_total: self.remote_total,
             last_synced_at: parse_timestamp(&self.last_synced_at)?,
         })
@@ -432,10 +492,12 @@ fn stored_state_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredSync
     Ok(StoredSyncState {
         uid_validity: row.get(0)?,
         highest_uid: row.get(1)?,
-        indexed_messages: row.get(2)?,
-        initial_window_complete: row.get(3)?,
-        remote_total: row.get(4)?,
-        last_synced_at: row.get(5)?,
+        lowest_uid: row.get(2)?,
+        indexed_messages: row.get(3)?,
+        initial_window_complete: row.get(4)?,
+        backfill_complete: row.get(5)?,
+        remote_total: row.get(6)?,
+        last_synced_at: row.get(7)?,
     })
 }
 
@@ -628,9 +690,12 @@ mod tests {
             mailbox: "INBOX".to_owned(),
             uid_validity,
             messages,
+            tombstones: Vec::new(),
+            lowest_uid: None,
             remote_total: Some(20),
             has_more: false,
             reset_required: false,
+            backfill_complete: false,
         }
     }
 
@@ -692,6 +757,108 @@ mod tests {
         assert_eq!(page.messages.len(), 1);
         assert_eq!(page.messages[0].reference.uid, 10);
         assert!(!page.has_more);
+    }
+
+    #[test]
+    fn backfill_sync_tracks_lowest_uid_and_completion() {
+        let (_directory, index) = index();
+        let mut first = batch(7, vec![message(7, 20, "Recent", true)]);
+        first.has_more = true;
+        let report = index.apply_sync(&first, false).expect("initial sync");
+        assert_eq!(report.state.highest_uid, Some(20));
+        assert_eq!(report.state.lowest_uid, Some(20));
+        assert!(!report.state.backfill_complete);
+
+        let mut backfill = batch(7, vec![message(7, 15, "Older", true)]);
+        backfill.lowest_uid = Some(15);
+        backfill.backfill_complete = true;
+        let report = index.apply_sync(&backfill, false).expect("backfill sync");
+        assert_eq!(report.state.highest_uid, Some(20));
+        assert_eq!(report.state.lowest_uid, Some(15));
+        assert!(report.state.backfill_complete);
+        assert_eq!(report.state.indexed_messages, 2);
+    }
+
+    #[test]
+    fn tombstones_mark_disappeared_messages_and_exclude_from_search() {
+        let (_directory, index) = index();
+        let initial = batch(
+            7,
+            vec![
+                message(7, 10, "Keep", true),
+                message(7, 11, "DeleteMe", true),
+            ],
+        );
+        index.apply_sync(&initial, false).expect("initial sync");
+
+        let mut reconciliation = batch(7, Vec::new());
+        reconciliation.tombstones = vec![11];
+        let report = index
+            .apply_sync(&reconciliation, false)
+            .expect("reconciliation");
+
+        assert_eq!(report.state.indexed_messages, 1);
+        let page = index.search(&search(None, None, 10)).expect("search");
+        assert_eq!(page.messages.len(), 1);
+        assert_eq!(page.messages[0].subject, "Keep");
+    }
+
+    #[test]
+    fn schema_v1_to_v2_migration_preserves_existing_data() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let path = directory.path().join("v1.sqlite3");
+        let connection = Connection::open(&path).expect("open");
+        connection
+            .execute_batch(
+                "CREATE TABLE mailbox_sync_state (
+                    account_id TEXT NOT NULL,
+                    mailbox TEXT NOT NULL,
+                    uid_validity INTEGER NOT NULL CHECK(uid_validity > 0),
+                    highest_uid INTEGER,
+                    initial_window_complete INTEGER NOT NULL,
+                    remote_total INTEGER,
+                    last_synced_at TEXT NOT NULL,
+                    PRIMARY KEY(account_id, mailbox)
+                 );
+                 CREATE TABLE messages (
+                    account_id TEXT NOT NULL,
+                    mailbox TEXT NOT NULL,
+                    uid_validity INTEGER NOT NULL CHECK(uid_validity > 0),
+                    uid INTEGER NOT NULL CHECK(uid > 0),
+                    message_id TEXT,
+                    in_reply_to_json TEXT NOT NULL,
+                    subject TEXT NOT NULL,
+                    from_json TEXT NOT NULL,
+                    to_json TEXT NOT NULL,
+                    sent_at TEXT,
+                    size INTEGER NOT NULL,
+                    is_read INTEGER NOT NULL,
+                    is_starred INTEGER NOT NULL,
+                    has_attachment INTEGER,
+                    truncated INTEGER NOT NULL,
+                    indexed_at TEXT NOT NULL,
+                    PRIMARY KEY(account_id, mailbox, uid_validity, uid)
+                 );
+                 CREATE INDEX messages_search_order
+                    ON messages(account_id, mailbox, sent_at DESC, uid DESC);
+                 PRAGMA user_version = 1;
+                 INSERT INTO mailbox_sync_state VALUES ('personal', 'INBOX', 7, 100, 1, 10, '2026-08-26T01:02:03Z');
+                 INSERT INTO messages VALUES ('personal', 'INBOX', 7, 100, 'msg-100', '[]', 'Subject', '[]', '[]', '2026-08-26T01:02:03Z', 50, 0, 0, 0, 0, '2026-08-26T01:02:03Z');",
+            )
+            .expect("init v1");
+        drop(connection);
+
+        let index = SqliteMessageIndex::open(path).expect("migrate to v2");
+        let state = index
+            .state("personal", "INBOX")
+            .expect("state")
+            .expect("exists");
+        assert_eq!(state.uid_validity, 7);
+        assert_eq!(state.highest_uid, Some(100));
+        assert_eq!(state.indexed_messages, 1);
+        let page = index.search(&search(None, None, 10)).expect("search");
+        assert_eq!(page.messages.len(), 1);
+        assert_eq!(page.messages[0].subject, "Subject");
     }
 
     #[test]
