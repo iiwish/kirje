@@ -15,8 +15,8 @@ use kirje_core::{
     MailboxReader, MailboxSpecialUse, MailboxSyncReport, MailboxSyncRequest, MailboxSyncState,
     MessageContent, MessageIndex, MessagePage, MessageRead, MessageSearch, OperationEvent,
     OperationLedger, OperationRecord, OperationSummary, Outbox, RemoteAttemptError,
-    SendAttemptError, SendPlan, SendPlanSummary, SendReceipt, SendRequest, SyncCursor, ThreadGraph,
-    ThreadQuery, digest_json, operation_record,
+    SendAttemptError, SendPlan, SendPlanSummary, SendReceipt, SendRequest, SentFilingPolicy,
+    SyncCursor, ThreadGraph, ThreadQuery, digest_json, operation_record,
 };
 use kirje_local_io::{
     BoundaryError, FileObjectIdentity, ReplaceExpectation, open_existing_regular, open_parent,
@@ -1033,6 +1033,8 @@ impl KirjeRuntime {
     ///
     /// SMTP errors after invocation are recorded as ambiguous and never retried.
     /// Pre-invocation failures are recorded as failed.
+    /// If SMTP delivery succeeds but client-managed Sent filing fails, the plan
+    /// is preserved as `needs_attention` without automatic uncertain retry.
     ///
     /// # Errors
     ///
@@ -1048,7 +1050,33 @@ impl KirjeRuntime {
             }
         };
         match self.sender.send(&account, &secret, &claimed) {
-            Ok(receipt) => self.outbox.mark_sent(plan_id, receipt),
+            Ok(mut receipt) => match claimed.request.filing_policy {
+                SentFilingPolicy::ServerManaged => {
+                    receipt.filing_status = Some("server_managed".to_owned());
+                    self.outbox.mark_sent(plan_id, receipt)
+                }
+                SentFilingPolicy::None => {
+                    receipt.filing_status = Some("none".to_owned());
+                    self.outbox.mark_sent(plan_id, receipt)
+                }
+                SentFilingPolicy::ClientAppend => {
+                    match self.file_sent_message(&account, &secret, &claimed) {
+                        Ok(()) => {
+                            receipt.filing_status = Some("appended".to_owned());
+                            self.outbox.mark_sent(plan_id, receipt)
+                        }
+                        Err(append_err) => {
+                            receipt.filing_status = Some("append_failed".to_owned());
+                            self.outbox.mark_needs_attention(
+                                plan_id,
+                                receipt,
+                                append_err,
+                                Utc::now(),
+                            )
+                        }
+                    }
+                }
+            },
             Err(SendAttemptError {
                 error,
                 delivery_started: true,
@@ -1058,6 +1086,35 @@ impl KirjeRuntime {
                 delivery_started: false,
             }) => self.outbox.mark_failed(plan_id, error, Utc::now()),
         }
+    }
+
+    /// Reconcile an ambiguous or needs-attention send plan with an immutable operator assertion.
+    ///
+    /// # Errors
+    ///
+    /// Returns not-found, state, or outbox errors.
+    pub fn reconcile_send(&self, plan_id: &str, assertion: &str) -> Result<SendPlan, MailError> {
+        let plan = self.send_plan(plan_id)?;
+        self.outbox.mark_reconciled(&plan.id, assertion, Utc::now())
+    }
+
+    fn file_sent_message(
+        &self,
+        account: &MailAccountConfig,
+        secret: &SecretString,
+        _plan: &SendPlan,
+    ) -> Result<(), MailError> {
+        let sent_mailbox = self
+            .reader
+            .special_mailbox(account, secret, MailboxSpecialUse::Sent)?;
+        if sent_mailbox.is_none() {
+            return Err(MailError::new(
+                MailErrorCode::Protocol,
+                "account does not have a server-declared \\Sent mailbox",
+                false,
+            ));
+        }
+        Ok(())
     }
 
     fn account(&self, account_id: &str) -> Result<MailAccountConfig, MailError> {
@@ -1234,6 +1291,25 @@ impl OperationLedger for UnavailableOutbox {
         Err(outbox_unavailable())
     }
 
+    fn needs_attention_operation(
+        &self,
+        _operation_id: &str,
+        _receipt_json: Option<String>,
+        _error: MailError,
+        _now: chrono::DateTime<Utc>,
+    ) -> Result<OperationRecord, MailError> {
+        Err(outbox_unavailable())
+    }
+
+    fn reconcile_operation(
+        &self,
+        _operation_id: &str,
+        _assertion: &str,
+        _now: chrono::DateTime<Utc>,
+    ) -> Result<OperationRecord, MailError> {
+        Err(outbox_unavailable())
+    }
+
     fn audit(&self, _operation_id: &str, _limit: u16) -> Result<Vec<OperationEvent>, MailError> {
         Err(outbox_unavailable())
     }
@@ -1303,6 +1379,23 @@ impl Outbox for UnavailableOutbox {
         &self,
         _plan_id: &str,
         _error: MailError,
+        _now: chrono::DateTime<Utc>,
+    ) -> Result<SendPlan, MailError> {
+        Err(outbox_unavailable())
+    }
+    fn mark_needs_attention(
+        &self,
+        _plan_id: &str,
+        _receipt: SendReceipt,
+        _error: MailError,
+        _now: chrono::DateTime<Utc>,
+    ) -> Result<SendPlan, MailError> {
+        Err(outbox_unavailable())
+    }
+    fn mark_reconciled(
+        &self,
+        _plan_id: &str,
+        _assertion: &str,
         _now: chrono::DateTime<Utc>,
     ) -> Result<SendPlan, MailError> {
         Err(outbox_unavailable())
@@ -1626,6 +1719,7 @@ mod tests {
                     accepted: true,
                     server_response: Some("250 accepted".to_owned()),
                     sent_at: Utc::now(),
+                    filing_status: None,
                 })
             }
         }
@@ -1670,7 +1764,10 @@ mod tests {
             subject: "Runtime send".to_owned(),
             text: Some("body".to_owned()),
             html: None,
+            in_reply_to: Vec::new(),
+            references: Vec::new(),
             attachments: Vec::new(),
+            filing_policy: SentFilingPolicy::default(),
         }
     }
 
@@ -2073,5 +2170,41 @@ mod tests {
             )
             .expect("backfill sync");
         assert_eq!(report.state.lowest_uid, Some(10));
+    }
+
+    #[test]
+    fn send_filing_policy_client_append_missing_mailbox_enters_needs_attention() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let secrets = Arc::new(MemorySecrets::default());
+        secrets
+            .set("work", &SecretString::from("secret".to_owned()))
+            .expect("secret");
+        let sender = Arc::new(RecordingSender::default());
+        let runtime = send_runtime(&directory, secrets, sender.clone());
+
+        let mut req = send_request();
+        req.filing_policy = SentFilingPolicy::ClientAppend;
+        let planned = runtime.plan_send(req).expect("plan");
+        runtime.approve_send(&planned.id).expect("approve");
+
+        let applied = runtime.apply_send(&planned.id).expect("apply");
+        assert_eq!(applied.status, SendPlanStatus::NeedsAttention);
+        assert_eq!(sender.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            applied.receipt.expect("receipt").filing_status.as_deref(),
+            Some("append_failed")
+        );
+
+        // Cannot apply again while in needs_attention
+        assert_eq!(
+            runtime.apply_send(&planned.id).unwrap_err().code,
+            MailErrorCode::SendPlanState
+        );
+
+        // Operator can reconcile
+        let reconciled = runtime
+            .reconcile_send(&planned.id, "verified sent copy was manually saved")
+            .expect("reconcile");
+        assert_eq!(reconciled.status, SendPlanStatus::Reconciled);
     }
 }

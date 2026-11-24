@@ -339,6 +339,17 @@ fn send_plan_is_local_and_approval_rejects_piped_input() {
     assert_eq!(apply.status.code(), Some(1));
     let apply: serde_json::Value = serde_json::from_slice(&apply.stdout).expect("apply JSON");
     assert_eq!(apply["error"]["code"], "send_plan_state");
+
+    let reconcile = Command::cargo_bin("kirje")
+        .expect("kirje binary")
+        .args(common)
+        .args(["send", "reconcile", plan_id, "--assertion", "manual test"])
+        .output()
+        .expect("reconcile");
+    assert_eq!(reconcile.status.code(), Some(1));
+    let reconcile: serde_json::Value =
+        serde_json::from_slice(&reconcile.stdout).expect("reconcile JSON");
+    assert_eq!(reconcile["error"]["code"], "send_plan_state");
 }
 
 #[test]

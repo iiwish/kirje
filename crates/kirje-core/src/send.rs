@@ -21,6 +21,15 @@ pub const SEND_PLAN_TTL_HOURS: i64 = 24;
 pub const DEFAULT_SEND_PLAN_LIMIT: u16 = 25;
 pub const MAX_SEND_PLAN_LIMIT: u16 = 100;
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SentFilingPolicy {
+    #[default]
+    ServerManaged,
+    ClientAppend,
+    None,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SendRequest {
@@ -34,7 +43,13 @@ pub struct SendRequest {
     pub text: Option<String>,
     pub html: Option<String>,
     #[serde(default)]
+    pub in_reply_to: Vec<String>,
+    #[serde(default)]
+    pub references: Vec<String>,
+    #[serde(default)]
     pub attachments: Vec<SendAttachment>,
+    #[serde(default)]
+    pub filing_policy: SentFilingPolicy,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -269,6 +284,8 @@ pub enum SendPlanStatus {
     Approved,
     Applying,
     Sent,
+    NeedsAttention,
+    Reconciled,
     Failed,
     Ambiguous,
     Expired,
@@ -279,6 +296,8 @@ pub struct SendReceipt {
     pub accepted: bool,
     pub server_response: Option<String>,
     pub sent_at: DateTime<Utc>,
+    #[serde(default)]
+    pub filing_status: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -491,6 +510,31 @@ pub trait Outbox: crate::OperationLedger + Send + Sync {
         &self,
         plan_id: &str,
         error: MailError,
+        now: DateTime<Utc>,
+    ) -> Result<SendPlan, MailError>;
+
+    /// Finish an accepted SMTP plan whose client-managed copy needs operator attention.
+    ///
+    /// # Errors
+    ///
+    /// Returns not-found, invalid-state, or store errors.
+    fn mark_needs_attention(
+        &self,
+        plan_id: &str,
+        receipt: SendReceipt,
+        error: MailError,
+        now: DateTime<Utc>,
+    ) -> Result<SendPlan, MailError>;
+
+    /// Reconcile an ambiguous or needs-attention plan with an immutable operator assertion.
+    ///
+    /// # Errors
+    ///
+    /// Returns not-found, invalid-state, or store errors.
+    fn mark_reconciled(
+        &self,
+        plan_id: &str,
+        assertion: &str,
         now: DateTime<Utc>,
     ) -> Result<SendPlan, MailError>;
 }

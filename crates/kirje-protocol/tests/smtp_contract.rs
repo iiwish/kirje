@@ -19,7 +19,10 @@ fn plan() -> SendPlan {
             subject: "SMTP contract".to_owned(),
             text: Some("body".to_owned()),
             html: None,
+            in_reply_to: Vec::new(),
+            references: Vec::new(),
             attachments: Vec::new(),
+            filing_policy: kirje_core::SentFilingPolicy::default(),
         },
         Utc.with_ymd_and_hms(2026, 8, 26, 12, 0, 0).unwrap(),
     )

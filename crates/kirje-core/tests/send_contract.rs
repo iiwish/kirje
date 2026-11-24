@@ -1,7 +1,7 @@
 use chrono::{TimeZone as _, Utc};
 use kirje_core::{
     MAX_SEND_ATTACHMENT_BYTES, MailAddress, MailErrorCode, SendAttachment, SendPlan,
-    SendPlanStatus, SendRequest,
+    SendPlanStatus, SendRequest, SentFilingPolicy,
 };
 
 fn request() -> SendRequest {
@@ -16,7 +16,10 @@ fn request() -> SendRequest {
         subject: "Governed send test".to_owned(),
         text: Some("This is a bounded test body.".to_owned()),
         html: None,
+        in_reply_to: Vec::new(),
+        references: Vec::new(),
         attachments: Vec::new(),
+        filing_policy: SentFilingPolicy::default(),
     }
 }
 

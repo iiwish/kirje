@@ -25,7 +25,10 @@ fn request() -> SendRequest {
         subject: "Outbox test".to_owned(),
         text: Some("safe body".to_owned()),
         html: None,
+        in_reply_to: Vec::new(),
+        references: Vec::new(),
         attachments: Vec::new(),
+        filing_policy: kirje_core::SentFilingPolicy::default(),
     }
 }
 
@@ -154,6 +157,49 @@ fn ambiguous_outcome_is_terminal() {
 }
 
 #[test]
+fn needs_attention_and_reconciliation_workflow() {
+    let (_directory, outbox, plan) = fixture();
+    let now = plan.created_at + Duration::minutes(1);
+    outbox.approve(&plan.id, now).expect("approve");
+    outbox.claim(&plan.id, now).expect("claim");
+    let receipt = SendReceipt {
+        accepted: true,
+        server_response: Some("250 queued".to_owned()),
+        sent_at: now,
+        filing_status: Some("append_failed".to_owned()),
+    };
+    let error = MailError::new(MailErrorCode::Protocol, "failed to append sent copy", false);
+    let flagged = outbox
+        .mark_needs_attention(&plan.id, receipt.clone(), error, now)
+        .expect("mark needs attention");
+    assert_eq!(flagged.status, SendPlanStatus::NeedsAttention);
+    assert_eq!(flagged.receipt, Some(receipt));
+    assert!(flagged.last_error.is_some());
+
+    // Empty assertion fails
+    assert_eq!(
+        outbox
+            .mark_reconciled(&plan.id, "   ", now + Duration::minutes(1))
+            .unwrap_err()
+            .code,
+        MailErrorCode::InvalidInput
+    );
+
+    // Operator reconciliation closes the plan with an immutable audit event
+    let assertion = "operator verified message was accepted by downstream MTA";
+    let reconciled = outbox
+        .mark_reconciled(&plan.id, assertion, now + Duration::minutes(2))
+        .expect("reconcile");
+    assert_eq!(reconciled.status, SendPlanStatus::Reconciled);
+
+    let events = outbox.audit(&plan.id, 10).expect("audit");
+    let last_event = events.last().expect("last event");
+    assert_eq!(last_event.event, "reconciled");
+    assert_eq!(last_event.status, Some(OperationStatus::Reconciled));
+    assert_eq!(last_event.detail.as_deref(), Some(assertion));
+}
+
+#[test]
 fn successful_receipt_finishes_the_plan() {
     let (_directory, outbox, plan) = fixture();
     let now = plan.created_at + Duration::minutes(1);
@@ -163,6 +209,7 @@ fn successful_receipt_finishes_the_plan() {
         accepted: true,
         server_response: Some("250 queued".to_owned()),
         sent_at: now,
+        filing_status: None,
     };
     let sent = outbox
         .mark_sent(&plan.id, receipt.clone())

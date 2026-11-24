@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::{
     MailAddress, MailError, MailErrorCode, MessageContent, MessageReference, SendAttachment,
-    SendRequest,
+    SendRequest, SentFilingPolicy,
 };
 
 pub const OPERATION_TTL_HOURS: i64 = 24;
@@ -254,6 +254,8 @@ pub enum OperationStatus {
     Approved,
     Applying,
     Succeeded,
+    NeedsAttention,
+    Reconciled,
     Failed,
     Ambiguous,
     Expired,
@@ -355,6 +357,19 @@ pub trait OperationLedger: Send + Sync {
         &self,
         operation_id: &str,
         error: MailError,
+        now: DateTime<Utc>,
+    ) -> Result<OperationRecord, MailError>;
+    fn needs_attention_operation(
+        &self,
+        operation_id: &str,
+        receipt_json: Option<String>,
+        error: MailError,
+        now: DateTime<Utc>,
+    ) -> Result<OperationRecord, MailError>;
+    fn reconcile_operation(
+        &self,
+        operation_id: &str,
+        assertion: &str,
         now: DateTime<Utc>,
     ) -> Result<OperationRecord, MailError>;
     fn audit(&self, operation_id: &str, limit: u16) -> Result<Vec<OperationEvent>, MailError>;
@@ -495,6 +510,17 @@ pub fn compose_request(input: &DraftInput, account_email: &str) -> Result<SendRe
         .text
         .clone()
         .or_else(|| source.and_then(|source| quote_source(input.mode, source)));
+    let (in_reply_to, references) = if matches!(input.mode, DraftMode::Reply | DraftMode::ReplyAll)
+    {
+        if let Some(source) = source {
+            let mid = source.message_id.clone().into_iter().collect::<Vec<_>>();
+            (mid.clone(), mid)
+        } else {
+            (Vec::new(), Vec::new())
+        }
+    } else {
+        (Vec::new(), Vec::new())
+    };
     let request = SendRequest {
         account_id: input.account_id.clone(),
         to,
@@ -503,7 +529,10 @@ pub fn compose_request(input: &DraftInput, account_email: &str) -> Result<SendRe
         subject,
         text,
         html: input.html.clone(),
+        in_reply_to,
+        references,
         attachments: input.attachments.clone(),
+        filing_policy: SentFilingPolicy::default(),
     };
     request.validate()?;
     Ok(request)

@@ -315,6 +315,12 @@ enum SendCommand {
     Approve { plan_id: String },
     /// Apply an already approved plan at most once.
     Apply { plan_id: String },
+    /// Reconcile an ambiguous or needs-attention plan with an immutable operator assertion.
+    Reconcile {
+        plan_id: String,
+        #[arg(long)]
+        assertion: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -882,6 +888,9 @@ fn handle_send(cli: &Cli, command: &SendCommand) -> Result<Value, MailError> {
             json_value(runtime.approve_send(plan_id)?)
         }
         SendCommand::Apply { plan_id } => json_value(runtime(cli)?.apply_send(plan_id)?),
+        SendCommand::Reconcile { plan_id, assertion } => {
+            json_value(runtime(cli)?.reconcile_send(plan_id, assertion)?)
+        }
     }
 }
 
@@ -1232,6 +1241,11 @@ fn schema_report() -> SchemaReport {
                 "terminal send state",
             ),
             command(
+                "send reconcile <plan-id> --assertion <text>",
+                "operator_local_write",
+                "reconciled immutable plan state with an immutable audit event",
+            ),
+            command(
                 "draft create|show|list|update|discard",
                 "private_local_draft",
                 "draft content and attachment summaries",
@@ -1377,6 +1391,10 @@ mod tests {
         assert!(schema.commands.iter().any(|entry| {
             entry.name == "send approve <plan-id>"
                 && entry.safety == "interactive_human_local_write"
+        }));
+        assert!(schema.commands.iter().any(|entry| {
+            entry.name == "send reconcile <plan-id> --assertion <text>"
+                && entry.safety == "operator_local_write"
         }));
     }
 

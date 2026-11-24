@@ -78,6 +78,7 @@ impl MailSender for LettreSmtpSender {
                 response.first_line().unwrap_or("accepted")
             ))),
             sent_at: Utc::now(),
+            filing_status: None,
         })
     }
 }
@@ -96,6 +97,12 @@ fn build_message(account: &MailAccountConfig, plan: &SendPlan) -> Result<Message
     }
     for address in &plan.request.bcc {
         builder = builder.bcc(mailbox(address)?);
+    }
+    for mid in &plan.request.in_reply_to {
+        builder = builder.header(lettre::message::header::InReplyTo::from(mid.clone()));
+    }
+    for mid in &plan.request.references {
+        builder = builder.header(lettre::message::header::References::from(mid.clone()));
     }
 
     if plan.request.attachments.is_empty() {
@@ -239,7 +246,13 @@ mod tests {
                 subject: "Kirje 世界".to_owned(),
                 text: Some("plain body".to_owned()),
                 html: Some("<p>HTML body</p>".to_owned()),
+                in_reply_to: vec!["<parent@example.com>".to_owned()],
+                references: vec![
+                    "<root@example.com>".to_owned(),
+                    "<parent@example.com>".to_owned(),
+                ],
                 attachments: Vec::new(),
+                filing_policy: kirje_core::SentFilingPolicy::default(),
             },
             Utc.with_ymd_and_hms(2026, 8, 26, 12, 0, 0).unwrap(),
         )
@@ -253,6 +266,7 @@ mod tests {
         let message = build_message(&account, &plan).expect("message");
         let formatted = String::from_utf8(message.formatted()).expect("UTF-8 MIME");
         assert!(formatted.contains(&format!("Message-ID: {}", plan.message_id)));
+        assert!(formatted.contains("In-Reply-To: <parent@example.com>"));
         assert!(formatted.contains("multipart/alternative"));
         assert!(!formatted.contains("Bcc:"));
         assert_eq!(message.envelope().to().len(), 2);

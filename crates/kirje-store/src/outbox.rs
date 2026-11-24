@@ -12,7 +12,7 @@ use kirje_core::{
 use rusqlite::{Connection, OptionalExtension as _, Row, Transaction, TransactionBehavior, params};
 use sha2::{Digest as _, Sha256};
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const STALE_APPLY_MINUTES: i64 = 15;
 
@@ -186,6 +186,28 @@ impl Outbox for SqliteOutbox {
     ) -> Result<SendPlan, MailError> {
         error.retryable = false;
         self.ambiguous_operation(plan_id, error, now)
+            .and_then(|operation| send_plan_from_operation(&operation))
+    }
+
+    fn mark_needs_attention(
+        &self,
+        plan_id: &str,
+        receipt: SendReceipt,
+        error: MailError,
+        now: DateTime<Utc>,
+    ) -> Result<SendPlan, MailError> {
+        let receipt_json = serde_json::to_string(&receipt).map_err(|_| store_write_error())?;
+        self.needs_attention_operation(plan_id, Some(receipt_json), error, now)
+            .and_then(|operation| send_plan_from_operation(&operation))
+    }
+
+    fn mark_reconciled(
+        &self,
+        plan_id: &str,
+        assertion: &str,
+        now: DateTime<Utc>,
+    ) -> Result<SendPlan, MailError> {
+        self.reconcile_operation(plan_id, assertion, now)
             .and_then(|operation| send_plan_from_operation(&operation))
     }
 }
@@ -386,6 +408,69 @@ impl OperationLedger for SqliteOutbox {
             Some(error),
             None,
         )
+    }
+
+    fn needs_attention_operation(
+        &self,
+        operation_id: &str,
+        receipt_json: Option<String>,
+        error: MailError,
+        now: DateTime<Utc>,
+    ) -> Result<OperationRecord, MailError> {
+        finish_operation(
+            self,
+            operation_id,
+            now,
+            OperationStatus::NeedsAttention,
+            Some(error),
+            receipt_json.as_deref(),
+        )
+    }
+
+    fn reconcile_operation(
+        &self,
+        operation_id: &str,
+        assertion: &str,
+        now: DateTime<Utc>,
+    ) -> Result<OperationRecord, MailError> {
+        validate_operation_id(operation_id)?;
+        let trimmed = assertion.trim();
+        if trimmed.is_empty() {
+            return Err(MailError::invalid_input(
+                "reconciliation assertion cannot be empty",
+            ));
+        }
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| store_write_error())?;
+        reconcile_operations(&transaction, now)?;
+        let existing =
+            operation_in_transaction(&transaction, operation_id)?.ok_or_else(not_found_error)?;
+        if existing.status != OperationStatus::Ambiguous
+            && existing.status != OperationStatus::NeedsAttention
+        {
+            return Err(state_error(
+                "only an ambiguous or needs_attention operation can be reconciled",
+            ));
+        }
+        transaction
+            .execute(
+                "UPDATE operations SET status = 'reconciled', updated_at = ?1 WHERE id = ?2 AND status IN ('ambiguous', 'needs_attention')",
+                params![timestamp(now), operation_id],
+            )
+            .map_err(|_| store_write_error())?;
+        let updated =
+            operation_in_transaction(&transaction, operation_id)?.ok_or_else(not_found_error)?;
+        append_event(
+            &transaction,
+            &updated,
+            "reconciled",
+            Some(OperationStatus::Reconciled),
+            Some(trimmed),
+        )?;
+        transaction.commit().map_err(|_| store_write_error())?;
+        Ok(updated)
     }
 
     fn audit(&self, operation_id: &str, limit: u16) -> Result<Vec<OperationEvent>, MailError> {
@@ -782,6 +867,8 @@ fn operation_status_name(status: OperationStatus) -> &'static str {
         OperationStatus::Approved => "approved",
         OperationStatus::Applying => "applying",
         OperationStatus::Succeeded => "succeeded",
+        OperationStatus::NeedsAttention => "needs_attention",
+        OperationStatus::Reconciled => "reconciled",
         OperationStatus::Failed => "failed",
         OperationStatus::Ambiguous => "ambiguous",
         OperationStatus::Expired => "expired",
@@ -794,6 +881,8 @@ fn parse_operation_status(status: &str) -> Result<OperationStatus, MailError> {
         "approved" => Ok(OperationStatus::Approved),
         "applying" => Ok(OperationStatus::Applying),
         "succeeded" => Ok(OperationStatus::Succeeded),
+        "needs_attention" => Ok(OperationStatus::NeedsAttention),
+        "reconciled" => Ok(OperationStatus::Reconciled),
         "failed" => Ok(OperationStatus::Failed),
         "ambiguous" => Ok(OperationStatus::Ambiguous),
         "expired" => Ok(OperationStatus::Expired),
@@ -812,6 +901,8 @@ fn send_plan_from_operation(operation: &OperationRecord) -> Result<SendPlan, Mai
         OperationStatus::Approved => SendPlanStatus::Approved,
         OperationStatus::Applying => SendPlanStatus::Applying,
         OperationStatus::Succeeded => SendPlanStatus::Sent,
+        OperationStatus::NeedsAttention => SendPlanStatus::NeedsAttention,
+        OperationStatus::Reconciled => SendPlanStatus::Reconciled,
         OperationStatus::Failed => SendPlanStatus::Failed,
         OperationStatus::Ambiguous => SendPlanStatus::Ambiguous,
         OperationStatus::Expired => SendPlanStatus::Expired,
@@ -841,7 +932,7 @@ fn send_plan_from_operation(operation: &OperationRecord) -> Result<SendPlan, Mai
 fn migrate(connection: &mut Connection) -> Result<(), MailError> {
     let version: i64 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
-        .map_err(|_| migration_error())?;
+        .map_err(migration_error)?;
     if version > SCHEMA_VERSION {
         return Err(MailError::new(
             MailErrorCode::StoreMigration,
@@ -852,15 +943,15 @@ fn migrate(connection: &mut Connection) -> Result<(), MailError> {
     if version == SCHEMA_VERSION {
         return Ok(());
     }
-    let transaction = connection.transaction().map_err(|_| migration_error())?;
+    let transaction = connection.transaction().map_err(migration_error)?;
     if version == 0 {
         transaction
             .execute_batch(LEGACY_SEND_SCHEMA)
-            .map_err(|_| migration_error())?;
+            .map_err(migration_error)?;
     }
     transaction
         .execute_batch(LEDGER_SCHEMA)
-        .map_err(|_| migration_error())?;
+        .map_err(migration_error)?;
     if version <= 1 {
         transaction
             .execute_batch(
@@ -881,12 +972,41 @@ fn migrate(connection: &mut Connection) -> Result<(), MailError> {
                     updated_at, content_sha256, 'migrated from legacy send_plans'
                  FROM send_plans;",
             )
-            .map_err(|_| migration_error())?;
+            .map_err(migration_error)?;
+    }
+    if version == 2 {
+        transaction
+            .execute_batch(
+                "CREATE TABLE operations_v3 (
+                    id TEXT PRIMARY KEY,
+                    kind TEXT NOT NULL,
+                    account_id TEXT NOT NULL,
+                    message_id TEXT,
+                    payload_json TEXT NOT NULL,
+                    payload_sha256 TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('planned','approved','applying','succeeded','needs_attention','reconciled','failed','ambiguous','expired')),
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT,
+                    approved_at TEXT,
+                    updated_at TEXT NOT NULL,
+                    attempt_count INTEGER NOT NULL CHECK(attempt_count >= 0),
+                    last_error_json TEXT,
+                    receipt_json TEXT
+                 );
+                 INSERT INTO operations_v3 SELECT * FROM operations;
+                 DROP TABLE operations;
+                 ALTER TABLE operations_v3 RENAME TO operations;
+                 CREATE INDEX IF NOT EXISTS operations_account_created
+                     ON operations(account_id, created_at DESC);
+                 CREATE INDEX IF NOT EXISTS operations_kind_created
+                     ON operations(kind, created_at DESC);",
+            )
+            .map_err(migration_error)?;
     }
     transaction
-        .execute_batch("PRAGMA user_version = 2;")
-        .map_err(|_| migration_error())?;
-    transaction.commit().map_err(|_| migration_error())
+        .execute_batch("PRAGMA user_version = 3;")
+        .map_err(migration_error)?;
+    transaction.commit().map_err(migration_error)
 }
 
 const LEGACY_SEND_SCHEMA: &str = "
@@ -917,7 +1037,7 @@ const LEDGER_SCHEMA: &str = "
         message_id TEXT,
         payload_json TEXT NOT NULL,
         payload_sha256 TEXT NOT NULL,
-        status TEXT NOT NULL CHECK(status IN ('planned','approved','applying','succeeded','failed','ambiguous','expired')),
+        status TEXT NOT NULL CHECK(status IN ('planned','approved','applying','succeeded','needs_attention','reconciled','failed','ambiguous','expired')),
         created_at TEXT NOT NULL,
         expires_at TEXT,
         approved_at TEXT,
@@ -997,10 +1117,10 @@ fn store_write_error() -> MailError {
     )
 }
 
-fn migration_error() -> MailError {
+fn migration_error(error: impl std::fmt::Display) -> MailError {
     MailError::new(
         MailErrorCode::StoreMigration,
-        "cannot migrate the local outbox",
+        format!("cannot migrate the local outbox: {error}"),
         false,
     )
 }

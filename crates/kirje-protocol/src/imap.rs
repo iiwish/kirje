@@ -420,6 +420,7 @@ impl MailboxReader for PimalayaImapReader {
             .map_err(|error| classify_error(&error))?;
         let wanted = match use_kind {
             MailboxSpecialUse::Archive => "\\archive",
+            MailboxSpecialUse::Sent => "\\sent",
             MailboxSpecialUse::Trash => "\\trash",
         };
         let matches: Vec<String> = rows
