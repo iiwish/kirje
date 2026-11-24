@@ -817,6 +817,99 @@ impl KirjeRuntime {
         self.reader.read_message(&account, &secret, read)
     }
 
+    /// Generate a structured, categorized triage report of recent inbox messages.
+    ///
+    /// # Errors
+    ///
+    /// Returns account, credential, validation, or protocol-adapter errors.
+    pub fn inbox_triage(
+        &self,
+        account_id: &str,
+        mailbox: Option<&str>,
+        limit: Option<u16>,
+        fetch_snippets: bool,
+    ) -> Result<kirje_core::InboxTriageReport, MailError> {
+        let mailbox = mailbox.unwrap_or("INBOX");
+        let limit = limit.unwrap_or(15).clamp(1, 50);
+
+        let search = kirje_core::MessageSearch {
+            account_id: account_id.to_owned(),
+            mailbox: mailbox.to_owned(),
+            from: None,
+            to: None,
+            subject: None,
+            text: None,
+            unread: None,
+            limit,
+        };
+
+        let page = self.search_messages(&search)?;
+        let credentials = if fetch_snippets && !page.messages.is_empty() {
+            self.credentials(account_id).ok()
+        } else {
+            None
+        };
+
+        let mut security_alerts = Vec::new();
+        let mut invoices_and_receipts = Vec::new();
+        let mut notifications = Vec::new();
+        let mut personal_and_direct = Vec::new();
+        let mut newsletters_and_promo = Vec::new();
+        let mut general = Vec::new();
+        let mut unread_count = 0;
+
+        for msg in &page.messages {
+            if !msg.is_read {
+                unread_count += 1;
+            }
+
+            let snippet = if let Some((acc, sec)) = &credentials {
+                let read = kirje_core::MessageRead {
+                    reference: msg.reference.clone(),
+                    max_body_chars: 120,
+                };
+                self.reader
+                    .read_message(acc, sec, &read)
+                    .ok()
+                    .and_then(|c| {
+                        c.text
+                            .map(|t| t.trim().chars().take(120).collect::<String>())
+                            .filter(|t| !t.is_empty())
+                            .or_else(|| {
+                                c.sanitized_html
+                                    .map(|h| h.trim().chars().take(120).collect::<String>())
+                            })
+                    })
+            } else {
+                None
+            };
+
+            let item = kirje_core::triage_envelope(msg, snippet);
+            match item.category {
+                kirje_core::TriageCategory::Security => security_alerts.push(item),
+                kirje_core::TriageCategory::Invoice => invoices_and_receipts.push(item),
+                kirje_core::TriageCategory::Notification => notifications.push(item),
+                kirje_core::TriageCategory::Personal => personal_and_direct.push(item),
+                kirje_core::TriageCategory::Newsletter => newsletters_and_promo.push(item),
+                kirje_core::TriageCategory::General => general.push(item),
+            }
+        }
+
+        Ok(kirje_core::InboxTriageReport {
+            contract_version: kirje_core::CONTRACT_VERSION.to_owned(),
+            account_id: account_id.to_owned(),
+            mailbox: mailbox.to_owned(),
+            total_inspected: page.messages.len(),
+            unread_count,
+            security_alerts,
+            invoices_and_receipts,
+            notifications,
+            personal_and_direct,
+            newsletters_and_promo,
+            general,
+        })
+    }
+
     /// Synchronize one bounded mailbox metadata batch into the local index.
     ///
     /// # Errors

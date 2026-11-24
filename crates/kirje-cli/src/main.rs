@@ -242,6 +242,17 @@ enum MessageCommand {
         #[arg(long)]
         message_id: Option<String>,
     },
+    /// Inspect recent mailbox messages and generate a structured triage report.
+    Triage {
+        #[arg(long)]
+        account: String,
+        #[arg(long, default_value = "INBOX")]
+        mailbox: String,
+        #[arg(long, default_value_t = 15)]
+        limit: u16,
+        #[arg(long)]
+        no_snippets: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -318,6 +329,13 @@ enum SendCommand {
     },
     /// Approve one exact plan in an interactive human terminal.
     Approve { plan_id: String },
+    /// Request interactive system approval for an immutable send plan without manual terminal typing.
+    RequestApproval {
+        plan_id: String,
+        /// Automatically apply and send the email once approved.
+        #[arg(long)]
+        apply: bool,
+    },
     /// Apply an already approved plan at most once.
     Apply { plan_id: String },
     /// Reconcile an ambiguous or needs-attention plan with an immutable operator assertion.
@@ -405,6 +423,28 @@ enum PolicyCommand {
 enum McpCommand {
     /// Start the typed MCP server over standard input/output.
     Serve,
+    /// Install or update kirje MCP configuration into popular AI agent clients.
+    Install {
+        /// Target agent client platform.
+        #[arg(long, default_value = "claude-desktop")]
+        client: McpClientTarget,
+        /// Explicit config path override.
+        #[arg(long)]
+        config_path: Option<PathBuf>,
+        /// Inspect changes without modifying configuration files.
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum, Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum McpClientTarget {
+    ClaudeDesktop,
+    Cursor,
+    Zed,
+    Cline,
+    All,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -589,7 +629,14 @@ fn execute_local(cli: &Cli) -> Result<Value, MailError> {
         Command::Draft { command } => handle_draft(cli, command),
         Command::Operation { command } => handle_operation(cli, command),
         Command::Policy { command } => handle_policy(cli, command),
-        Command::Mcp { .. } => unreachable!("MCP command handled before local dispatch"),
+        Command::Mcp { command } => match command {
+            McpCommand::Serve => unreachable!("MCP serve handled before local dispatch"),
+            McpCommand::Install {
+                client,
+                config_path,
+                dry_run,
+            } => handle_mcp_install(*client, config_path.clone(), *dry_run),
+        },
     }
 }
 
@@ -775,6 +822,17 @@ fn handle_message(cli: &Cli, command: &MessageCommand) -> Result<Value, MailErro
             uid: *uid,
             message_id: message_id.clone(),
         })?),
+        MessageCommand::Triage {
+            account,
+            mailbox,
+            limit,
+            no_snippets,
+        } => json_value(runtime(cli)?.inbox_triage(
+            account,
+            Some(mailbox),
+            Some(*limit),
+            !*no_snippets,
+        )?),
     }
 }
 
@@ -909,10 +967,338 @@ fn handle_send(cli: &Cli, command: &SendCommand) -> Result<Value, MailError> {
             json_value(runtime.approve_send(plan_id)?)
         }
         SendCommand::Apply { plan_id } => json_value(runtime(cli)?.apply_send(plan_id)?),
+        SendCommand::RequestApproval { plan_id, apply } => {
+            handle_request_approval(cli, plan_id, *apply)
+        }
         SendCommand::Reconcile { plan_id, assertion } => {
             json_value(runtime(cli)?.reconcile_send(plan_id, assertion)?)
         }
     }
+}
+
+fn handle_request_approval(cli: &Cli, plan_id: &str, apply: bool) -> Result<Value, MailError> {
+    let runtime = runtime(cli)?;
+    let plan = runtime.send_plan(plan_id)?;
+
+    let is_macos = cfg!(target_os = "macos");
+    let approved = if is_macos {
+        let to_emails: Vec<String> = plan.request.to.iter().map(|a| a.email.clone()).collect();
+        prompt_macos_approval(
+            &plan.id,
+            &plan.request.account_id,
+            &to_emails,
+            &plan.request.subject,
+        )?
+    } else if io::stdin().is_terminal() {
+        eprintln!(
+            "Send Request: from={}, to={:?}, subject={}",
+            plan.request.account_id,
+            plan.request.to.iter().map(|a| &a.email).collect::<Vec<_>>(),
+            plan.request.subject
+        );
+        let answer =
+            rpassword::prompt_password("Approve this send plan? [y/N]: ").unwrap_or_default();
+        matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+    } else {
+        return Err(MailError::invalid_input(
+            "request-approval requires a macOS desktop session or an interactive terminal",
+        ));
+    };
+
+    if !approved {
+        return Err(MailError::invalid_input(
+            "send approval was rejected or canceled by user",
+        ));
+    }
+
+    let approved_record = runtime.approve_send(plan_id)?;
+    if apply {
+        let applied_record = runtime.apply_send(plan_id)?;
+        json_value(serde_json::json!({
+            "contract_version": CONTRACT_VERSION,
+            "plan_id": plan_id,
+            "approved": true,
+            "applied": true,
+            "result": applied_record,
+        }))
+    } else {
+        json_value(serde_json::json!({
+            "contract_version": CONTRACT_VERSION,
+            "plan_id": plan_id,
+            "approved": true,
+            "applied": false,
+            "plan": approved_record,
+        }))
+    }
+}
+
+fn prompt_macos_approval(
+    _plan_id: &str,
+    account_id: &str,
+    recipients: &[String],
+    subject: &str,
+) -> Result<bool, MailError> {
+    let script = format!(
+        r#"display alert "Kirje 邮件发送审批请求" message "发件账户: {}\n收件人: {}\n主题: {}\n\n是否批准此发送计划？" as critical buttons {{"拒绝", "批准发送"}} default button "拒绝" cancel button "拒绝""#,
+        account_id.replace('"', "\\\""),
+        recipients.join(", ").replace('"', "\\\""),
+        subject.replace('"', "\\\"")
+    );
+
+    let output = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output();
+
+    match output {
+        Ok(out) => {
+            if out.status.success() {
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                Ok(stdout.contains("批准发送"))
+            } else {
+                Ok(false)
+            }
+        }
+        Err(e) => Err(MailError::stable(
+            MailErrorCode::Internal,
+            format!("failed to execute osascript: {e}"),
+        )),
+    }
+}
+
+#[derive(Serialize)]
+struct McpInstallItem {
+    client: McpClientTarget,
+    config_path: PathBuf,
+    status: &'static str,
+    server_name: &'static str,
+    command: String,
+    args: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct McpInstallOutput {
+    contract_version: &'static str,
+    success: bool,
+    results: Vec<McpInstallItem>,
+}
+
+fn resolve_client_configs(
+    target: McpClientTarget,
+    override_path: Option<PathBuf>,
+) -> Result<Vec<(McpClientTarget, PathBuf)>, MailError> {
+    if let Some(path) = override_path {
+        if target == McpClientTarget::All {
+            return Err(MailError::invalid_input(
+                "--config-path cannot be specified when target is 'all'",
+            ));
+        }
+        return Ok(vec![(target, path)]);
+    }
+
+    let base_dirs = directories::BaseDirs::new().ok_or_else(|| {
+        MailError::stable(
+            MailErrorCode::Internal,
+            "failed to resolve user home directory",
+        )
+    })?;
+    let home = base_dirs.home_dir();
+
+    let resolve_one = |t: McpClientTarget| -> Result<PathBuf, MailError> {
+        #[cfg(target_os = "macos")]
+        let path = match t {
+            McpClientTarget::ClaudeDesktop => {
+                home.join("Library/Application Support/Claude/claude_desktop_config.json")
+            }
+            McpClientTarget::Cursor => home.join(".cursor/mcp.json"),
+            McpClientTarget::Zed => home.join(".config/zed/settings.json"),
+            McpClientTarget::Cline => home.join("Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json"),
+            McpClientTarget::All => unreachable!(),
+        };
+
+        #[cfg(target_os = "linux")]
+        let path = match t {
+            McpClientTarget::ClaudeDesktop => home.join(".config/Claude/claude_desktop_config.json"),
+            McpClientTarget::Cursor => home.join(".cursor/mcp.json"),
+            McpClientTarget::Zed => home.join(".config/zed/settings.json"),
+            McpClientTarget::Cline => home.join(".config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json"),
+            McpClientTarget::All => unreachable!(),
+        };
+
+        #[cfg(target_os = "windows")]
+        let path = match t {
+            McpClientTarget::ClaudeDesktop => base_dirs
+                .config_dir()
+                .join("Claude/claude_desktop_config.json"),
+            McpClientTarget::Cursor => home.join(".cursor/mcp.json"),
+            McpClientTarget::Zed => home.join(".config/zed/settings.json"),
+            McpClientTarget::Cline => base_dirs.config_dir().join(
+                "Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json",
+            ),
+            McpClientTarget::All => unreachable!(),
+        };
+
+        #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+        let path = home.join(format!(
+            ".config/{}/mcp.json",
+            format!("{t:?}").to_lowercase()
+        ));
+
+        Ok(path)
+    };
+
+    match target {
+        McpClientTarget::All => Ok(vec![
+            (
+                McpClientTarget::ClaudeDesktop,
+                resolve_one(McpClientTarget::ClaudeDesktop)?,
+            ),
+            (
+                McpClientTarget::Cursor,
+                resolve_one(McpClientTarget::Cursor)?,
+            ),
+            (McpClientTarget::Zed, resolve_one(McpClientTarget::Zed)?),
+            (McpClientTarget::Cline, resolve_one(McpClientTarget::Cline)?),
+        ]),
+        single => Ok(vec![(single, resolve_one(single)?)]),
+    }
+}
+
+fn handle_mcp_install(
+    client: McpClientTarget,
+    config_path: Option<PathBuf>,
+    dry_run: bool,
+) -> Result<Value, MailError> {
+    let targets = resolve_client_configs(client, config_path)?;
+    let command_bin = std::env::current_exe().ok().map_or_else(
+        || "kirje".to_string(),
+        |p| {
+            let s = p.to_string_lossy().to_string();
+            if s.contains("/target/") {
+                "kirje".to_string()
+            } else {
+                s
+            }
+        },
+    );
+    let args = vec!["mcp".to_string(), "serve".to_string()];
+
+    let mut results = Vec::new();
+
+    for (target, path) in targets {
+        let item = update_single_client_config(target, path, &command_bin, &args, dry_run)?;
+        results.push(item);
+    }
+
+    json_value(McpInstallOutput {
+        contract_version: CONTRACT_VERSION,
+        success: true,
+        results,
+    })
+}
+
+fn update_single_client_config(
+    target: McpClientTarget,
+    path: PathBuf,
+    command_bin: &str,
+    args: &[String],
+    dry_run: bool,
+) -> Result<McpInstallItem, MailError> {
+    let mut existing_val = if path.exists() {
+        let content = std::fs::read_to_string(&path).map_err(|e| {
+            MailError::stable(
+                MailErrorCode::Internal,
+                format!("failed to read config {}: {e}", path.display()),
+            )
+        })?;
+        serde_json::from_str::<Value>(&content).unwrap_or_else(|_| serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+
+    if !existing_val.is_object() {
+        existing_val = serde_json::json!({});
+    }
+
+    let obj = existing_val.as_object_mut().expect("must be object");
+    let mut status = "installed";
+
+    if target == McpClientTarget::Zed {
+        let context_servers = obj
+            .entry("context_servers")
+            .or_insert_with(|| serde_json::json!({}));
+        if !context_servers.is_object() {
+            *context_servers = serde_json::json!({});
+        }
+        let cs_map = context_servers.as_object_mut().expect("must be object");
+        if cs_map.contains_key("kirje") {
+            status = "updated";
+        }
+        cs_map.insert(
+            "kirje".to_string(),
+            serde_json::json!({
+                "command": {
+                    "path": command_bin,
+                    "args": args
+                }
+            }),
+        );
+    } else {
+        let mcp_servers = obj
+            .entry("mcpServers")
+            .or_insert_with(|| serde_json::json!({}));
+        if !mcp_servers.is_object() {
+            *mcp_servers = serde_json::json!({});
+        }
+        let ms_map = mcp_servers.as_object_mut().expect("must be object");
+        if ms_map.contains_key("kirje") {
+            status = "updated";
+        }
+        ms_map.insert(
+            "kirje".to_string(),
+            serde_json::json!({
+                "command": command_bin,
+                "args": args
+            }),
+        );
+    }
+
+    if dry_run {
+        status = "dry_run";
+    } else {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                MailError::stable(
+                    MailErrorCode::Internal,
+                    format!(
+                        "failed to create parent directory {}: {e}",
+                        parent.display()
+                    ),
+                )
+            })?;
+        }
+        let formatted = serde_json::to_string_pretty(&existing_val).map_err(|e| {
+            MailError::stable(
+                MailErrorCode::Internal,
+                format!("failed to serialize JSON: {e}"),
+            )
+        })?;
+        std::fs::write(&path, formatted).map_err(|e| {
+            MailError::stable(
+                MailErrorCode::Internal,
+                format!("failed to write config {}: {e}", path.display()),
+            )
+        })?;
+    }
+
+    Ok(McpInstallItem {
+        client: target,
+        config_path: path,
+        status,
+        server_name: "kirje",
+        command: command_bin.to_string(),
+        args: args.to_vec(),
+    })
 }
 
 const MAX_SEND_INPUT_BYTES: usize = 24 * 1024 * 1024;
@@ -1309,6 +1695,21 @@ fn schema_report() -> SchemaReport {
                 "active account policy and safeguards",
             ),
             command("mcp serve", "governed_send_tools", "MCP stdio transport"),
+            command(
+                "mcp install",
+                "agent_client_configuration",
+                "automatic MCP configuration installer for AI clients",
+            ),
+            command(
+                "message triage",
+                "remote_read_only_bounded_untrusted",
+                "categorized inbox triage report with snippets",
+            ),
+            command(
+                "send request-approval <plan-id>",
+                "interactive_system_approval",
+                "native system dialog or interactive approval",
+            ),
         ],
         stable_exit_codes: vec![
             ExitCodeContract {
@@ -1453,5 +1854,36 @@ mod tests {
 
         assert!(list.is_ok());
         assert!(show.is_ok());
+    }
+
+    #[test]
+    fn mcp_install_dry_run_and_real_write_behave_deterministically() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let fake_config = temp_dir.path().join("fake_claude.json");
+        let result = handle_mcp_install(
+            McpClientTarget::ClaudeDesktop,
+            Some(fake_config.clone()),
+            true,
+        )
+        .expect("mcp install dry-run");
+        assert_eq!(result["success"], true);
+        assert_eq!(result["results"][0]["status"], "dry_run");
+        assert!(!fake_config.exists());
+
+        let write_result = handle_mcp_install(
+            McpClientTarget::ClaudeDesktop,
+            Some(fake_config.clone()),
+            false,
+        )
+        .expect("mcp install real write");
+        assert_eq!(write_result["results"][0]["status"], "installed");
+        assert!(fake_config.exists());
+
+        let content = std::fs::read_to_string(&fake_config).expect("read");
+        let parsed: serde_json::Value = serde_json::from_str(&content).expect("parse json");
+        assert_eq!(
+            parsed["mcpServers"]["kirje"]["args"],
+            serde_json::json!(["mcp", "serve"])
+        );
     }
 }

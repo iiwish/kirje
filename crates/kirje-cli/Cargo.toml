@@ -16,6 +16,7 @@ path = "src/main.rs"
 anyhow.workspace = true
 base64.workspace = true
 clap.workspace = true
+directories.workspace = true
 kirje-core.workspace = true
 kirje-local-io.workspace = true
 kirje-mcp.workspace = true

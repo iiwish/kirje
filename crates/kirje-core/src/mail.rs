@@ -996,6 +996,156 @@ pub trait MailboxReader: Send + Sync {
     }
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TriageCategory {
+    Security,
+    Invoice,
+    Notification,
+    Newsletter,
+    Personal,
+    General,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TriageActionHint {
+    ActionRequired,
+    Review,
+    Informational,
+    CanArchive,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct TriageItem {
+    pub reference: MessageReference,
+    pub subject: String,
+    pub sender: Option<String>,
+    pub sender_email: Option<String>,
+    pub sent_at: Option<DateTime<Utc>>,
+    pub is_unread: bool,
+    pub is_starred: bool,
+    pub category: TriageCategory,
+    pub action_hint: TriageActionHint,
+    pub snippet: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct InboxTriageReport {
+    pub contract_version: String,
+    pub account_id: String,
+    pub mailbox: String,
+    pub total_inspected: usize,
+    pub unread_count: usize,
+    pub security_alerts: Vec<TriageItem>,
+    pub invoices_and_receipts: Vec<TriageItem>,
+    pub notifications: Vec<TriageItem>,
+    pub personal_and_direct: Vec<TriageItem>,
+    pub newsletters_and_promo: Vec<TriageItem>,
+    pub general: Vec<TriageItem>,
+}
+
+#[must_use]
+pub fn triage_envelope(envelope: &MessageEnvelope, snippet: Option<String>) -> TriageItem {
+    let subject_lower = envelope.subject.to_ascii_lowercase();
+    let sender = envelope.from.first();
+    let sender_email = sender
+        .map(|s| s.email.to_ascii_lowercase())
+        .unwrap_or_default();
+    let sender_name = sender
+        .and_then(|s| s.name.as_deref())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    let is_security = subject_lower.contains("验证码")
+        || subject_lower.contains("verification code")
+        || subject_lower.contains("verify")
+        || subject_lower.contains("security alert")
+        || subject_lower.contains("登录警告")
+        || subject_lower.contains("异地登录")
+        || subject_lower.contains("password reset")
+        || subject_lower.contains("重置密码")
+        || subject_lower.contains("2fa")
+        || subject_lower.contains("auth code")
+        || subject_lower.contains("安全提示");
+
+    let is_invoice = subject_lower.contains("发票")
+        || subject_lower.contains("invoice")
+        || subject_lower.contains("receipt")
+        || subject_lower.contains("收据")
+        || subject_lower.contains("账单")
+        || subject_lower.contains("payment")
+        || subject_lower.contains("付款")
+        || subject_lower.contains("扣费")
+        || subject_lower.contains("order confirmation")
+        || subject_lower.contains("订单确认")
+        || subject_lower.contains("电子发票")
+        || subject_lower.contains("billing");
+
+    let is_notification = sender_email.contains("noreply")
+        || sender_email.contains("no-reply")
+        || sender_email.contains("do-not-reply")
+        || sender_email.contains("notification")
+        || sender_email.contains("mailer-daemon")
+        || sender_name.contains("github")
+        || sender_name.contains("gitlab")
+        || sender_name.contains("jira")
+        || subject_lower.contains("通知")
+        || subject_lower.contains("提醒")
+        || subject_lower.contains("notification")
+        || subject_lower.contains("alert")
+        || subject_lower.contains("物流")
+        || subject_lower.contains("delivery")
+        || subject_lower.contains("shipping");
+
+    let is_newsletter = subject_lower.contains("weekly")
+        || subject_lower.contains("newsletter")
+        || subject_lower.contains("digest")
+        || subject_lower.contains("周刊")
+        || subject_lower.contains("快讯")
+        || subject_lower.contains("优惠")
+        || subject_lower.contains("promotion")
+        || subject_lower.contains("退订")
+        || subject_lower.contains("unsubscribe");
+
+    let (category, action_hint) = if is_security {
+        (TriageCategory::Security, TriageActionHint::ActionRequired)
+    } else if is_invoice {
+        (TriageCategory::Invoice, TriageActionHint::Review)
+    } else if is_newsletter {
+        (TriageCategory::Newsletter, TriageActionHint::CanArchive)
+    } else if is_notification {
+        (
+            TriageCategory::Notification,
+            TriageActionHint::Informational,
+        )
+    } else if !sender_email.is_empty() {
+        (
+            TriageCategory::Personal,
+            if envelope.is_read {
+                TriageActionHint::Informational
+            } else {
+                TriageActionHint::Review
+            },
+        )
+    } else {
+        (TriageCategory::General, TriageActionHint::Informational)
+    };
+
+    TriageItem {
+        reference: envelope.reference.clone(),
+        subject: envelope.subject.clone(),
+        sender: sender.and_then(|s| s.name.clone()),
+        sender_email: sender.map(|s| s.email.clone()),
+        sent_at: envelope.sent_at,
+        is_unread: !envelope.is_read,
+        is_starred: envelope.is_starred,
+        category,
+        action_hint,
+        snippet,
+    }
+}
+
 pub trait MailboxMutator: Send + Sync {
     /// Apply one exact, already approved IMAP mutation.
     ///

@@ -13,7 +13,10 @@
         {"protocol": "smtp", "host": "smtp.163.com", "port": 465, "security": "implicit_tls", "runtime_default": true},
         {"protocol": "pop3", "host": "pop.163.com", "port": 995, "security": "implicit_tls", "runtime_default": false}
       ],
-      "guidance": ["Enable IMAP/SMTP and use the provider-issued client authorization password."],
+      "guidance": [
+        "Do not use your web login password.",
+        "In Webmail: Settings -> POP3/SMTP/IMAP -> enable the service and generate a dedicated 16-character client authorization password (客户端授权密码)."
+      ],
       "sources": [{"title": "NetEase client settings guide", "url": "https://help.mail.126.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac25c12dcb3d46222b6", "verified_at": "2026-08-26"}]
     },
     {
@@ -27,7 +30,10 @@
         {"protocol": "smtp", "host": "smtp.126.com", "port": 465, "security": "implicit_tls", "runtime_default": true},
         {"protocol": "pop3", "host": "pop.126.com", "port": 995, "security": "implicit_tls", "runtime_default": false}
       ],
-      "guidance": ["Enable IMAP/SMTP and use the provider-issued client authorization password."],
+      "guidance": [
+        "Do not use your web login password.",
+        "In Webmail: Settings -> POP3/SMTP/IMAP -> enable the service and generate a dedicated 16-character client authorization password (客户端授权密码)."
+      ],
       "sources": [{"title": "NetEase client settings guide", "url": "https://help.mail.126.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac25c12dcb3d46222b6", "verified_at": "2026-08-26"}]
     },
     {
@@ -41,7 +47,10 @@
         {"protocol": "smtp", "host": "smtp.yeah.net", "port": 465, "security": "implicit_tls", "runtime_default": true},
         {"protocol": "pop3", "host": "pop.yeah.net", "port": 995, "security": "implicit_tls", "runtime_default": false}
       ],
-      "guidance": ["Enable IMAP/SMTP and use the provider-issued client authorization password."],
+      "guidance": [
+        "Do not use your web login password.",
+        "In Webmail: Settings -> POP3/SMTP/IMAP -> enable the service and generate a dedicated 16-character client authorization password (客户端授权密码)."
+      ],
       "sources": [{"title": "NetEase client settings guide", "url": "https://help.mail.126.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac25c12dcb3d46222b6", "verified_at": "2026-08-26"}]
     },
     {
@@ -55,7 +64,10 @@
         {"protocol": "smtp", "host": "smtp.qq.com", "port": 465, "security": "implicit_tls", "runtime_default": true},
         {"protocol": "pop3", "host": "pop.qq.com", "port": 995, "security": "implicit_tls", "runtime_default": false}
       ],
-      "guidance": ["Enable IMAP/SMTP and use the provider-issued authorization code."],
+      "guidance": [
+        "Do not use your main QQ password.",
+        "In QQ Webmail: Settings -> Account -> POP3/IMAP/SMTP/Exchange Service -> generate a dedicated 16-character authorization code (授权码)."
+      ],
       "sources": [{"title": "Tencent Cloud email connector guide", "url": "https://main.qcloudimg.com/raw/document/product/pdf/1270_46586_cn.pdf", "verified_at": "2026-08-26"}]
     },
     {
@@ -69,7 +81,9 @@
         {"protocol": "smtp", "host": "smtp.139.com", "port": 465, "security": "implicit_tls", "runtime_default": true},
         {"protocol": "pop3", "host": "pop.139.com", "port": 995, "security": "implicit_tls", "runtime_default": false}
       ],
-      "guidance": ["Enable client protocol access and use a provider-issued client credential when required."],
+      "guidance": [
+        "In 139 Webmail: Settings -> Account Security -> Client Password/Authorization Code -> generate an authorization code."
+      ],
       "sources": [
         {"title": "139 Mail server addresses", "url": "https://help.mail.10086.cn/statichtml/6/Content/1454.html", "verified_at": "2026-08-26"},
         {"title": "139 Mail authorization codes", "url": "https://help.mail.10086.cn/statichtml/15/Content/1234605.html", "verified_at": "2026-08-26"}
@@ -86,7 +100,9 @@
         {"protocol": "smtp", "host": "smtp.189.cn", "port": 465, "security": "implicit_tls", "runtime_default": true},
         {"protocol": "pop3", "host": "pop.189.cn", "port": 995, "security": "implicit_tls", "runtime_default": false}
       ],
-      "guidance": ["Enable IMAP/SMTP and use the provider-issued client password."],
+      "guidance": [
+        "In 189 Webmail: Settings -> Client Access -> generate a dedicated client password (客户端专用密码)."
+      ],
       "sources": [{"title": "189 Mail client help", "url": "https://help.189.cn/client/client.html", "verified_at": "2026-08-26"}]
     },
     {
@@ -100,7 +116,9 @@
         {"protocol": "smtp", "host": "smtp.sina.com", "port": 465, "security": "implicit_tls", "runtime_default": true},
         {"protocol": "pop3", "host": "pop.sina.com", "port": 995, "security": "implicit_tls", "runtime_default": false}
       ],
-      "guidance": ["Enable client protocol access and use the provider-issued client credential."],
+      "guidance": [
+        "In Sina Webmail: Settings -> Account -> POP/IMAP/SMTP -> generate a client authorization code (客户端授权码)."
+      ],
       "sources": [
         {"title": "Sina Mail client server settings", "url": "https://help.sina.com.cn/comquestiondetail/view/160/", "verified_at": "2026-08-26"},
         {"title": "Sina Mail client authorization codes", "url": "https://help.sina.com.cn/comquestiondetail/view/1567/", "verified_at": "2026-08-26"}
@@ -117,7 +135,9 @@
         {"protocol": "smtp", "host": "smtp.sina.cn", "port": 465, "security": "implicit_tls", "runtime_default": true},
         {"protocol": "pop3", "host": "pop.sina.cn", "port": 995, "security": "implicit_tls", "runtime_default": false}
       ],
-      "guidance": ["Enable client protocol access and use the provider-issued client credential."],
+      "guidance": [
+        "In Sina Webmail: Settings -> Account -> POP/IMAP/SMTP -> generate a client authorization code (客户端授权码)."
+      ],
       "sources": [
         {"title": "Sina Mail client server settings", "url": "https://help.sina.com.cn/comquestiondetail/view/160/", "verified_at": "2026-08-26"},
         {"title": "Sina Mail client authorization codes", "url": "https://help.sina.com.cn/comquestiondetail/view/1567/", "verified_at": "2026-08-26"}
@@ -134,7 +154,9 @@
         {"protocol": "smtp", "host": "smtp.vip.sina.com", "port": 465, "security": "implicit_tls", "runtime_default": true},
         {"protocol": "pop3", "host": "pop.vip.sina.com", "port": 995, "security": "implicit_tls", "runtime_default": false}
       ],
-      "guidance": ["Enable client protocol access and use the provider-issued client credential."],
+      "guidance": [
+        "In Sina Webmail: Settings -> Account -> POP/IMAP/SMTP -> generate a client authorization code (客户端授权码)."
+      ],
       "sources": [
         {"title": "Sina Mail client server settings", "url": "https://help.sina.com.cn/comquestiondetail/view/160/", "verified_at": "2026-08-26"},
         {"title": "Sina Mail client authorization codes", "url": "https://help.sina.com.cn/comquestiondetail/view/1567/", "verified_at": "2026-08-26"}
@@ -151,7 +173,9 @@
         {"protocol": "smtp", "host": "smtp.vip.sina.cn", "port": 465, "security": "implicit_tls", "runtime_default": true},
         {"protocol": "pop3", "host": "pop.vip.sina.cn", "port": 995, "security": "implicit_tls", "runtime_default": false}
       ],
-      "guidance": ["Enable client protocol access and use the provider-issued client credential."],
+      "guidance": [
+        "In Sina Webmail: Settings -> Account -> POP/IMAP/SMTP -> generate a client authorization code (客户端授权码)."
+      ],
       "sources": [
         {"title": "Sina Mail client server settings", "url": "https://help.sina.com.cn/comquestiondetail/view/160/", "verified_at": "2026-08-26"},
         {"title": "Sina Mail client authorization codes", "url": "https://help.sina.com.cn/comquestiondetail/view/1567/", "verified_at": "2026-08-26"}

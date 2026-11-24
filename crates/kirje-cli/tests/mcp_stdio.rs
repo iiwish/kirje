@@ -43,11 +43,12 @@ fn stdio_handshake_is_protocol_clean_and_declares_local_write_safety() {
         .iter()
         .filter_map(|tool| tool["name"].as_str())
         .collect();
-    assert_eq!(names.len(), 25);
+    assert_eq!(names.len(), 26);
     assert!(names.contains(&"mailbox_list"));
     assert!(names.contains(&"mailbox_sync"));
     assert!(names.contains(&"message_search_local"));
     assert!(names.contains(&"message_thread"));
+    assert!(names.contains(&"message_triage"));
     assert!(names.contains(&"attachment_read"));
     let sync = tools
         .iter()

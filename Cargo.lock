@@ -1581,6 +1581,7 @@ dependencies = [
  "assert_cmd",
  "base64 0.22.1",
  "clap",
+ "directories",
  "kirje-core",
  "kirje-local-io",
  "kirje-mcp",

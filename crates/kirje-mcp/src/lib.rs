@@ -3,10 +3,10 @@
 use std::{path::PathBuf, sync::Arc};
 
 use kirje_core::{
-    AttachmentContent, AttachmentRead, CONTRACT_VERSION, Draft, DraftInput, LocalMessageSearch,
-    MailError, MailboxOperationRequest, MailboxPage, MailboxSyncReport, MailboxSyncState,
-    MessageContent, MessagePage, MessageRead, MessageSearch, OperationRecord, OperationSummary,
-    ProviderDiscovery, SendPlan, SendRequest, discover_account,
+    AttachmentContent, AttachmentRead, CONTRACT_VERSION, Draft, DraftInput, InboxTriageReport,
+    LocalMessageSearch, MailError, MailboxOperationRequest, MailboxPage, MailboxSyncReport,
+    MailboxSyncState, MessageContent, MessagePage, MessageRead, MessageSearch, OperationRecord,
+    OperationSummary, ProviderDiscovery, SendPlan, SendRequest, discover_account,
 };
 use kirje_runtime::{AccountStatus, KirjeRuntime};
 use rmcp::{
@@ -134,6 +134,19 @@ pub struct MessageThreadParams {
     pub uid: Option<u32>,
     /// Exact RFC 5322 Message-ID header value.
     pub message_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+pub struct MessageTriageParams {
+    /// Stable local account identifier.
+    pub account_id: String,
+    /// Remote mailbox name (defaults to "INBOX").
+    pub mailbox: Option<String>,
+    /// Maximum number of recent messages to inspect (1 to 50, defaults to 15).
+    #[schemars(range(min = 1, max = 50))]
+    pub limit: Option<u16>,
+    /// Whether to fetch clean text snippets for inspected messages (defaults to true).
+    pub fetch_snippets: Option<bool>,
 }
 
 #[derive(Clone, Debug, JsonSchema, Serialize)]
@@ -359,6 +372,33 @@ impl KirjeMcp {
                 uid: params.uid,
                 message_id: params.message_id,
             })
+        })
+        .await
+    }
+
+    #[tool(
+        description = "Inspect recent messages in a mailbox and produce a structured, categorized triage report (security alerts, invoices/receipts, notifications, newsletters, personal/work) for daily digest generation.",
+        output_schema = schema_for_type::<InboxTriageReport>(),
+        annotations(
+            title = "Triage recent messages",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
+    )]
+    async fn message_triage(
+        &self,
+        Parameters(params): Parameters<MessageTriageParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let runtime = self.runtime()?;
+        run_blocking(move || {
+            runtime.inbox_triage(
+                &params.account_id,
+                params.mailbox.as_deref(),
+                params.limit,
+                params.fetch_snippets.unwrap_or(true),
+            )
         })
         .await
     }
@@ -782,6 +822,7 @@ mod tests {
             "message_send_plan_draft",
             "message_send_status",
             "message_thread",
+            "message_triage",
             "system_status",
         ];
 
