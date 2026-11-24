@@ -3,6 +3,13 @@ all-features = true
 
 [advisories]
 yanked = "deny"
+ignore = [
+  "RUSTSEC-2026-0543", # chrono unmaintained upstream tracking
+  "RUSTSEC-2026-0370", # zvariant unmaintained in keyring/secret-service
+  "RUSTSEC-2026-0371", # zbus_names unmaintained in keyring/secret-service
+  "RUSTSEC-2026-0372", # zvariant_derive unmaintained in keyring/secret-service
+  "RUSTSEC-2026-0459", # libsqlite3-sys bundled wal page-cache (Kirje SQLite databases are private 0600)
+]
 
 [licenses]
 confidence-threshold = 0.8
