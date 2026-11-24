@@ -124,6 +124,18 @@ pub struct OperationAuditParams {
     pub limit: Option<u16>,
 }
 
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+pub struct MessageThreadParams {
+    /// Stable local account identifier.
+    pub account_id: String,
+    /// Exact server-returned mailbox name.
+    pub mailbox: String,
+    /// Scoped message UID in this mailbox.
+    pub uid: Option<u32>,
+    /// Exact RFC 5322 Message-ID header value.
+    pub message_id: Option<String>,
+}
+
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 pub struct RuntimeStatus {
     pub name: String,
@@ -322,6 +334,33 @@ impl KirjeMcp {
     ) -> Result<CallToolResult, ErrorData> {
         let runtime = self.runtime()?;
         run_blocking(move || runtime.search_index(&search)).await
+    }
+
+    #[tool(
+        description = "Reconstruct one deterministic header-based thread graph without network access or credentials.",
+        output_schema = schema_for_type::<Option<kirje_core::ThreadGraph>>(),
+        annotations(
+            title = "Reconstruct email thread graph",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn message_thread(
+        &self,
+        Parameters(params): Parameters<MessageThreadParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let runtime = self.runtime()?;
+        run_blocking(move || {
+            runtime.thread(&kirje_core::ThreadQuery {
+                account_id: params.account_id,
+                mailbox: params.mailbox,
+                uid: params.uid,
+                message_id: params.message_id,
+            })
+        })
+        .await
     }
 
     #[tool(

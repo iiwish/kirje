@@ -209,6 +209,29 @@ fn empty_local_index_status_and_search_need_no_secret() {
         serde_json::from_slice(&search.stdout).expect("search JSON");
     assert_eq!(search_json["data"]["returned"], 0);
     assert_eq!(search_json["data"]["untrusted"], true);
+
+    let thread = Command::cargo_bin("kirje")
+        .expect("kirje binary")
+        .args([
+            "--config",
+            config.to_str().expect("config path"),
+            "--index",
+            index.to_str().expect("index path"),
+            "message",
+            "thread",
+            "--account",
+            "personal",
+            "--mailbox",
+            "INBOX",
+            "--uid",
+            "1",
+        ])
+        .output()
+        .expect("thread query");
+    assert!(thread.status.success());
+    let thread_json: serde_json::Value =
+        serde_json::from_slice(&thread.stdout).expect("thread JSON");
+    assert!(thread_json["data"].is_null());
 }
 
 #[test]

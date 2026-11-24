@@ -226,6 +226,17 @@ enum MessageCommand {
         #[arg(long, default_value_t = kirje_core::DEFAULT_BODY_CHARS)]
         max_body_chars: u32,
     },
+    /// Reconstruct one deterministic thread graph without network access.
+    Thread {
+        #[arg(long)]
+        account: String,
+        #[arg(long)]
+        mailbox: String,
+        #[arg(long)]
+        uid: Option<u32>,
+        #[arg(long)]
+        message_id: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -725,6 +736,17 @@ fn handle_message(cli: &Cli, command: &MessageCommand) -> Result<Value, MailErro
             subject: subject.clone(),
             unread: *unread,
             limit: *limit,
+        })?),
+        MessageCommand::Thread {
+            account,
+            mailbox,
+            uid,
+            message_id,
+        } => json_value(runtime(cli)?.thread(&kirje_core::ThreadQuery {
+            account_id: account.clone(),
+            mailbox: mailbox.clone(),
+            uid: *uid,
+            message_id: message_id.clone(),
         })?),
     }
 }

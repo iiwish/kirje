@@ -468,6 +468,75 @@ pub trait MessageIndex: Send + Sync {
     ///
     /// Returns stable validation or store-read errors.
     fn search(&self, search: &LocalMessageSearch) -> Result<MessagePage, MailError>;
+
+    /// Reconstruct one deterministic thread graph by message reference or message ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable validation or store-read errors.
+    fn thread(&self, query: &ThreadQuery) -> Result<Option<ThreadGraph>, MailError>;
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ThreadQuery {
+    pub account_id: String,
+    pub mailbox: String,
+    pub uid: Option<u32>,
+    pub message_id: Option<String>,
+}
+
+impl ThreadQuery {
+    /// Validate query criteria and bounds.
+    ///
+    /// # Errors
+    ///
+    /// Returns a validation error for invalid scope, missing criteria, or out-of-bounds input.
+    pub fn validate(&self) -> Result<(), MailError> {
+        validate_scope(&self.account_id, &self.mailbox)?;
+        if self.uid.is_none() && self.message_id.is_none() {
+            return Err(MailError::invalid_input(
+                "thread query requires either a uid or message_id",
+            ));
+        }
+        if self.uid == Some(0) {
+            return Err(MailError::invalid_input("uid must be positive"));
+        }
+        if self
+            .message_id
+            .as_deref()
+            .is_some_and(|mid| mid.trim().is_empty() || mid.len() > MAX_SEARCH_VALUE_CHARS)
+        {
+            return Err(MailError::invalid_input("invalid message_id"));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct ThreadNode {
+    pub message_id: Option<String>,
+    pub uid: Option<u32>,
+    pub subject: Option<String>,
+    #[serde(default)]
+    pub from: Vec<MailAddress>,
+    pub sent_at: Option<DateTime<Utc>>,
+    pub is_read: Option<bool>,
+    #[serde(default)]
+    pub missing: bool,
+    #[serde(default)]
+    pub children: Vec<ThreadNode>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct ThreadGraph {
+    pub account_id: String,
+    pub mailbox: String,
+    pub thread_id: String,
+    pub subject: String,
+    pub total_messages: usize,
+    pub provisional: bool,
+    pub root: ThreadNode,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -1053,6 +1122,24 @@ mod tests {
             search.validate().unwrap_err().code,
             MailErrorCode::InvalidInput
         );
+
+        let query = ThreadQuery {
+            account_id: "personal".to_owned(),
+            mailbox: "INBOX".to_owned(),
+            uid: None,
+            message_id: None,
+        };
+        assert_eq!(
+            query.validate().unwrap_err().code,
+            MailErrorCode::InvalidInput
+        );
+        let valid_query = ThreadQuery {
+            account_id: "personal".to_owned(),
+            mailbox: "INBOX".to_owned(),
+            uid: Some(42),
+            message_id: None,
+        };
+        assert!(valid_query.validate().is_ok());
     }
 
     #[test]
@@ -1093,6 +1180,24 @@ mod tests {
             search.validate().unwrap_err().code,
             MailErrorCode::InvalidInput
         );
+
+        let query = ThreadQuery {
+            account_id: "personal".to_owned(),
+            mailbox: "INBOX".to_owned(),
+            uid: None,
+            message_id: None,
+        };
+        assert_eq!(
+            query.validate().unwrap_err().code,
+            MailErrorCode::InvalidInput
+        );
+        let valid_query = ThreadQuery {
+            account_id: "personal".to_owned(),
+            mailbox: "INBOX".to_owned(),
+            uid: Some(42),
+            message_id: None,
+        };
+        assert!(valid_query.validate().is_ok());
     }
 
     #[test]

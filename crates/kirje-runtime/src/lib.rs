@@ -15,8 +15,8 @@ use kirje_core::{
     MailboxReader, MailboxSpecialUse, MailboxSyncReport, MailboxSyncRequest, MailboxSyncState,
     MessageContent, MessageIndex, MessagePage, MessageRead, MessageSearch, OperationEvent,
     OperationLedger, OperationRecord, OperationSummary, Outbox, RemoteAttemptError,
-    SendAttemptError, SendPlan, SendPlanSummary, SendReceipt, SendRequest, SyncCursor, digest_json,
-    operation_record,
+    SendAttemptError, SendPlan, SendPlanSummary, SendReceipt, SendRequest, SyncCursor, ThreadGraph,
+    ThreadQuery, digest_json, operation_record,
 };
 use kirje_local_io::{
     BoundaryError, FileObjectIdentity, ReplaceExpectation, open_existing_regular, open_parent,
@@ -678,6 +678,17 @@ impl KirjeRuntime {
         self.index.search(search)
     }
 
+    /// Reconstruct one deterministic thread graph without consulting credentials or the network.
+    ///
+    /// # Errors
+    ///
+    /// Returns account, validation, or store errors.
+    pub fn thread(&self, query: &ThreadQuery) -> Result<Option<ThreadGraph>, MailError> {
+        query.validate()?;
+        let _account = self.account(&query.account_id)?;
+        self.index.thread(query)
+    }
+
     /// Read one explicitly selected attachment without remote mailbox mutation.
     ///
     /// # Errors
@@ -1329,6 +1340,10 @@ impl MessageIndex for UnavailableMessageIndex {
     }
 
     fn search(&self, _search: &LocalMessageSearch) -> Result<MessagePage, MailError> {
+        Err(index_unavailable())
+    }
+
+    fn thread(&self, _query: &ThreadQuery) -> Result<Option<ThreadGraph>, MailError> {
         Err(index_unavailable())
     }
 }

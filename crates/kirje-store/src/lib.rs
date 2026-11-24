@@ -7,6 +7,7 @@ pub use authority::*;
 pub use outbox::{SqliteOutbox, SqliteOutbox as SqliteOperationLedger};
 
 use std::{
+    collections::{HashMap, HashSet, VecDeque},
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -15,7 +16,7 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use kirje_core::{
     LocalMessageSearch, MAX_SYNC_LIMIT, MailError, MailErrorCode, MailboxSyncBatch,
     MailboxSyncReport, MailboxSyncState, MessageEnvelope, MessageIndex, MessagePage,
-    MessageReference,
+    MessageReference, ThreadGraph, ThreadNode, ThreadQuery,
 };
 use rusqlite::{
     Connection, OptionalExtension as _, Transaction, params, params_from_iter, types::Value,
@@ -333,6 +334,367 @@ impl MessageIndex for SqliteMessageIndex {
             untrusted: true,
         })
     }
+
+    #[allow(clippy::too_many_lines)]
+    fn thread(&self, query: &ThreadQuery) -> Result<Option<ThreadGraph>, MailError> {
+        query.validate()?;
+        let connection = self.connection()?;
+
+        let target = fetch_target_envelope(&connection, query)?;
+        let Some(target) = target else {
+            return Ok(None);
+        };
+
+        let state = self.state(&query.account_id, &query.mailbox)?;
+        let backfill_complete = state.as_ref().is_some_and(|s| s.backfill_complete);
+
+        let collected =
+            collect_thread_envelopes(&connection, &query.account_id, &query.mailbox, &target)?;
+        let (root, provisional) = build_thread_tree(&collected, &target, backfill_complete);
+        let total_messages = count_messages(&root);
+        let subject = root
+            .subject
+            .clone()
+            .unwrap_or_else(|| target.subject.clone());
+        let thread_id = root
+            .message_id
+            .clone()
+            .or_else(|| target.message_id.clone())
+            .unwrap_or_else(|| format!("uid-{}", target.reference.uid));
+
+        Ok(Some(ThreadGraph {
+            account_id: query.account_id.clone(),
+            mailbox: query.mailbox.clone(),
+            thread_id,
+            subject,
+            total_messages,
+            provisional,
+            root,
+        }))
+    }
+}
+
+const SELECT_ENVELOPE_COLUMNS: &str = "uid_validity, uid, message_id, in_reply_to_json, subject, from_json, to_json, sent_at, size, is_read, is_starred, has_attachment, truncated";
+
+fn fetch_target_envelope(
+    connection: &Connection,
+    query: &ThreadQuery,
+) -> Result<Option<MessageEnvelope>, MailError> {
+    if let Some(uid) = query.uid {
+        let sql = format!(
+            "SELECT {SELECT_ENVELOPE_COLUMNS} FROM messages
+             WHERE account_id = ?1 AND mailbox = ?2 AND uid = ?3 AND is_deleted = 0"
+        );
+        let mut statement = connection.prepare(&sql).map_err(|_| store_read_error())?;
+        let mut rows = statement
+            .query_map(params![query.account_id, query.mailbox, uid], |row| {
+                message_from_row(&query.account_id, &query.mailbox, row)
+            })
+            .map_err(|_| store_read_error())?;
+        match rows.next() {
+            Some(row) => row.map_err(|_| store_read_error())?.map(Some),
+            None => Ok(None),
+        }
+    } else if let Some(message_id) = &query.message_id {
+        let sql = format!(
+            "SELECT {SELECT_ENVELOPE_COLUMNS} FROM messages
+             WHERE account_id = ?1 AND mailbox = ?2 AND message_id = ?3 AND is_deleted = 0
+             ORDER BY sent_at IS NULL, sent_at DESC, uid DESC LIMIT 1"
+        );
+        let mut statement = connection.prepare(&sql).map_err(|_| store_read_error())?;
+        let mut rows = statement
+            .query_map(
+                params![query.account_id, query.mailbox, message_id],
+                |row| message_from_row(&query.account_id, &query.mailbox, row),
+            )
+            .map_err(|_| store_read_error())?;
+        match rows.next() {
+            Some(row) => row.map_err(|_| store_read_error())?.map(Some),
+            None => Ok(None),
+        }
+    } else {
+        Ok(None)
+    }
+}
+
+fn collect_thread_envelopes(
+    connection: &Connection,
+    account_id: &str,
+    mailbox: &str,
+    target: &MessageEnvelope,
+) -> Result<Vec<MessageEnvelope>, MailError> {
+    let mut collected: Vec<MessageEnvelope> = vec![target.clone()];
+    let mut seen_uids: HashSet<u32> = HashSet::new();
+    seen_uids.insert(target.reference.uid);
+
+    let mut queue: VecDeque<String> = VecDeque::new();
+    let mut queued_ids: HashSet<String> = HashSet::new();
+
+    if let Some(mid) = &target.message_id {
+        queued_ids.insert(mid.clone());
+        queue.push_back(mid.clone());
+    }
+    for parent in &target.in_reply_to {
+        if queued_ids.insert(parent.clone()) {
+            queue.push_back(parent.clone());
+        }
+    }
+
+    let mut iterations = 0;
+    while let Some(current_id) = queue.pop_front() {
+        iterations += 1;
+        if iterations > 200 {
+            break;
+        }
+
+        let sql_up = format!(
+            "SELECT {SELECT_ENVELOPE_COLUMNS} FROM messages
+             WHERE account_id = ?1 AND mailbox = ?2 AND message_id = ?3 AND is_deleted = 0"
+        );
+        let mut stmt_up = connection
+            .prepare(&sql_up)
+            .map_err(|_| store_read_error())?;
+        let rows_up = stmt_up
+            .query_map(params![account_id, mailbox, current_id], |row| {
+                message_from_row(account_id, mailbox, row)
+            })
+            .map_err(|_| store_read_error())?;
+        for row in rows_up {
+            let env = row.map_err(|_| store_read_error())??;
+            if seen_uids.insert(env.reference.uid) {
+                for parent in &env.in_reply_to {
+                    if queued_ids.insert(parent.clone()) {
+                        queue.push_back(parent.clone());
+                    }
+                }
+                collected.push(env);
+            }
+        }
+
+        let sql_down = format!(
+            "SELECT {SELECT_ENVELOPE_COLUMNS} FROM messages
+             WHERE account_id = ?1 AND mailbox = ?2 AND in_reply_to_json LIKE ?3 AND is_deleted = 0"
+        );
+        let mut stmt_down = connection
+            .prepare(&sql_down)
+            .map_err(|_| store_read_error())?;
+        let pattern = format!("%\"{}\"%", current_id.replace('"', ""));
+        let rows_down = stmt_down
+            .query_map(params![account_id, mailbox, pattern], |row| {
+                message_from_row(account_id, mailbox, row)
+            })
+            .map_err(|_| store_read_error())?;
+        for row in rows_down {
+            let env = row.map_err(|_| store_read_error())??;
+            if seen_uids.insert(env.reference.uid) {
+                if let Some(child_id) = env
+                    .message_id
+                    .as_ref()
+                    .filter(|id| queued_ids.insert((*id).clone()))
+                {
+                    queue.push_back(child_id.clone());
+                }
+                collected.push(env);
+            }
+        }
+    }
+
+    Ok(collected)
+}
+
+fn build_thread_tree(
+    messages: &[MessageEnvelope],
+    target: &MessageEnvelope,
+    backfill_complete: bool,
+) -> (ThreadNode, bool) {
+    let mut by_id: HashMap<String, Vec<&MessageEnvelope>> = HashMap::new();
+    for msg in messages {
+        if let Some(mid) = &msg.message_id {
+            by_id.entry(mid.clone()).or_default().push(msg);
+        }
+    }
+    for list in by_id.values_mut() {
+        list.sort_unstable_by_key(|m| (m.sent_at, m.reference.uid));
+    }
+
+    let mut missing_parents: HashSet<String> = HashSet::new();
+    let mut children_map: HashMap<String, Vec<&MessageEnvelope>> = HashMap::new();
+    let mut roots: Vec<&MessageEnvelope> = Vec::new();
+
+    for msg in messages {
+        let parent_id = msg.in_reply_to.last().cloned();
+        match parent_id {
+            Some(pid) => {
+                if by_id.contains_key(&pid) {
+                    children_map.entry(pid).or_default().push(msg);
+                } else {
+                    missing_parents.insert(pid.clone());
+                    children_map.entry(pid).or_default().push(msg);
+                }
+            }
+            None => {
+                roots.push(msg);
+            }
+        }
+    }
+
+    let has_missing = !missing_parents.is_empty();
+    let provisional = !backfill_complete || has_missing;
+
+    if let Some(first_missing) = missing_parents.iter().next() {
+        let ancestor_missing = find_missing_ancestor_of_target(target, &missing_parents, &by_id)
+            .unwrap_or_else(|| first_missing.clone());
+        let mut path = HashSet::new();
+        let root = build_node_for_missing(&ancestor_missing, &children_map, &mut path);
+        return (root, provisional);
+    }
+
+    roots.sort_unstable_by_key(|m| (m.sent_at, m.reference.uid));
+    let target_root = find_root_for_target(target, &roots, &by_id)
+        .or_else(|| roots.first().copied())
+        .unwrap_or(target);
+
+    let mut path = HashSet::new();
+    let root = build_node_for_message(target_root, &children_map, &mut path);
+    (root, provisional)
+}
+
+fn build_node_for_message(
+    msg: &MessageEnvelope,
+    children_map: &HashMap<String, Vec<&MessageEnvelope>>,
+    path: &mut HashSet<String>,
+) -> ThreadNode {
+    let mid_str = msg
+        .message_id
+        .clone()
+        .unwrap_or_else(|| format!("uid:{}", msg.reference.uid));
+    path.insert(mid_str.clone());
+
+    let mut children = Vec::new();
+    let child_msgs = msg
+        .message_id
+        .as_ref()
+        .and_then(|mid| children_map.get(mid));
+    if let Some(child_msgs) = child_msgs {
+        let mut sorted = child_msgs.clone();
+        sorted.sort_unstable_by_key(|m| (m.sent_at, m.reference.uid));
+        for child in sorted {
+            let child_id = child
+                .message_id
+                .clone()
+                .unwrap_or_else(|| format!("uid:{}", child.reference.uid));
+            if !path.contains(&child_id) {
+                children.push(build_node_for_message(child, children_map, path));
+            }
+        }
+    }
+
+    path.remove(&mid_str);
+
+    ThreadNode {
+        message_id: msg.message_id.clone(),
+        uid: Some(msg.reference.uid),
+        subject: Some(msg.subject.clone()),
+        from: msg.from.clone(),
+        sent_at: msg.sent_at,
+        is_read: Some(msg.is_read),
+        missing: false,
+        children,
+    }
+}
+
+fn build_node_for_missing(
+    missing_id: &str,
+    children_map: &HashMap<String, Vec<&MessageEnvelope>>,
+    path: &mut HashSet<String>,
+) -> ThreadNode {
+    path.insert(missing_id.to_owned());
+
+    let mut children = Vec::new();
+    if let Some(child_msgs) = children_map.get(missing_id) {
+        let mut sorted = child_msgs.clone();
+        sorted.sort_unstable_by_key(|m| (m.sent_at, m.reference.uid));
+        for child in sorted {
+            let child_id = child
+                .message_id
+                .clone()
+                .unwrap_or_else(|| format!("uid:{}", child.reference.uid));
+            if !path.contains(&child_id) {
+                children.push(build_node_for_message(child, children_map, path));
+            }
+        }
+    }
+
+    path.remove(missing_id);
+
+    ThreadNode {
+        message_id: Some(missing_id.to_owned()),
+        uid: None,
+        subject: None,
+        from: Vec::new(),
+        sent_at: None,
+        is_read: None,
+        missing: true,
+        children,
+    }
+}
+
+fn count_messages(node: &ThreadNode) -> usize {
+    let self_count = usize::from(!node.missing);
+    let child_count: usize = node.children.iter().map(count_messages).sum();
+    self_count + child_count
+}
+
+fn find_missing_ancestor_of_target(
+    target: &MessageEnvelope,
+    missing_parents: &HashSet<String>,
+    by_id: &HashMap<String, Vec<&MessageEnvelope>>,
+) -> Option<String> {
+    let mut current_refs = target.in_reply_to.clone();
+    let mut visited = HashSet::new();
+    while let Some(parent_id) = current_refs.pop() {
+        if !visited.insert(parent_id.clone()) {
+            continue;
+        }
+        if missing_parents.contains(&parent_id) {
+            return Some(parent_id);
+        }
+        if let Some(parents) = by_id.get(&parent_id) {
+            for p in parents {
+                for p_ref in &p.in_reply_to {
+                    current_refs.push(p_ref.clone());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn find_root_for_target<'a>(
+    target: &'a MessageEnvelope,
+    roots: &[&'a MessageEnvelope],
+    by_id: &HashMap<String, Vec<&'a MessageEnvelope>>,
+) -> Option<&'a MessageEnvelope> {
+    let mut current_refs = target.in_reply_to.clone();
+    let mut visited = HashSet::new();
+    while let Some(parent_id) = current_refs.pop() {
+        if !visited.insert(parent_id.clone()) {
+            continue;
+        }
+        for root in roots {
+            if root.message_id.as_deref() == Some(&parent_id) {
+                return Some(root);
+            }
+        }
+        if let Some(parents) = by_id.get(&parent_id) {
+            for p in parents {
+                for p_ref in &p.in_reply_to {
+                    current_refs.push(p_ref.clone());
+                }
+            }
+        }
+    }
+    None
 }
 
 fn migrate(connection: &mut Connection) -> Result<(), MailError> {
@@ -937,5 +1299,119 @@ mod tests {
             unread,
             limit,
         }
+    }
+
+    #[test]
+    fn thread_reconstruction_linear_hierarchy_and_provisional_flag() {
+        let (_directory, index) = index();
+
+        let mut msg_a = message(1, 1, "Root Topic", true);
+        msg_a.message_id = Some("a@example.com".to_owned());
+
+        let mut msg_b = message(1, 2, "Re: Root Topic", true);
+        msg_b.message_id = Some("b@example.com".to_owned());
+        msg_b.in_reply_to = vec!["a@example.com".to_owned()];
+
+        let mut msg_c = message(1, 3, "Re: Re: Root Topic", true);
+        msg_c.message_id = Some("c@example.com".to_owned());
+        msg_c.in_reply_to = vec!["a@example.com".to_owned(), "b@example.com".to_owned()];
+
+        let mut sync_batch = batch(1, vec![msg_a, msg_b, msg_c]);
+        sync_batch.backfill_complete = true;
+        index.apply_sync(&sync_batch, false).expect("sync");
+
+        let query = ThreadQuery {
+            account_id: "personal".to_owned(),
+            mailbox: "INBOX".to_owned(),
+            uid: Some(2),
+            message_id: None,
+        };
+        let graph = index.thread(&query).expect("thread").expect("found");
+        assert_eq!(graph.thread_id, "a@example.com");
+        assert_eq!(graph.total_messages, 3);
+        assert!(!graph.provisional);
+        assert_eq!(graph.root.message_id.as_deref(), Some("a@example.com"));
+        assert_eq!(graph.root.children.len(), 1);
+        assert_eq!(
+            graph.root.children[0].message_id.as_deref(),
+            Some("b@example.com")
+        );
+        assert_eq!(graph.root.children[0].children.len(), 1);
+        assert_eq!(
+            graph.root.children[0].children[0].message_id.as_deref(),
+            Some("c@example.com")
+        );
+    }
+
+    #[test]
+    fn thread_reconstruction_handles_branching_and_missing_parent() {
+        let (_directory, index) = index();
+
+        let mut msg_b = message(1, 2, "Re: Root Topic", true);
+        msg_b.message_id = Some("b@example.com".to_owned());
+        msg_b.in_reply_to = vec!["missing-root@example.com".to_owned()];
+
+        let mut msg_c = message(1, 3, "Re: Root Topic (other branch)", true);
+        msg_c.message_id = Some("c@example.com".to_owned());
+        msg_c.in_reply_to = vec!["missing-root@example.com".to_owned()];
+
+        let mut sync_batch = batch(1, vec![msg_b, msg_c]);
+        sync_batch.backfill_complete = false;
+        index.apply_sync(&sync_batch, false).expect("sync");
+
+        let query = ThreadQuery {
+            account_id: "personal".to_owned(),
+            mailbox: "INBOX".to_owned(),
+            uid: None,
+            message_id: Some("b@example.com".to_owned()),
+        };
+        let graph = index.thread(&query).expect("thread").expect("found");
+        assert!(graph.provisional);
+        assert_eq!(graph.total_messages, 2);
+        assert!(graph.root.missing);
+        assert_eq!(
+            graph.root.message_id.as_deref(),
+            Some("missing-root@example.com")
+        );
+        assert_eq!(graph.root.children.len(), 2);
+    }
+
+    #[test]
+    fn thread_reconstruction_breaks_cycles_and_ignores_subject_only_similarity() {
+        let (_directory, index) = index();
+
+        let mut msg_x = message(1, 10, "Cycle Topic", true);
+        msg_x.message_id = Some("x@example.com".to_owned());
+        msg_x.in_reply_to = vec!["y@example.com".to_owned()];
+
+        let mut msg_y = message(1, 11, "Cycle Topic", true);
+        msg_y.message_id = Some("y@example.com".to_owned());
+        msg_y.in_reply_to = vec!["x@example.com".to_owned()];
+
+        let mut msg_separate = message(1, 12, "Cycle Topic", true);
+        msg_separate.message_id = Some("separate@example.com".to_owned());
+        msg_separate.in_reply_to = Vec::new();
+
+        let sync_batch = batch(1, vec![msg_x, msg_y, msg_separate]);
+        index.apply_sync(&sync_batch, false).expect("sync");
+
+        let query = ThreadQuery {
+            account_id: "personal".to_owned(),
+            mailbox: "INBOX".to_owned(),
+            uid: Some(10),
+            message_id: None,
+        };
+        let graph = index.thread(&query).expect("thread").expect("found");
+        assert_eq!(graph.total_messages, 2);
+
+        let query_sep = ThreadQuery {
+            account_id: "personal".to_owned(),
+            mailbox: "INBOX".to_owned(),
+            uid: Some(12),
+            message_id: None,
+        };
+        let graph_sep = index.thread(&query_sep).expect("thread").expect("found");
+        assert_eq!(graph_sep.total_messages, 1);
+        assert_eq!(graph_sep.thread_id, "separate@example.com");
     }
 }
