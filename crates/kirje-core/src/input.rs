@@ -1,8 +1,9 @@
 use serde::de::DeserializeOwned;
 
 use crate::{
-    AttachmentRead, AuthorizationProof, DraftInput, LocalMessageSearch, MailError, MailErrorCode,
-    MailboxOperationRequest, MailboxSyncRequest, MessageRead, MessageSearch, SendRequest,
+    AccountPolicy, AttachmentRead, AuthorizationProof, DraftInput, LocalMessageSearch, MailError,
+    MailErrorCode, MailboxOperationRequest, MailboxSyncRequest, MessageRead, MessageSearch,
+    SendRequest,
 };
 
 #[derive(Clone, Copy)]
@@ -16,6 +17,7 @@ pub(crate) enum InputShape {
     AttachmentRead,
     MessageRead,
     AuthorizationProof,
+    AccountPolicy,
 }
 
 mod sealed {
@@ -100,6 +102,12 @@ bounded_input!(
     AuthorizationProof,
     crate::MAX_AUTHORIZATION_PROOF_BYTES,
     validate_authorization_proof
+);
+bounded_input!(
+    AccountPolicy,
+    AccountPolicy,
+    crate::MAX_OPERATION_INPUT_BYTES,
+    AccountPolicy::validate
 );
 
 /// Parse one complete JSON request through the shape owned by its sealed type.

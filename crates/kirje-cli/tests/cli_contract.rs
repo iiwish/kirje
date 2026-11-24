@@ -259,6 +259,7 @@ fn relative_config_and_index_paths_are_supported() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn send_plan_is_local_and_approval_rejects_piped_input() {
     let directory = tempfile::tempdir().expect("temp dir");
     let config = directory.path().join("accounts.toml");
@@ -290,6 +291,43 @@ fn send_plan_is_local_and_approval_rejects_piped_input() {
         .expect("kirje binary")
         .args(common)
         .args(["account", "add", "personal", "agent@163.com"])
+        .assert()
+        .success();
+
+    // Verify default policy is read-only for remote writes (FR-014)
+    let default_policy = Command::cargo_bin("kirje")
+        .expect("kirje binary")
+        .args(common)
+        .args(["policy", "show", "personal"])
+        .output()
+        .expect("policy show");
+    assert!(default_policy.status.success());
+    let policy_json: serde_json::Value =
+        serde_json::from_slice(&default_policy.stdout).expect("policy JSON");
+    assert_eq!(policy_json["data"]["allow_remote_write"], false);
+
+    // Unconfigured/read-only policy rejects send planning
+    let rejected_plan = Command::cargo_bin("kirje")
+        .expect("kirje binary")
+        .args(common)
+        .args([
+            "send",
+            "plan",
+            "--input",
+            request.to_str().expect("request"),
+        ])
+        .output()
+        .expect("plan rejected");
+    assert_eq!(rejected_plan.status.code(), Some(1));
+    let rej_json: serde_json::Value =
+        serde_json::from_slice(&rejected_plan.stdout).expect("rej JSON");
+    assert_eq!(rej_json["error"]["code"], "unsupported_capability");
+
+    // Enable governed remote write for personal account
+    Command::cargo_bin("kirje")
+        .expect("kirje binary")
+        .args(common)
+        .args(["policy", "enable", "personal"])
         .assert()
         .success();
 

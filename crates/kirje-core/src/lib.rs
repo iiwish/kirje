@@ -13,6 +13,7 @@ mod bounded;
 mod input;
 mod mail;
 mod operation;
+mod policy;
 mod send;
 
 pub use account::*;
@@ -21,6 +22,7 @@ pub use bounded::*;
 pub use input::*;
 pub use mail::*;
 pub use operation::*;
+pub use policy::*;
 pub use send::*;
 
 pub const CONTRACT_VERSION: &str = "2026-09-04.1";
@@ -109,6 +111,15 @@ pub struct ProviderSource {
     pub verified_at: String,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderSupportTier {
+    #[default]
+    ReferenceConfiguration,
+    FixtureTested,
+    LiveVerified,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 pub struct ProviderPreset {
     pub id: String,
@@ -119,6 +130,8 @@ pub struct ProviderPreset {
     pub endpoints: Vec<ProviderEndpointPreset>,
     pub guidance: Vec<String>,
     pub sources: Vec<ProviderSource>,
+    #[serde(default)]
+    pub support_tier: ProviderSupportTier,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]

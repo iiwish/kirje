@@ -8,11 +8,11 @@ use anyhow::Context as _;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use clap::{Parser, Subcommand, ValueEnum};
 use kirje_core::{
-    AttachmentRead, BoundedJsonInput, CONTRACT_VERSION, CredentialKind, DraftInput, Endpoint,
-    LocalMessageSearch, MailAccountConfig, MailError, MailErrorCode, MailboxOperationRequest,
-    MessageRead, MessageReference, MessageSearch, Protocol, SendAttachment, SendRequest,
-    TransportSecurity, discover_account, find_provider_preset, parse_bounded_json,
-    provider_registry,
+    AccountPolicy, AttachmentRead, BoundedJsonInput, CONTRACT_VERSION, CredentialKind, DraftInput,
+    Endpoint, LocalMessageSearch, MailAccountConfig, MailError, MailErrorCode,
+    MailboxOperationRequest, MessageRead, MessageReference, MessageSearch, Protocol,
+    SendAttachment, SendRequest, TransportSecurity, discover_account, find_provider_preset,
+    parse_bounded_json, provider_registry,
 };
 use kirje_local_io::{
     BoundaryError, open_existing_regular, open_parent, read_bounded, read_stream_bounded,
@@ -107,6 +107,11 @@ enum Command {
     Operation {
         #[command(subcommand)]
         command: OperationCommand,
+    },
+    /// Inspect or configure local account policy.
+    Policy {
+        #[command(subcommand)]
+        command: PolicyCommand,
     },
     /// Run protocol adapters for agent harnesses.
     Mcp {
@@ -382,6 +387,21 @@ enum OperationCommand {
 }
 
 #[derive(Subcommand)]
+enum PolicyCommand {
+    /// Show the active policy for an account.
+    Show { account_id: String },
+    /// Set the policy for an account from bounded JSON input.
+    Set {
+        account_id: String,
+        /// JSON file path, or '-' to read from stdin.
+        #[arg(long)]
+        input: String,
+    },
+    /// Enable governed remote operations with standard safeguards.
+    Enable { account_id: String },
+}
+
+#[derive(Subcommand)]
 enum McpCommand {
     /// Start the typed MCP server over standard input/output.
     Serve,
@@ -568,6 +588,7 @@ fn execute_local(cli: &Cli) -> Result<Value, MailError> {
         Command::Send { command } => handle_send(cli, command),
         Command::Draft { command } => handle_draft(cli, command),
         Command::Operation { command } => handle_operation(cli, command),
+        Command::Policy { command } => handle_policy(cli, command),
         Command::Mcp { .. } => unreachable!("MCP command handled before local dispatch"),
     }
 }
@@ -980,6 +1001,27 @@ fn handle_operation(cli: &Cli, command: &OperationCommand) -> Result<Value, Mail
     }
 }
 
+const MAX_POLICY_INPUT_BYTES: usize = 64 * 1024;
+
+fn handle_policy(cli: &Cli, command: &PolicyCommand) -> Result<Value, MailError> {
+    let runtime = runtime(cli)?;
+    match command {
+        PolicyCommand::Show { account_id } => json_value(runtime.account_policy(account_id)?),
+        PolicyCommand::Set { account_id, input } => {
+            let mut policy: AccountPolicy =
+                read_json_input(input, MAX_POLICY_INPUT_BYTES, "account policy")?;
+            policy.account_id.clone_from(account_id);
+            runtime.set_account_policy(policy.clone())?;
+            json_value(policy)
+        }
+        PolicyCommand::Enable { account_id } => {
+            let policy = AccountPolicy::default_governed(account_id);
+            runtime.set_account_policy(policy.clone())?;
+            json_value(policy)
+        }
+    }
+}
+
 fn read_json_input<T: BoundedJsonInput>(
     input: &str,
     max_bytes: usize,
@@ -1177,6 +1219,7 @@ fn doctor_report(
     })
 }
 
+#[allow(clippy::too_many_lines)]
 fn schema_report() -> SchemaReport {
     SchemaReport {
         name: "kirje",
@@ -1259,6 +1302,11 @@ fn schema_report() -> SchemaReport {
                 "operation approve|apply",
                 "interactive_approval_or_approved_remote_write",
                 "remote operation certainty state",
+            ),
+            command(
+                "policy show|set|enable <account>",
+                "local_account_policy",
+                "active account policy and safeguards",
             ),
             command("mcp serve", "governed_send_tools", "MCP stdio transport"),
         ],

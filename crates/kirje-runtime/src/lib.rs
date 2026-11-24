@@ -9,12 +9,12 @@ use std::{
 use chrono::Utc;
 use directories::ProjectDirs;
 use kirje_core::{
-    AttachmentContent, AttachmentRead, ConnectionReport, Draft, DraftInput, DraftSummary,
-    LocalMessageSearch, MAX_OPERATION_LIMIT, MailAccountConfig, MailError, MailErrorCode,
-    MailOperationKind, MailSender, MailboxMutator, MailboxOperationRequest, MailboxPage,
-    MailboxReader, MailboxSpecialUse, MailboxSyncReport, MailboxSyncRequest, MailboxSyncState,
-    MessageContent, MessageIndex, MessagePage, MessageRead, MessageSearch, OperationEvent,
-    OperationLedger, OperationRecord, OperationSummary, Outbox, RemoteAttemptError,
+    AccountPolicy, AttachmentContent, AttachmentRead, ConnectionReport, Draft, DraftInput,
+    DraftSummary, LocalMessageSearch, MAX_OPERATION_LIMIT, MailAccountConfig, MailError,
+    MailErrorCode, MailOperationKind, MailSender, MailboxMutator, MailboxOperationRequest,
+    MailboxPage, MailboxReader, MailboxSpecialUse, MailboxSyncReport, MailboxSyncRequest,
+    MailboxSyncState, MessageContent, MessageIndex, MessagePage, MessageRead, MessageSearch,
+    OperationEvent, OperationLedger, OperationRecord, OperationSummary, Outbox, RemoteAttemptError,
     SendAttemptError, SendPlan, SendPlanSummary, SendReceipt, SendRequest, SentFilingPolicy,
     SyncCursor, ThreadGraph, ThreadQuery, digest_json, operation_record,
 };
@@ -54,6 +54,20 @@ pub trait AccountRepository: Send + Sync {
     ///
     /// Returns a stable validation or configuration error.
     fn create(&self, account: MailAccountConfig) -> Result<(), MailError>;
+
+    /// Look up the configured policy for an account.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable configuration error when storage cannot be read.
+    fn get_policy(&self, account_id: &str) -> Result<Option<AccountPolicy>, MailError>;
+
+    /// Set or update the policy for an account using an atomic write.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable configuration error when persistence fails.
+    fn set_policy(&self, policy: AccountPolicy) -> Result<(), MailError>;
 }
 
 /// Storage contract for credentials. Implementations must never expose values
@@ -95,6 +109,8 @@ struct ConfigDocument {
     version: u16,
     #[serde(default)]
     accounts: Vec<MailAccountConfig>,
+    #[serde(default)]
+    policies: Vec<AccountPolicy>,
 }
 
 impl Default for ConfigDocument {
@@ -102,6 +118,7 @@ impl Default for ConfigDocument {
         Self {
             version: CONFIG_VERSION,
             accounts: Vec::new(),
+            policies: Vec::new(),
         }
     }
 }
@@ -279,6 +296,31 @@ impl AccountRepository for TomlAccountRepository {
         document
             .accounts
             .sort_by(|left, right| left.id.cmp(&right.id));
+        self.save(&document, identity)
+    }
+
+    fn get_policy(&self, account_id: &str) -> Result<Option<AccountPolicy>, MailError> {
+        Ok(self
+            .load()?
+            .policies
+            .into_iter()
+            .find(|policy| policy.account_id == account_id))
+    }
+
+    fn set_policy(&self, policy: AccountPolicy) -> Result<(), MailError> {
+        let (mut document, identity) = self.load_with_identity()?;
+        if let Some(existing) = document
+            .policies
+            .iter_mut()
+            .find(|item| item.account_id == policy.account_id)
+        {
+            *existing = policy;
+        } else {
+            document.policies.push(policy);
+        }
+        document
+            .policies
+            .sort_by(|left, right| left.account_id.cmp(&right.account_id));
         self.save(&document, identity)
     }
 }
@@ -820,6 +862,8 @@ impl KirjeRuntime {
             );
         }
         request.validate()?;
+        let policy = self.account_policy(&request.account_id)?;
+        policy.check_mail_operation(&request)?;
         let (payload_json, payload_sha256) = digest_json(&request)?;
         let mut record = operation_record(
             Uuid::new_v4().to_string(),
@@ -929,6 +973,13 @@ impl KirjeRuntime {
                 Utc::now(),
             );
         }
+        let policy = match self.account_policy(&operation.account_id) {
+            Ok(policy) => policy,
+            Err(error) => return self.outbox.fail_operation(operation_id, error, Utc::now()),
+        };
+        if let Err(error) = policy.check_mail_operation(&operation) {
+            return self.outbox.fail_operation(operation_id, error, Utc::now());
+        }
         let (account, secret) = match self.credentials(&operation.account_id) {
             Ok(credentials) => credentials,
             Err(error) => return self.outbox.fail_operation(operation_id, error, Utc::now()),
@@ -982,7 +1033,10 @@ impl KirjeRuntime {
                 "account has no SMTP endpoint; update its account configuration",
             ));
         }
-        let plan = SendPlan::create(request, Utc::now())?;
+        let policy = self.account_policy(&request.account_id)?;
+        policy.check_send(&request)?;
+        let mut plan = SendPlan::create(request, Utc::now())?;
+        plan.policy_digest = Some(policy.digest()?);
         self.outbox.create(&plan)
     }
 
@@ -1042,6 +1096,15 @@ impl KirjeRuntime {
     /// persisted terminal plan so callers can inspect certainty.
     pub fn apply_send(&self, plan_id: &str) -> Result<SendPlan, MailError> {
         let claimed = self.outbox.claim(plan_id, Utc::now())?;
+        let policy = match self.account_policy(&claimed.request.account_id) {
+            Ok(policy) => policy,
+            Err(error) => {
+                return self.outbox.mark_failed(plan_id, error, Utc::now());
+            }
+        };
+        if let Err(error) = policy.check_send(&claimed.request) {
+            return self.outbox.mark_failed(plan_id, error, Utc::now());
+        }
         let credentials = self.credentials(&claimed.request.account_id);
         let (account, secret) = match credentials {
             Ok(credentials) => credentials,
@@ -1115,6 +1178,30 @@ impl KirjeRuntime {
             ));
         }
         Ok(())
+    }
+
+    /// Return the active policy for an account, or a safe default read-only policy if unconfigured.
+    ///
+    /// # Errors
+    ///
+    /// Returns account repository or configuration errors.
+    pub fn account_policy(&self, account_id: &str) -> Result<AccountPolicy, MailError> {
+        let _ = self.account(account_id)?;
+        if let Some(policy) = self.accounts.get_policy(account_id)? {
+            Ok(policy)
+        } else {
+            Ok(AccountPolicy::default_read_only(account_id))
+        }
+    }
+
+    /// Set or update the policy for an account using owner authority.
+    ///
+    /// # Errors
+    ///
+    /// Returns account validation or configuration errors.
+    pub fn set_account_policy(&self, policy: AccountPolicy) -> Result<(), MailError> {
+        let _ = self.account(&policy.account_id)?;
+        self.accounts.set_policy(policy)
     }
 
     fn account(&self, account_id: &str) -> Result<MailAccountConfig, MailError> {
@@ -1780,6 +1867,9 @@ mod tests {
             directory.path().join("accounts.toml"),
         ));
         accounts.create(account()).expect("account");
+        accounts
+            .set_policy(AccountPolicy::default_governed("work"))
+            .expect("policy");
         KirjeRuntime::with_services(
             accounts,
             secrets,
@@ -1805,6 +1895,9 @@ mod tests {
             directory.path().join("accounts.toml"),
         ));
         accounts.create(account()).expect("account");
+        accounts
+            .set_policy(AccountPolicy::default_governed("work"))
+            .expect("policy");
         KirjeRuntime::with_services_and_mutator(
             accounts,
             secrets,
@@ -2206,5 +2299,111 @@ mod tests {
             .reconcile_send(&planned.id, "verified sent copy was manually saved")
             .expect("reconcile");
         assert_eq!(reconciled.status, SendPlanStatus::Reconciled);
+    }
+
+    #[test]
+    fn account_policy_default_read_only_and_allowlist_enforcement() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let repository = Arc::new(TomlAccountRepository::new(
+            directory.path().join("accounts.toml"),
+        ));
+        repository.create(account()).expect("account");
+        let secrets = Arc::new(MemorySecrets::default());
+        secrets
+            .set("work", &SecretString::from("secret".to_owned()))
+            .expect("secret");
+        let sender = Arc::new(RecordingSender::default());
+        let runtime = KirjeRuntime::with_services(
+            repository,
+            secrets,
+            Arc::new(NoopReader),
+            Arc::new(
+                kirje_store::SqliteMessageIndex::open(directory.path().join("index.sqlite3"))
+                    .expect("index"),
+            ),
+            Arc::new(
+                kirje_store::SqliteOutbox::open(directory.path().join("outbox.sqlite3"))
+                    .expect("outbox"),
+            ),
+            sender,
+        );
+
+        // 1. By default, unconfigured account policy is read-only for remote writes (FR-014)
+        let default_policy = runtime.account_policy("work").expect("policy");
+        assert!(!default_policy.allow_remote_write);
+
+        let err = runtime.plan_send(send_request()).unwrap_err();
+        assert_eq!(err.code, MailErrorCode::UnsupportedCapability);
+        assert!(err.message.contains("policy forbids remote write"));
+
+        // 2. Configure a policy with recipient allowlist
+        let mut policy = AccountPolicy::default_governed("work");
+        policy.recipient_allowlist = vec!["@163.com".to_owned()];
+        runtime.set_account_policy(policy).expect("set policy");
+
+        let mut forbidden_req = send_request();
+        forbidden_req.to = vec![MailAddress {
+            name: None,
+            email: "attacker@gmail.com".to_owned(),
+        }];
+        let forbidden_err = runtime.plan_send(forbidden_req).unwrap_err();
+        assert_eq!(forbidden_err.code, MailErrorCode::UnsupportedCapability);
+        assert!(
+            forbidden_err
+                .message
+                .contains("not permitted by account policy")
+        );
+
+        // 3. Allowed recipient succeeds and binds policy digest
+        let allowed = runtime.plan_send(send_request()).expect("allowed plan");
+        assert!(allowed.policy_digest.is_some());
+    }
+
+    #[test]
+    fn account_policy_two_phase_evaluation_invalidates_on_stricter_change() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let repository = Arc::new(TomlAccountRepository::new(
+            directory.path().join("accounts.toml"),
+        ));
+        repository.create(account()).expect("account");
+        repository
+            .set_policy(AccountPolicy::default_governed("work"))
+            .expect("policy");
+        let secrets = Arc::new(MemorySecrets::default());
+        secrets
+            .set("work", &SecretString::from("secret".to_owned()))
+            .expect("secret");
+        let sender = Arc::new(RecordingSender::default());
+        let runtime = KirjeRuntime::with_services(
+            repository,
+            secrets,
+            Arc::new(NoopReader),
+            Arc::new(
+                kirje_store::SqliteMessageIndex::open(directory.path().join("index.sqlite3"))
+                    .expect("index"),
+            ),
+            Arc::new(
+                kirje_store::SqliteOutbox::open(directory.path().join("outbox.sqlite3"))
+                    .expect("outbox"),
+            ),
+            sender.clone(),
+        );
+
+        let planned = runtime.plan_send(send_request()).expect("planned");
+        runtime.approve_send(&planned.id).expect("approved");
+
+        // Stricter policy change: remote writes revoked before apply (FR-013)
+        let revoked = AccountPolicy::default_read_only("work");
+        runtime.set_account_policy(revoked).expect("revoke");
+
+        let result = runtime
+            .apply_send(&planned.id)
+            .expect("apply records failure");
+        assert_eq!(result.status, SendPlanStatus::Failed);
+        assert_eq!(sender.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            result.last_error.expect("last error").code,
+            MailErrorCode::UnsupportedCapability
+        );
     }
 }

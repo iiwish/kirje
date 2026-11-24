@@ -926,6 +926,7 @@ fn send_plan_from_operation(operation: &OperationRecord) -> Result<SendPlan, Mai
             .map(serde_json::from_str)
             .transpose()
             .map_err(|_| store_read_error())?,
+        policy_digest: None,
     })
 }
 

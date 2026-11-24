@@ -355,6 +355,8 @@ pub struct SendPlan {
     pub attempt_count: u32,
     pub last_error: Option<MailError>,
     pub receipt: Option<SendReceipt>,
+    #[serde(default)]
+    pub policy_digest: Option<String>,
 }
 
 impl SendPlan {
@@ -396,6 +398,7 @@ impl SendPlan {
             attempt_count: 0,
             last_error: None,
             receipt: None,
+            policy_digest: None,
         })
     }
 
@@ -417,6 +420,7 @@ impl SendPlan {
             attempt_count: self.attempt_count,
             last_error: self.last_error.clone(),
             receipt: self.receipt.clone(),
+            policy_digest: self.policy_digest.clone(),
         }
     }
 }
@@ -439,6 +443,8 @@ pub struct SendPlanSummary {
     pub attempt_count: u32,
     pub last_error: Option<MailError>,
     pub receipt: Option<SendReceipt>,
+    #[serde(default)]
+    pub policy_digest: Option<String>,
 }
 
 pub trait Outbox: crate::OperationLedger + Send + Sync {
