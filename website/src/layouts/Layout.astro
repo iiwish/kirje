@@ -7,7 +7,7 @@ interface Props {
 }
 
 const {
-  title = 'Kirje — 为 AI Agent 而生的安全、本地优先邮件引擎',
+  title = 'Kirje — 安全、本地优先的 AI Agent 邮件引擎',
   description = 'Local-first email CLI and MCP server built in Rust for AI agents. Zero cloud relay, immune to prompt injection via Plan-Approve-Apply, native 163/QQ/Gmail/IMAP support.'
 } = Astro.props;
 ---
@@ -18,13 +18,23 @@ const {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content={description} />
+    <meta name="theme-color" content="#050507" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
     <title>{title}</title>
   </head>
-  <body class="bg-zinc-950 text-zinc-100 antialiased selection:bg-emerald-500/30 selection:text-emerald-200">
+  <body class="bg-[#050507] text-zinc-100 antialiased selection:bg-emerald-500/30 selection:text-emerald-200">
     <slot />
   </body>
 </html>
