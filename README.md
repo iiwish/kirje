@@ -16,6 +16,7 @@
   </p>
 
   <p>
+    <a href="https://kirje.app">Website</a> •
     <a href="#-quick-start-30s">Quick Start</a> •
     <a href="#-the-security-model">Security Model</a> •
     <a href="#-why-kirje">Why Kirje</a> •
