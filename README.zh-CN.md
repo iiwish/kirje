@@ -16,6 +16,7 @@
   </p>
 
   <p>
+    <a href="https://kirje.app">官网 (kirje.app)</a> •
     <a href="#-30-秒极速上手">快速上手</a> •
     <a href="#-安全防线与架构设计">安全防线</a> •
     <a href="#-为什么选择-kirje">核心对比</a> •
