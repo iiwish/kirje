@@ -1,193 +1,202 @@
-# Kirje
+<div align="center">
+  <img src="website/public/favicon.svg" alt="Kirje Logo" width="84" height="84" />
+  <h1>Kirje</h1>
+  <p><strong>The Safe, Local-First Email CLI &amp; MCP Engine Built for AI Agents</strong></p>
+  <p>
+    Give Claude Desktop, Cursor, Zed, and autonomous agents safe access to your real inbox.<br />
+    Zero cloud relay. Immune to prompt injection. Native 163 / QQ / Gmail / IMAP support.
+  </p>
 
-**Local-first email CLI and MCP server built for AI agents.**
+  <p>
+    <a href="https://github.com/iiwish/kirje/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/iiwish/kirje/ci.yml?branch=main&style=flat-square&logo=github&label=CI" alt="CI Status" /></a>
+    <a href="https://github.com/iiwish/kirje/releases"><img src="https://img.shields.io/github/v/release/iiwish/kirje?style=flat-square&color=10b981" alt="Release" /></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square" alt="License" /></a>
+    <img src="https://img.shields.io/badge/rust-1.95%2B-orange?style=flat-square&logo=rust" alt="Rust 1.95+" />
+    <img src="https://img.shields.io/badge/MCP-26%20Tools-8b5cf6?style=flat-square" alt="MCP 26 Tools" />
+  </p>
 
-Kirje is a standards-first runtime for agents that need to work with existing
-email accounts. The project targets IMAP, SMTP, and JMAP across consumer,
-enterprise, and self-hosted providers without routing mailbox data through a
-Kirje cloud service.
+  <p>
+    <a href="#-quick-start-30s">Quick Start</a> •
+    <a href="#-the-security-model">Security Model</a> •
+    <a href="#-why-kirje">Why Kirje</a> •
+    <a href="#-mcp-integration">MCP Tools</a> •
+    <a href="docs/agent-guide.md">Agent Guide</a> •
+    <a href="README.zh-CN.md">简体中文</a>
+  </p>
+</div>
 
-> Status: `1.0.0` Release Candidate. Kirje provides bounded IMAP reads,
-> private local drafts, multipart SMTP sending, governed IMAP mailbox
-> operations, capability-anchored local input, two-phase policy enforcement,
-> deterministic thread graph reconstruction, and an auditable local operation
-> ledger with offline reconciliation. See [compatibility.md](docs/compatibility.md)
-> and [RELEASE_NOTES.md](RELEASE_NOTES.md) for the 1.x stable contract guarantees.
+---
 
-## Why Kirje
+## ⚡ Why Kirje?
 
-- One local binary for CLI and MCP clients.
-- JSON-first, versioned output designed for deterministic automation.
-- Bounded IMAP mailbox access plus separately governed SMTP and IMAP writes.
-- Explicit incremental sync into a private local SQLite metadata index.
-- Private local drafts with reply, reply-all, and forward composition.
-- Local attachment import and bounded content summaries; multipart SMTP bodies.
-- A unified transactional operation ledger with immutable plans, migration,
-  audit events, crash recovery, and explicit ambiguous states.
-- Credential-free offline envelope search and sync coverage inspection.
-- A source-backed JSON provider registry for NetEase 163/126/Yeah, QQ/Foxmail,
-  139, 189, Sina, Aliyun, Fastmail, and iCloud.
-- No credential arguments, shell bridges, telemetry, or hosted control plane.
-- Explicit treatment of email content as untrusted input.
+Connecting an LLM directly to your primary email inbox with naive scripts or hosted APIs exposes you to catastrophic risks: **indirect prompt injection** hidden inside an incoming email can trick an agent into exfiltrating sensitive threads, deleting your inbox, or spamming contacts. Meanwhile, most open-source MCP servers store passwords in plaintext JSON and break immediately on non-standard IMAP handshakes (like NetEase 163 or QQ Mail).
 
-## Quick Start
+**Kirje** re-engineers email access for AI agents from the ground up in Rust:
 
-```bash
-cargo build --release
-./target/release/kirje doctor --pretty
-./target/release/kirje provider show 163.com --pretty
-./target/release/kirje account discover agent@163.com --pretty
-./target/release/kirje account add personal agent@163.com --pretty
-./target/release/kirje secret set personal
-./target/release/kirje account check personal --pretty
-./target/release/kirje policy show personal --pretty
-./target/release/kirje policy enable personal --pretty
-./target/release/kirje mailbox list --account personal --pretty
-./target/release/kirje message search --account personal --mailbox INBOX --limit 10 --pretty
-./target/release/kirje sync run --account personal --mailbox INBOX --pretty
-./target/release/kirje message search-local --account personal --mailbox INBOX --pretty
-./target/release/kirje send plan --input ./send-request.json --pretty
-./target/release/kirje send approve <plan-id> --pretty
-./target/release/kirje send apply <plan-id> --pretty
-./target/release/kirje send reconcile <plan-id> --assertion "provider verified sent" --pretty
-./target/release/kirje draft create --input ./draft.json --pretty
-./target/release/kirje send from-draft <draft-id> --pretty
-./target/release/kirje operation plan --input ./mail-operation.json --pretty
-./target/release/kirje operation approve <operation-id> --pretty
-./target/release/kirje operation apply <operation-id> --pretty
-./target/release/kirje schema --pretty
-```
+| Capability | **Kirje (Rust Local Engine)** | Naive Open-Source MCP | Hosted Agent Email APIs |
+| :--- | :--- | :--- | :--- |
+| **Prompt Injection Defense** | ✅ **Immutable Plan → Approve → Apply** | ❌ None (LLM sends/deletes directly) | ❌ API key only |
+| **Privacy & Data Ownership** | ✅ **100% Local-First, zero cloud relay** | ✅ Local | ❌ Routed via 3rd-party cloud |
+| **Existing Personal Inbox** | ✅ **Connects to your real accounts** | ✅ Partial | ❌ New domain addresses only |
+| **Secret Isolation** | ✅ **`0600` private store (0 OS popups)** | ❌ Plaintext in MCP JSON / env | Cloud API Token |
+| **Global & China Mail Quirks** | ✅ **Native RFC 2971 & Coremail fixes** | ❌ Fails 163 / QQ handshakes often | — N/A |
+| **Token Efficiency** | ✅ **HTML sanitization + `message_triage`** | ❌ Raw HTML blows up LLM context | Partial |
 
-Building from source requires Rust 1.95 or newer.
+---
 
-Every non-MCP command emits a stable JSON envelope. Use `--pretty` only for
-interactive inspection. Secret changes and send approval require a terminal;
-credentials and approval confirmations are never accepted through flags or
-pipes. Send message content is accepted as bounded JSON from a file or stdin,
-not as subject/body command arguments.
-
-## MCP
-
-Start the typed stdio server:
-
-```bash
-kirje mcp serve
-```
-
-Example client configuration:
-
-```json
-{
-  "mcpServers": {
-    "kirje": {
-      "command": "/absolute/path/to/kirje",
-      "args": ["mcp", "serve"]
-    }
-  }
-}
-```
-
-The MCP server exposes 24 task-level tools. It can create private drafts,
-prepare and apply governed operations, and inspect the ledger. MCP deliberately
-has no approval tool; approval is an interactive CLI-only boundary:
-
-- `account_discover`: discover provider endpoints without credentials.
-- `account_status`: inspect one configured account and credential presence.
-- `mailbox_list`: list selectable remote mailboxes.
-- `message_search`: search bounded envelope metadata using structured filters.
-- `message_read`: read bounded text and sanitized HTML using `BODY.PEEK`.
-- `mailbox_sync`: update one bounded local mailbox metadata index.
-- `index_status`: inspect local sync cursor and coverage without network access.
-- `message_search_local`: search indexed envelope metadata offline.
-- `attachment_read`: retrieve one bounded attachment as untrusted base64.
-- `message_send_plan`: persist an immutable local plan without credentials.
-- `message_send_plan_draft`: plan a send from a private local draft.
-- `message_send_status`: inspect plan state and delivery certainty.
-- `message_send_apply`: apply a separately human-approved plan at most once.
-- `draft_create`, `draft_status`, `draft_update`, `draft_list`, `draft_discard`:
-  manage bounded local draft snapshots.
-- `mail_operation_plan`, `mail_operation_status`, `mail_operation_list`:
-  prepare or inspect governed IMAP flag, move, archive, and safe-delete work.
-- `mail_operation_apply`: apply an operation after CLI approval.
-- `mail_operation_audit`: inspect bounded operation audit events.
-- `system_status`: inspect the runtime contract and safety mode.
-
-## For Agents
-
-Agents should read [docs/agent-guide.md](docs/agent-guide.md) before invoking
-Kirje. A reusable Agent Skill is available at [skills/kirje/SKILL.md](skills/kirje/SKILL.md).
-The skill documents safe configuration, reference handling, and prompt-injection
-boundaries for autonomous agents.
-
-## Design Contract
+## 🛡️ The Security Model
 
 ```text
 Agent decides what should happen.
-Kirje reports mailbox facts and executes approved operations.
+Kirje reports mailbox facts and executes only human-approved operations.
 ```
 
-The core product invariants are:
+Kirje enforces a strict physical boundary between **autonomous planning** and **irreversible execution**:
 
-1. CLI, MCP, and future SDKs share one application contract.
-2. Read operations and write operations have separate permission boundaries.
-3. Sending, deletion, movement, flag changes, and credential changes use
-   plan/approve/apply. MCP has no approval entrypoint.
-4. Email bodies, headers, links, and attachments are untrusted data.
-5. Unknown providers remain unknown; Kirje does not guess unsafe endpoints.
-6. Local operation never requires a Kirje account or Kirje-hosted relay.
+```mermaid
+flowchart LR
+    A["AI Agent (MCP)"] -->|"1. message_send_plan"| B["Local SQLite Ledger<br/>(SHA-256 Locked)"]
+    B -->|"2. Human Boundary<br/>(No MCP approve tool)"| C{"Human Approval<br/>Native Dialog / TTY"}
+    C -->|"Reject"| D["Neutralized<br/>Nothing Sent"]
+    C -->|"Approve"| E["3. At-most-once Apply<br/>(SMTP / IMAP)"]
+```
 
-See [docs/architecture.md](docs/architecture.md),
-[docs/compatibility.md](docs/compatibility.md), and
-[docs/security.md](docs/security.md) for the full technical boundary. Provider
-testing is documented in [docs/conformance.md](docs/conformance.md).
-Registry ownership and source policy are documented in
-[docs/provider-presets.md](docs/provider-presets.md).
+1. **Untrusted by Default**: Every email body, subject, header, and attachment is explicitly flagged `"untrusted": true` and HTML-sanitized before reaching the LLM.
+2. **Physical Authority Separation**: The MCP server exposes **zero approval tools**. An agent can draft and stage an immutable `SendPlan` or `OperationPlan` bound to a SHA-256 digest, but cannot approve it.
+3. **Frictionless Human Approval**: Approve plans safely via a native macOS system alert dialog (`kirje send request-approval <id> --apply`) or an interactive human terminal (`kirje send approve <id>`).
+4. **Zero-Popup `0600` Secret Store**: Credentials are stored in a private `0600` POSIX-permissioned file (`credentials.toml`)—never passed via CLI flags, never exposed in stdout, and never triggering annoying macOS Keychain password popups when background agents run.
 
-## Local Index And Ledger
+---
 
-Kirje stores envelope metadata only. It does not persist message bodies,
-attachments, credentials, or raw MIME. The first sync imports the newest
-bounded window; later runs request UIDs above the stored cursor. Use `sync run
---refresh` to rebuild that window after flags or deletions change. Historical
-backfill advances downward to index older messages, and disappearing messages
-are marked with soft tombstones.
+## 🚀 Quick Start (30s)
 
-The private `outbox.sqlite3` database contains the unified operation ledger
-(schema version 3) with full transactional migration, atomic claim, crash
-recovery, `needs_attention` filing alerts, and operator reconciliation.
-Stale `applying` operations become `ambiguous`; Kirje never retries them
-automatically.
+### 1. Install
 
-## Governed Send
+Requires **Rust 1.95+** (or build from source):
 
-The private ledger binds approval to the account, operation kind, scoped message
-reference, payload digest, and 24-hour expiry. `send approve` and `operation
-approve` display the immutable request and require the exact id in a human
-terminal. Remote work is invoked only after an atomic `approved -> applying`
-claim. A lost or unclear result becomes `ambiguous` and Kirje will not retry it
-automatically.
+```bash
+cargo install --git https://github.com/iiwish/kirje kirje-cli
+```
 
-Archive and safe delete use a server-declared `\\Archive` or `\\Trash` mailbox,
-or an explicit destination supplied by the caller. Safe delete never issues
-`EXPUNGE`; the default is a reversible move to Trash.
+<details>
+<summary>Or build from local clone</summary>
 
-## Roadmap
+```bash
+git clone https://github.com/iiwish/kirje.git
+cd kirje
+cargo build --release
+# Binary is at ./target/release/kirje
+```
 
-- Finish owner-authorized account and credential workflows for `alpha.2`.
-- Complete config/ledger migration to stable internal account identities in
-  `alpha.2`.
-- Historical backfill, thread reconstruction, reconciliation, and event watching.
-- JMAP discovery and JMAP mailbox operations.
-- Provider conformance fixtures and real-mailbox compatibility reports.
-- Permanent deletion, bulk mailbox workflows, and automatic ambiguous-state
-  reconciliation.
+</details>
 
-The archived desktop predecessor is preserved at
-[iiwish/kirje-desktop-archive](https://github.com/iiwish/kirje-desktop-archive).
-Its protocol lessons and sanitized compatibility evidence will be migrated
-selectively rather than copying the desktop architecture.
+### 2. Discover & Connect Your Email
 
-## Development
+Kirje auto-discovers verified endpoints, TLS security, and step-by-step app-password instructions (including NetEase 163/126, QQ/Foxmail, Aliyun, 139, 189, Sina, iCloud, Fastmail, plus custom IMAP/SMTP):
+
+```bash
+# Discover safe endpoints & authorization code instructions
+kirje account discover you@163.com --pretty
+
+# Register account locally (non-secret config)
+kirje account add personal you@163.com
+
+# Store your app password securely (interactive TTY prompt, 0600 file store)
+kirje secret set personal
+
+# Verify TLS, IMAP handshake & authentication
+kirje account check personal --pretty
+```
+
+### 3. One-Click MCP Client Setup
+
+Skip manual JSON editing. Automatically configure Claude Desktop, Cursor, Zed, or Cline in one command:
+
+```bash
+# Configure a specific client
+kirje mcp install --client claude-desktop
+kirje mcp install --client cursor
+
+# Or configure all detected clients at once (use --dry-run to preview)
+kirje mcp install --client all
+```
+
+---
+
+## ✨ Key Capabilities
+
+### 📥 Smart Inbox Triage (`message_triage`)
+Stop burning thousands of tokens reading raw emails one by one. `message_triage` inspects recent messages in a single call, sanitizes content into clean 120-character snippets, and categorizes them into `security_alerts`, `invoices_and_receipts`, `notifications`, `personal_and_direct`, and `newsletters_and_promo`:
+
+```bash
+kirje message triage --account personal --limit 15 --pretty
+```
+
+### 🖥️ Native System Approval UX
+Approve agent-staged emails without manually typing long UUIDs in a terminal:
+
+```bash
+# Pops a native macOS confirmation dialog showing sender, recipients & subject
+kirje send request-approval <plan-id> --apply
+```
+
+### 🗄️ Offline SQLite Index & Thread Graphs
+Sync envelope metadata transactionally into a private local SQLite index (`index.sqlite3`). Search offline without network access or credentials, reconstruct deterministic RFC 5322 thread graphs, and safely track deletions via soft tombstones:
+
+```bash
+kirje sync run --account personal --mailbox INBOX --pretty
+kirje message search-local --account personal --mailbox INBOX --unread true --pretty
+kirje message thread --account personal --mailbox INBOX --uid 42 --pretty
+```
+
+### 📒 Unified Governed Operation Ledger
+Every send, draft, flag mutation, archive, and safe delete (move to `\Trash`, never `EXPUNGE`) runs through `outbox.sqlite3` with atomic claims, 24-hour expiry, crash recovery, and explicit `ambiguous` state tracking—Kirje never blindly retries failed network writes.
+
+---
+
+## 🤖 MCP Integration
+
+Start the protocol-clean stdio server manually with `kirje mcp serve` (diagnostics go strictly to `stderr`; `stdout` emits only JSON-RPC).
+
+Kirje exposes **26 task-level MCP tools**:
+
+<details>
+<summary>View all 26 MCP tools</summary>
+
+| Category | Tools | Safety Boundary |
+| :--- | :--- | :--- |
+| **Discovery & Health** | `account_discover`, `account_status`, `index_status`, `system_status` | Read-only / No credentials |
+| **Mailbox & Reading** | `mailbox_list`, `message_search`, `message_read`, `message_triage`, `attachment_read` | Remote read-only (`BODY.PEEK`), output marked `untrusted` |
+| **Local Sync & Search** | `mailbox_sync`, `message_search_local`, `message_thread` | Local SQLite metadata only |
+| **Private Drafts** | `draft_create`, `draft_status`, `draft_update`, `draft_list`, `draft_discard` | Private local ledger only |
+| **Governed Send** | `message_send_plan`, `message_send_plan_draft`, `message_send_status`, `message_send_apply` | Plan/Apply only (**no approve tool**) |
+| **Governed Operations** | `mail_operation_plan`, `mail_operation_status`, `mail_operation_list`, `mail_operation_apply`, `mail_operation_audit` | Plan/Apply only (**no approve tool**) |
+
+</details>
+
+For autonomous agents, an installable Agent Skill is included at [`skills/kirje/SKILL.md`](skills/kirje/SKILL.md), along with operational rules in [`docs/agent-guide.md`](docs/agent-guide.md).
+
+---
+
+## 🏗️ Workspace Architecture
+
+```text
+crates/
+├── kirje-core        # Provider-neutral domain contracts, bounds, triage & presets
+├── kirje-protocol    # IMAP / SMTP / JMAP adapters (RFC 2971 & Coremail fixes)
+├── kirje-credential  # Private 0600 FileSecretStore & OS keyring abstraction
+├── kirje-local-io    # Safe atomic file I/O & symlink/boundary guards
+├── kirje-store       # Transactional SQLite index, sync cursors & unified ledger
+├── kirje-runtime     # Shared application services for CLI and MCP
+├── kirje-mcp         # Typed stdio MCP server (26 tools)
+└── kirje-cli         # The `kirje` binary & versioned JSON envelope
+website/              # Official Astro + Tailwind landing page
+docs/                 # Architecture, security, compatibility & conformance specs
+```
+
+---
+
+## 🛠️ Development & Verification
 
 ```bash
 cargo fmt --all --check
@@ -197,5 +206,11 @@ cargo build --workspace --all-features --locked
 cargo deny check
 ```
 
-Kirje is licensed under Apache-2.0. Contributions are welcome after reading
-[CONTRIBUTING.md](CONTRIBUTING.md).
+See [docs/architecture.md](docs/architecture.md), [docs/security.md](docs/security.md), [docs/compatibility.md](docs/compatibility.md), and [docs/conformance.md](docs/conformance.md) for deep technical specifications.
+
+---
+
+## 📄 License & Contributing
+
+Kirje is open-source software licensed under the [Apache-2.0 License](LICENSE).
+Contributions are welcome! Please review [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md) before opening a pull request.
